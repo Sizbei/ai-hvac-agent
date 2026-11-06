@@ -22,6 +22,13 @@ vi.mock('@/lib/admin/queries', () => ({
   assignTechnician: (...args: unknown[]) => mockAssignTechnician(...args),
 }));
 
+// The create path lazy-loads its DB writer; it must never be reached by the
+// validation tests below.
+const { mockCreateAdminRequest } = vi.hoisted(() => ({ mockCreateAdminRequest: vi.fn() }));
+vi.mock('@/lib/admin/create-request-queries', () => ({
+  createAdminRequest: (...args: unknown[]) => mockCreateAdminRequest(...args),
+}));
+
 vi.mock('@/lib/admin/audit', () => ({
   logAudit: (...args: unknown[]) => mockLogAudit(...args),
 }));
@@ -33,7 +40,8 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 
-import { GET as getRequestsHandler } from '@/app/api/admin/requests/route';
+import { GET as getRequestsHandler, POST as createRequestHandler } from '@/app/api/admin/requests/route';
+import { businessIsoDate } from '@/lib/admin/calendar-time';
 import { GET as getRequestByIdHandler } from '@/app/api/admin/requests/[id]/route';
 import { POST as assignHandler } from '@/app/api/admin/requests/[id]/assign/route';
 
@@ -311,5 +319,33 @@ describe('POST /api/admin/requests/[id]/assign', () => {
 
     expect(response.status).toBe(400);
     expect(body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
+describe('POST /api/admin/requests — past windows (round-2 P1-2)', () => {
+  it('refuses a window that has already ended, before any write', async () => {
+    mockGetAdminSession.mockResolvedValue(mockSession);
+    // Yesterday is inside the allowed day range, but every band on it is over.
+    const yesterday = businessIsoDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const response = await createRequestHandler(
+      createMockRequest({
+        method: 'POST',
+        body: {
+          customerId: '11111111-1111-4111-8111-111111111111',
+          address: '12 Main St, Johnson City, TN 37601',
+          issueType: 'cooling_not_working',
+          urgency: 'high',
+          description: 'AC blowing warm air',
+          schedule: { isoDay: yesterday, window: 'evening' },
+        },
+      }),
+    );
+    const body = await response.json();
+    expect(response.status).toBe(400);
+    expect(body.error).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: 'That arrival window has already ended. Pick a later one.',
+    });
+    expect(mockCreateAdminRequest).not.toHaveBeenCalled();
   });
 });

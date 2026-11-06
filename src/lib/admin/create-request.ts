@@ -20,6 +20,7 @@ import {
   type JobType,
 } from "@/lib/ai/extraction-schema";
 import { isRealIsoDate } from "@/lib/admin/calendar-time";
+import { WINDOW_ENDED_MESSAGE, windowHasEnded } from "@/lib/admin/window-ended";
 import { sanitizeName, sanitizePhone, sanitizeEmail } from "@/lib/ai/sanitize-fields";
 
 /** The bands the availability surface reports — what the office can book. */
@@ -207,8 +208,9 @@ export type ParseResult =
   | { readonly ok: false; readonly message: string };
 
 /** Validate + normalise a POST /api/admin/requests body. `todayIso` is the
- * business-tz today, used to bound the schedule day. */
-export function parseCreateRequestBody(raw: unknown, todayIso: string): ParseResult {
+ * business-tz today, used to bound the schedule day; `now`, when given, also
+ * refuses a window that has already ended (the route always passes it). */
+export function parseCreateRequestBody(raw: unknown, todayIso: string, now?: Date): ParseResult {
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -232,6 +234,9 @@ export function parseCreateRequestBody(raw: unknown, todayIso: string): ParseRes
       ok: false,
       message: `Pick a date between yesterday and ${SCHEDULE_MAX_DAYS_AHEAD} days from now.`,
     };
+  }
+  if (b.schedule && now && windowHasEnded(b.schedule.isoDay, b.schedule.window, now)) {
+    return { ok: false, message: WINDOW_ENDED_MESSAGE };
   }
   const customer: CreateRequestCustomer = hasId
     ? { kind: "existing", customerId: b.customerId! }
@@ -343,10 +348,32 @@ export function formatIsoDayShort(isoDay: string): string {
  * first day, else "" when there are no days. */
 export function firstOpenDay(
   days: readonly string[],
-  windows: ReadonlyArray<{ readonly day: string; readonly available: number }>,
+  windows: ReadonlyArray<{ readonly day: string; readonly window?: string; readonly available: number }>,
+  /** When given, a band that has already ended doesn't count as open. */
+  now?: Date,
 ): string {
-  const open = days.find((d) => windows.some((w) => w.day === d && w.available > 0));
-  return open ?? days[0] ?? "";
+  const live = (d: string, w: { readonly window?: string }) =>
+    !now || !isBookableWindow(w.window) || !windowHasEnded(d, w.window, now);
+  const open = days.find((d) => windows.some((w) => w.day === d && w.available > 0 && live(d, w)));
+  return open ?? days.find((d) => !now || BOOKABLE_WINDOWS.some((w) => !windowHasEnded(d, w, now))) ?? days[0] ?? "";
+}
+
+function isBookableWindow(w: string | undefined): w is BookableWindow {
+  return (BOOKABLE_WINDOWS as readonly string[]).includes(w ?? "");
+}
+
+/** The day Add visit opens on: the request's own day when it is offered and
+ * still has a band left, else the first open day. */
+export function initialVisitDay(
+  preferred: string | null,
+  days: readonly string[],
+  windows: ReadonlyArray<{ readonly day: string; readonly window?: string; readonly available: number }>,
+  now: Date,
+): string {
+  if (preferred && days.includes(preferred) && BOOKABLE_WINDOWS.some((w) => !windowHasEnded(preferred, w, now))) {
+    return preferred;
+  }
+  return firstOpenDay(days, windows, now);
 }
 
 // ── Client payload ─────────────────────────────────────────────────────────

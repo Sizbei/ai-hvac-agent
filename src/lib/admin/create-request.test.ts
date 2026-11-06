@@ -8,6 +8,7 @@ import {
   buildCreateRequestPayload,
   formatIsoDayShort,
   firstOpenDay,
+  initialVisitDay,
   isScheduleDayInRange,
   requestContactSnapshot,
   SCHEDULE_MAX_DAYS_AHEAD,
@@ -353,5 +354,52 @@ describe("isDraftDirty (ask before discarding a New request)", () => {
     expect(isDraftDirty({ ...empty, window: "morning" })).toBe(true);
     expect(isDraftDirty({ ...empty, tagTypeIds: ["t"] })).toBe(true);
     expect(isDraftDirty(empty, "Boone")).toBe(true);
+  });
+});
+
+describe("past windows (round-2 P1-2)", () => {
+  // Nov 5 2026, 8:05 PM Eastern (EST, UTC−5): every band that day has ended.
+  const EVENING_NOV5 = new Date("2026-11-06T01:05:00.000Z");
+  // Nov 5 2026, 1:00 PM Eastern: morning over, afternoon under way.
+  const MIDDAY_NOV5 = new Date("2026-11-05T18:00:00.000Z");
+
+  it("the parser refuses a window that already ended, with human copy", () => {
+    const r = parseCreateRequestBody(
+      baseBody({ schedule: { isoDay: "2026-11-05", window: "morning" } }),
+      "2026-11-05",
+      MIDDAY_NOV5,
+    );
+    expect(r).toEqual({ ok: false, message: "That arrival window has already ended. Pick a later one." });
+  });
+
+  it("a window under way is still bookable; a later day always is", () => {
+    expect(
+      parseCreateRequestBody(baseBody({ schedule: { isoDay: "2026-11-05", window: "afternoon" } }), "2026-11-05", MIDDAY_NOV5).ok,
+    ).toBe(true);
+    expect(
+      parseCreateRequestBody(baseBody({ schedule: { isoDay: "2026-11-06", window: "morning" } }), "2026-11-05", EVENING_NOV5).ok,
+    ).toBe(true);
+  });
+
+  it("firstOpenDay skips a today whose open bands are all over", () => {
+    const days = ["2026-11-05", "2026-11-06"];
+    const windows = [
+      { day: "2026-11-05", window: "evening", capacity: 2, available: 2 },
+      { day: "2026-11-06", window: "morning", capacity: 2, available: 2 },
+    ];
+    expect(firstOpenDay(days, windows, EVENING_NOV5)).toBe("2026-11-06");
+    expect(firstOpenDay(days, windows, MIDDAY_NOV5)).toBe("2026-11-05");
+    // No openings at all: still never lands on a finished day.
+    expect(firstOpenDay(days, [], EVENING_NOV5)).toBe("2026-11-06");
+  });
+
+  it("initialVisitDay opens on the request's own day when it is offered and not over", () => {
+    const days = ["2026-11-05", "2026-11-06", "2026-11-10"];
+    const windows = [{ day: "2026-11-06", window: "morning", capacity: 1, available: 1 }];
+    expect(initialVisitDay("2026-11-10", days, windows, EVENING_NOV5)).toBe("2026-11-10");
+    // The request's day is today and over, or not offered: first open day.
+    expect(initialVisitDay("2026-11-05", days, windows, EVENING_NOV5)).toBe("2026-11-06");
+    expect(initialVisitDay("2026-12-25", days, windows, EVENING_NOV5)).toBe("2026-11-06");
+    expect(initialVisitDay(null, days, windows, EVENING_NOV5)).toBe("2026-11-06");
   });
 });

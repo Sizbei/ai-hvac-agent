@@ -115,7 +115,8 @@ export async function POST(request: NextRequest) {
         import("@/lib/admin/create-request"),
         import("@/lib/admin/create-request-queries"),
       ]);
-    const parsed = parseCreateRequestBody(bodyResult.data, businessIsoDate(new Date()));
+    const now = new Date();
+    const parsed = parseCreateRequestBody(bodyResult.data, businessIsoDate(now), now);
     if (!parsed.ok) {
       return errorResponse(parsed.message, "VALIDATION_ERROR", 400);
     }

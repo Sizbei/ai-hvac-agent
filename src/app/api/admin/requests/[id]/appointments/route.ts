@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { listAppointments, addAppointment } from "@/lib/admin/appointment-queries";
 import { appointmentInputSchema } from "@/lib/admin/appointment-types";
+import { WINDOW_ENDED_MESSAGE, instantHasPassed } from "@/lib/admin/window-ended";
 import { logAudit } from "@/lib/admin/audit";
 import {
   successResponse,
@@ -84,6 +85,12 @@ export async function POST(
         "VALIDATION_ERROR",
         400,
       );
+    }
+
+    // A visit whose window is already over can't be worked; the picker greys
+    // those out and the server refuses them too.
+    if (instantHasPassed(parsed.data.arrivalWindowEnd, new Date())) {
+      return errorResponse(WINDOW_ENDED_MESSAGE, "WINDOW_ENDED", 400);
     }
 
     // organizationId comes from the session only; the request must be in it.

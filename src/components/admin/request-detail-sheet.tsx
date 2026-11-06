@@ -56,7 +56,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { MAX_TECHNICIANS_PER_VISIT, type AppointmentRecord } from '@/lib/admin/appointment-types';
-import { WINDOW_LABELS, firstOpenDay, formatIsoDayShort } from '@/lib/admin/create-request';
+import { WINDOW_LABELS, formatIsoDayShort, initialVisitDay } from '@/lib/admin/create-request';
 import {
   BUSINESS_TIME_ZONE,
   arrivalWindowUtcForBusinessDate,
@@ -355,6 +355,7 @@ const VISIT_ERROR_COPY: Record<string, string> = {
   HAS_PROGRESS: 'A technician has already started this visit.',
   REQUEST_COMPLETED: 'This request is already completed.',
   VISIT_ENDED: 'This visit has ended. Add a new visit instead.',
+  WINDOW_ENDED: 'That arrival window has already ended. Pick a later one.',
 };
 const VISIT_GENERIC_ERROR = 'Couldn’t save the visit. Try again.';
 
@@ -379,6 +380,7 @@ function VisitsSection({
   technicians,
   refreshKey,
   terminal,
+  preferredDay,
 }: {
   readonly requestId: string;
   readonly technicians: readonly TechnicianRecord[];
@@ -386,6 +388,8 @@ function VisitsSection({
   readonly refreshKey: string;
   /** Completed or cancelled: no new visits. */
   readonly terminal: boolean;
+  /** Business-tz day Add visit opens on (the request's own day), when it has one. */
+  readonly preferredDay: string | null;
 }) {
   const [visits, setVisits] = useState<readonly AppointmentRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -448,7 +452,8 @@ function VisitsSection({
   }
 
   const chosenDay =
-    pick?.isoDay || firstOpenDay(availability.days, availability.windows);
+    pick?.isoDay ||
+    initialVisitDay(preferredDay, availability.days, availability.windows, new Date());
   const canSave = !!pick?.window && !!chosenDay && techIds.length > 0 && !saving;
 
   async function saveVisit(): Promise<void> {
@@ -602,7 +607,7 @@ function VisitsSection({
           </DialogHeader>
           <div className="min-w-0 space-y-3">
             <WindowPicker
-              value={pick}
+              value={{ isoDay: chosenDay, window: pick?.window ?? '', technicianId: '' }}
               onChange={setPick}
               days={availability.days}
               availability={availability.windows}
@@ -1065,6 +1070,9 @@ export function RequestDetailSheet({
                 technicians={technicians}
                 refreshKey={[detail.status, detail.assignedTo, detail.arrivalWindowStart, detail.scheduledDate].join('|')}
                 terminal={detail.status === 'completed' || detail.status === 'cancelled'}
+                preferredDay={
+                  scheduleInputsFrom(detail.scheduledDate, detail.arrivalWindowStart, detail.arrivalWindowEnd).date || null
+                }
               />
 
               <section>

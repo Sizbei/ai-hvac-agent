@@ -267,7 +267,7 @@ export function RequestCreateDialog({
   const activeTechs = useMemo(() => technicians.filter((t) => t.isActive), [technicians]);
 
   // Until the dispatcher picks a day, default to the first day with an opening.
-  const selectedDay = draft.isoDay || firstOpenDay(availability.days, availability.windows);
+  const selectedDay = draft.isoDay || firstOpenDay(availability.days, availability.windows, new Date());
 
   function patch(p: Partial<CreateRequestDraft>): void {
     setDraft((d) => ({ ...d, ...p }));

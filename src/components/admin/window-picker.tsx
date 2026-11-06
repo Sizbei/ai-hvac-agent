@@ -17,6 +17,7 @@ import {
   windowAvailability,
 } from '@/lib/admin/create-request';
 import type { OpenWindow } from '@/lib/admin/types';
+import { windowHasEnded } from '@/lib/admin/window-ended';
 import { cn } from '@/lib/utils';
 
 const UNASSIGNED = '__unassigned__';
@@ -100,8 +101,10 @@ export function WindowPicker({
   emptyHint = 'Pick a window to schedule, or leave it unscheduled.',
 }: WindowPickerProps) {
   const current = value ?? EMPTY;
+  // Bands that are already over today are shown but can't be picked.
+  const now = new Date();
   // Until a day is picked, default to the first day with an opening.
-  const selectedDay = current.isoDay || firstOpenDay(days, availability);
+  const selectedDay = current.isoDay || firstOpenDay(days, availability, now);
 
   const techItems = useMemo(
     () => [
@@ -128,7 +131,9 @@ export function WindowPicker({
           className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1"
         >
           {days.map((d) => {
-            const open = availability.some((w) => w.day === d && w.available > 0);
+            const open =
+              BOOKABLE_WINDOWS.some((w) => !windowHasEnded(d, w, now)) &&
+              availability.some((w) => w.day === d && w.available > 0);
             const selected = selectedDay === d;
             return (
               <button
@@ -158,14 +163,15 @@ export function WindowPicker({
         <div role="radiogroup" aria-labelledby={`${idPrefix}-window-label`} className="grid gap-1.5 sm:grid-cols-3">
           {BOOKABLE_WINDOWS.map((w) => {
             const counts = windowAvailability(availability, selectedDay, w);
-            const selected = current.window === w;
+            const ended = !!selectedDay && windowHasEnded(selectedDay, w, now);
+            const selected = current.window === w && !ended;
             return (
               <button
                 key={w}
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                disabled={!selectedDay}
+                disabled={!selectedDay || ended}
                 onClick={() => onChange({ ...current, isoDay: selectedDay, window: w })}
                 className={cn(
                   'flex flex-col items-start rounded-md border px-2.5 py-1.5 text-left text-xs focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
@@ -174,11 +180,13 @@ export function WindowPicker({
               >
                 <span className="font-medium text-foreground">{WINDOW_LABELS[w]}</span>
                 <span
-                  className={cn('tabular-nums', counts.available > 0 ? 'text-muted-foreground' : 'text-warning')}
+                  className={cn('tabular-nums', ended || counts.available > 0 ? 'text-muted-foreground' : 'text-warning')}
                 >
-                  {counts.capacity === 0
-                    ? 'No technicians working'
-                    : `${counts.available} of ${counts.capacity} open`}
+                  {ended
+                    ? 'Already ended'
+                    : counts.capacity === 0
+                      ? 'No technicians working'
+                      : `${counts.available} of ${counts.capacity} open`}
                 </span>
               </button>
             );
