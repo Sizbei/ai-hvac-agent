@@ -22,6 +22,8 @@ describe("estimate intents (spec §7)", () => {
     expect(isStoredWrite(write("/api/tech/jobs/r/estimates"))).toBe(true);
     expect(isStoredWrite({ path: "https://evil.example/x", payload: {} })).toBe(false);
     expect(isStoredWrite({ path: "/api/tech/jobs/r" })).toBe(false);
+    expect(isStoredWrite({ path: "/api/tech/jobs/../admin/x", payload: {} })).toBe(false);
+    expect(isStoredWrite({ path: "/api/tech/jobs/r/..%2F../x", payload: {} })).toBe(false);
   });
   it("storedToRecover picks matching, well-formed intents", () => {
     expect(storedToRecover(raw, (id) => id.startsWith("estimate:")).map((x) => [x.intentId, x.key])).toEqual([["estimate:sell:e1", "k1"], ["estimate:bill:e2", "k2"]]);

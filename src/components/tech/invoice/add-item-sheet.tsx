@@ -121,7 +121,7 @@ export function AddItemSheet({
 
   /** Done adds the pending pick (with its quantity) before closing; an add that did not land keeps the sheet open. */
   async function done(): Promise<void> {
-    const action = doneAction({ picked: picked !== null, canRetry, adding });
+    const action = doneAction({ picked: picked !== null, canRetry, adding, locked: disabled });
     if (action === 'wait') return;
     if (action === 'add_then_close') {
       const status = await add();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -49,20 +49,25 @@ export function EstimatesCard({
 }) {
   const [view, setView] = useState<TechEstimatesView | null>(null);
   const [state, setState] = useState<'loading' | 'ok' | 'hidden' | 'error'>('loading');
+  // Latest callback without making `load` depend on it: an inline onLoaded would refetch in a loop.
+  const onLoadedRef = useRef(onLoaded);
+  useEffect(() => {
+    onLoadedRef.current = onLoaded;
+  }, [onLoaded]);
 
   const load = useCallback(async () => {
     const r = await fetchEstimates(jobId);
     if (r.kind === 'ok') {
       setView(r.view);
       setState('ok');
-      onLoaded?.(r.view);
+      onLoadedRef.current?.(r.view);
     } else if (r.kind === 'hidden') {
       setState('hidden');
-      onLoaded?.(null);
+      onLoadedRef.current?.(null);
     } else {
       setState((s) => (s === 'ok' ? s : 'error'));
     }
-  }, [jobId, onLoaded]);
+  }, [jobId]);
 
   useEffect(() => {
     void load();

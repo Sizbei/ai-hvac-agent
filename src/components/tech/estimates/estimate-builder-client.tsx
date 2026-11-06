@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Minus, Plus, Trash2 } from 'lucide-react';
@@ -50,6 +50,8 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
   /** retry: 'recover' = a reload left the last save unanswered (re-send it); 'save' = this save's answer is unknown. */
   const [message, setMessage] = useState<{ readonly text: string; readonly retry: 'recover' | 'save' | null } | null>(null);
   const create = useEstimateWrite(jobId, ESTIMATE_INTENT.create);
+  /** The mount recovery, started once per job (StrictMode runs the mount effect twice). */
+  const recovery = useRef<{ jobId: string; done: Promise<void> } | null>(null);
 
   const openSaved = useCallback((estimateId: unknown) => {
     clearDraft(jobId);
@@ -90,8 +92,10 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    if (recovery.current?.jobId !== jobId) recovery.current = { jobId, done: recover() };
+    const started = recovery.current.done;
     void (async () => {
-      await recover();
+      await started;
       const r = await fetchEstimates(jobId);
       if (cancelled) return;
       if (r.kind === 'ok') {
@@ -122,10 +126,11 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
 
   async function save(): Promise<void> {
     const check = checkDraft(options);
-    if (!check.ok || saving || recovering) return;
+    // While the last save is unknown, send re-sends the stored body whatever the draft says.
+    if ((!check.ok && create.phase !== 'unknown') || saving || recovering) return;
     setSaving(true);
     setMessage(null);
-    const r = await create.send(`/api/tech/jobs/${jobId}/estimates`, check.body);
+    const r = await create.send(`/api/tech/jobs/${jobId}/estimates`, check.ok ? check.body : {});
     if (!r.sent) {
       setSaving(false);
       return;
@@ -264,7 +269,7 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
           <div className="flex gap-2">
             <Button variant="outline" className="h-11 flex-1 rounded-xl text-[15px]" onClick={() => setConfirmDiscard(false)}>Keep editing</Button>
             <Button variant="destructive" className="h-11 flex-1 rounded-xl text-[15px]"
-              onClick={() => { clearDraft(jobId); setOptions(startOptions(mintKey())); setConfirmDiscard(false); }}>
+              onClick={() => { clearDraft(jobId); setOptions(startOptions(mintKey())); setUndo(null); setConfirmDiscard(false); }}>
               Discard
             </Button>
           </div>

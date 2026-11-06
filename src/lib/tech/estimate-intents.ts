@@ -25,7 +25,7 @@ export interface StoredWrite {
 export function isStoredWrite(v: unknown): v is StoredWrite {
   if (typeof v !== "object" || v === null || !("payload" in v)) return false;
   const path = (v as { path?: unknown }).path; // read once: a second cast after `in` narrowing is TS2352
-  return typeof path === "string" && path.startsWith("/api/tech/jobs/");
+  return typeof path === "string" && path.startsWith("/api/tech/jobs/") && !path.includes("..");
 }
 
 export interface RecoverableIntent {
