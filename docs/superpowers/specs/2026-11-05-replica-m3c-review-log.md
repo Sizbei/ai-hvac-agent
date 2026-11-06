@@ -23,3 +23,24 @@ Rejected / deferred:
 - Carry the estimate's tax onto the invoice (data m3): rejected — the invoice owns its tax; the difference is surfaced ("Tax is recalculated on the invoice.").
 - Cut sold_via/sold_by on portal/office paths (ux m12): kept — it is what lets the office distinguish a field sale and retires the "(admin)" sentinel.
 - One sold estimate per request (data m8/ux m11): warn only; two sales on one job are legitimate.
+
+## Spec round 2 (v2 → v3), 2026-11-06 — 2 critics (money/data/API, UX/flow/tests)
+
+Applied:
+- Customer view leaves via back/reload → `#customer` history entry; back closes to the estimate page only; reload reopens the layer; Not now → hand-back screen (ux B1).
+- Unseeded draft stranded materials → the bill drafts through the normal M3b create (seeded); overlap handled by the material-form warning and a post-add hint (ux B2; reverses v2's "unseeded" ruling — M1 of round 1 is now handled at entry, not by skipping materials).
+- Billing tri-state defined from billed(eid)'s halves with void excluded and precedence office → job → none; the job half requires `i.estimate_id IS NULL` (data M1, ux M6).
+- Equipment location rule shared by GET and every write predicate; request without location → any unit (data M2).
+- "Leave for the office" states what it does; office gets a "Sold, not invoiced" filter; no Add when the job's invoice is finalized (ux M1, m10).
+- GET carries companyName, customerDisplayName, signedAt, line pricebookItemId, hasApprovalLink, canCreate/createBlockedReason; equipment managedExternally (ux M2, M7, data notes).
+- Add-item sheet: Done adds the pending pick (fixes the open M3b P2 too) (ux M3).
+- Keyboard: name field + consent in scroll flow, sticky footer only summary+Approve and hidden while typing; real-phone check noted (ux M4).
+- Unknown sell result → "Checking…" + refetch; sell replay = same option + field + same tech, name ignored; refetch on layer close / visibility (ux M5).
+- Builder naming rule table with edited flags, unique names, Undo on remove option (ux M8).
+- Walk: second estimate built and sold; elementFromPoint, history.back and reload assertions; integration (l) materials-before-bill, (m), (n) (ux M9).
+- Bill lives in invoice-field-writes.ts (LINE_GATE); full createInvoiceFromJob result mapping; INVOICE_LOCKED stored and neutral copy; ALREADY_BILLED rendered as billed state (takeover downgrade stated); decline replay; NO_LINES; linked lines can't be removed (FROM_ESTIMATE); overflow pre-check includes the draft; office copies ordered with v7 ids; customer re-check inside batches; preamble options carry statuses + copy (data m1–m12, ux m1).
+- Copy: portal 2-character rule; "Approved. Thank you."; expander outside the label; approveBlockedHint; Approving… lock; lower-case type label; company name null → omitted (ux m2–m8).
+
+Rejected:
+- Restrict Show to customer / decline to field-created estimates (ux m12): rejected; a note shows when an approval link exists.
+- Helper "Ask <lead name>" (ux m11): rejected as scope; helpers see sold rows read-only.
