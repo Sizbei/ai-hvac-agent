@@ -443,6 +443,8 @@ describe("createInvoiceFromSoldEstimate", () => {
     // invoice insert + line-items insert batched atomically; no request → no lock.
     expect(db.batch).toHaveBeenCalledTimes(1);
     expect(db.execute).not.toHaveBeenCalled();
+    // Born open (never draft): billed(eid)'s job half (jbi.estimate_id IS NULL) relies on it.
+    expect(valuesSpy.mock.calls[0]![0]).toMatchObject({ estimateId: "est-1", state: "open" });
     const lineRows = valuesSpy.mock.calls.map((c) => c[0]).find(Array.isArray) as { id: string; estimateLineItemId: string }[];
     expect(lineRows[0]!.estimateLineItemId).toBe("el-1");
     expect(lineRows[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/); // v7
@@ -469,7 +471,9 @@ describe("createInvoiceFromSoldEstimate", () => {
       const [lock, insert, lines] = batchStmts().map(render);
       expect(batchStmts()).toHaveLength(3);
       expect(lock).toContain("FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE");
+      // Born open (never draft): billed(eid)'s job half (jbi.estimate_id IS NULL) relies on it.
       expect(insert).toMatch(/^INSERT INTO invoices .* SELECT .*'open'::invoice_state/);
+      expect(insert).not.toContain("'draft'::invoice_state,");
       expect(insert).toContain(
         "WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = $9::uuid AND service_request_id = $10::uuid AND state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL) AND NOT EXISTS (SELECT 1 FROM invoice_line_items jbx",
       );

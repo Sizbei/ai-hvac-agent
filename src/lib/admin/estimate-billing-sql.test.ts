@@ -58,6 +58,9 @@ describe("billed(eid) builders (spec §5.3)", () => {
     expect(t.indexOf("FROM invoices obi")).toBeLessThan(t.indexOf("FROM invoice_line_items jbx"));
     expect(t).toContain("ORDER BY obi.created_at DESC LIMIT 1");
     expect(t).toContain("ORDER BY jbi.created_at DESC LIMIT 1");
+    // A voided invoice is never the billing invoice, on either branch.
+    expect(t).toContain("obi.estimate_id = $2::uuid AND obi.state <> 'void'::invoice_state ORDER BY");
+    expect(t).toMatch(/jbi\.estimate_id IS NULL AND jbi\.state <> 'void'::invoice_state .* ORDER BY jbi\.created_at/);
   });
 });
 

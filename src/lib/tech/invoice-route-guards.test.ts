@@ -135,6 +135,7 @@ describe("techWritePreamble", () => {
     expect(h.slidingWindow).toHaveBeenCalledWith(`tech:estimate:write:${ME}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
     h.findReadableJob.mockResolvedValue({ ...JOB, status: "en_route" });
     const r2 = await techWritePreamble(req, REQ, ESTIMATE_PREAMBLE);
+    expect(r2.ok).toBe(false);
     if (!r2.ok) expect(await r2.response.json()).toEqual({ success: false, error: { code: "NOT_ON_SITE", message: "Arrive at the job first." } });
     h.findReadableJob.mockResolvedValue({ ...JOB, status: "completed" });
     expect((await techWritePreamble(req, REQ, BILL_PREAMBLE)).ok).toBe(true);
@@ -159,8 +160,8 @@ describe("techEquipmentPreamble (spec §5.6)", () => {
   it("403 NOT_ASSIGNED with only cancelled rows", async () => {
     h.findTechAssignments.mockResolvedValue([row("cancelled")]);
     const r = await techEquipmentPreamble(req, REQ);
-    if (!r.ok) expect(await r.response.json()).toEqual({ success: false, error: { code: "NOT_ASSIGNED", message: "Only a technician working this job can do that." } });
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(await r.response.json()).toEqual({ success: false, error: { code: "NOT_ASSIGNED", message: "Only a technician working this job can do that." } });
   });
   it("a completed request still takes equipment; a cancelled one does not", async () => {
     h.findReadableJob.mockResolvedValue({ ...JOB, status: "completed" });
@@ -171,7 +172,11 @@ describe("techEquipmentPreamble (spec §5.6)", () => {
   it("409 MANAGED_EXTERNALLY on a FieldPulse job", async () => {
     h.findReadableJob.mockResolvedValue({ ...JOB, native: false });
     const r = await techEquipmentPreamble(req, REQ);
-    if (!r.ok) expect(r.response.status).toBe(409);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.response.status).toBe(409);
+      expect((await r.response.json()).error.code).toBe("MANAGED_EXTERNALLY");
+    }
   });
 });
 

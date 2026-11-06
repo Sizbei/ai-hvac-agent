@@ -145,7 +145,7 @@ export async function createInvoiceFromSoldEstimate(
     serviceRequestId: est.serviceRequestId,
     customerId: est.customerId,
     estimateId: est.id,
-    state: "open",
+    state: "open", // born open: billed(eid)'s job half relies on it (estimate-billing-sql.ts jobLinesFrom)
     subtotalCents: opt.subtotalCents,
     taxCents: opt.taxCents,
     totalCents: opt.totalCents,
@@ -185,6 +185,7 @@ async function createRequestEstimateInvoice(
   // Lazy: the M3b writer module's import graph (tech field queries, inventory,
   // status writes) stays off this widely-imported module's load path.
   const { lockRequestSql, P_NATIVE } = await import("./invoice-field-writes");
+  // Born 'open', never 'draft': billed(eid)'s job half relies on it (estimate-billing-sql.ts jobLinesFrom).
   const items: SQL[] = [
     lockRequestSql(org, rid),
     sql`INSERT INTO invoices (id, organization_id, service_request_id, customer_id, estimate_id, state, subtotal_cents, tax_cents, total_cents, amount_paid_cents)

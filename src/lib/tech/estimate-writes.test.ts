@@ -109,6 +109,17 @@ describe("sellFieldEstimate (spec §5.2)", () => {
     expect(s[2]).toContain("r.status IN ('arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status)");
     expect(renderQ((batch.mock.calls[0]![0] as unknown[])[2]).params).toContain("Pat Probe");
   });
+
+  it("the sell UPDATE itself re-checks the lead and the request (the race after the preamble)", async () => {
+    batch.mockResolvedValueOnce(rowsOf([], [], [{ id: EST }], [], []));
+    await sellFieldEstimate(actor, { estimateId: EST, optionId: OPT, signatureName: "Pat Probe" });
+    const s = stmts();
+    expect(s[2]).toMatch(/^UPDATE estimates SET /);
+    // The lead predicate, inside this UPDATE (not only the tail SELECT).
+    expect(s[2]).toMatch(/AND \(EXISTS \(SELECT 1 FROM appointment_assignments a .* a\.technician_id = \$\d+::uuid AND a\.is_lead AND a\.status IN /);
+    // Scoped to the route's request.
+    expect(s[2]).toMatch(/WHERE id = \$\d+::uuid AND organization_id = \$\d+::uuid AND service_request_id = \$\d+::uuid AND status = 'open'::estimate_status/);
+  });
 });
 
 describe("sellOutcome", () => {
@@ -144,6 +155,8 @@ describe("sellOutcome", () => {
     for (const over of [
       { status: "sold", sold_option_id: CUST, sold_via: "field", sold_by: ME },
       { status: "sold", sold_option_id: OPT, sold_via: "portal", sold_by: null },
+      // an admin who is also the lead marked this same option sold in the office
+      { status: "sold", sold_option_id: OPT, sold_via: "office", sold_by: ME },
       { status: "sold", sold_option_id: OPT, sold_via: "field", sold_by: CUST },
       { status: "dismissed" },
     ]) expect(sellOutcome(est(over), tail, ctx)).toEqual({ ok: false, reason: "already_decided" });
@@ -166,6 +179,7 @@ describe("declineFieldEstimate (spec §5.5)", () => {
     const s = stmts();
     expect(s[1]).toContain("SET status = 'dismissed'::estimate_status, updated_at = now()");
     expect(s[1]).toContain("status = 'open'::estimate_status AND fieldpulse_estimate_id IS NULL AND (EXISTS (SELECT 1 FROM appointment_assignments");
+    expect(s[1]).toMatch(/WHERE id = \$\d+::uuid AND organization_id = \$\d+::uuid AND service_request_id = \$\d+::uuid AND status = 'open'::estimate_status/);
   });
   it("declineOutcome: dismissed → replay; decided → already_decided; missing → 404; not lead", () => {
     const e = (over: Record<string, unknown>) => ({ status: "open", service_request_id: REQ, synced: false, ...over });

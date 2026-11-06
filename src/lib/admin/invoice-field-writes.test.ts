@@ -563,6 +563,11 @@ describe("billSoldEstimate", () => {
     expect(s[2]).toContain("r.status IN ('arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status)");
     expect(s[2]).toContain("se.status = 'sold'::estimate_status AND se.fieldpulse_estimate_id IS NULL AND se.sold_option_id = el.option_id");
     expect(s[2]).toContain("AND NOT (EXISTS (SELECT 1 FROM invoices obi");
+    // The bill INSERT itself re-checks the lead (the race after the preamble) and
+    // keeps the target invoice on this request: asserted on s[2] alone, not by
+    // comparing the builder with itself.
+    expect(s[2]).toMatch(/AND \(EXISTS \(SELECT 1 FROM appointment_assignments a .* a\.technician_id = \$\d+::uuid AND a\.is_lead AND a\.status IN /);
+    expect(s[2]).toMatch(/WHERE EXISTS \(SELECT 1 FROM invoices i WHERE i\.id = \$\d+::uuid AND i\.organization_id = \$\d+::uuid AND i\.service_request_id = \$\d+::uuid AND i\.state = 'draft'/);
     expect(s[2]).toContain("ON CONFLICT (id) DO NOTHING RETURNING id");
     expect(s[3]).toContain("invoices.state = 'draft'::invoice_state AND invoices.amount_paid_cents = 0");
     expect(s[4]).toContain("AS has_materials");

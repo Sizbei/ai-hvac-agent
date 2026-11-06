@@ -28,6 +28,14 @@ function soldLineIdsSql(org: string, eid: SQL): SQL {
     WHERE jbe.id = ${eid} AND jbe.organization_id = ${org}::uuid AND jbl.organization_id = ${org}::uuid`;
 }
 
+/**
+ * INVARIANT: `jbi.estimate_id IS NULL` is safe only because every office
+ * estimate-born invoice is created `open` (invoice-queries.ts, both paths) and
+ * nothing moves an invoice back to `draft`, so a field bill can never put lines
+ * on one. A "save office invoice as draft" feature would re-open double billing
+ * here: drop this predicate (the line link alone is exact) before adding it.
+ * Pinned by invoice-queries.test.ts ("born open").
+ */
 const jobLinesFrom = (org: string, eid: SQL): SQL =>
   sql`FROM invoice_line_items jbx JOIN invoices jbi ON jbi.id = jbx.invoice_id
     WHERE jbx.organization_id = ${org}::uuid AND jbi.organization_id = ${org}::uuid AND jbi.estimate_id IS NULL

@@ -603,6 +603,37 @@ describe("field estimates (dev DB)", () => {
     expect(after.view.pendingWrite).toBe(true);
   }, 60_000);
 
+  it("(u) the lead is reassigned after the preamble: sell → NOT_LEAD, still open; bill INSERT adds nothing (the in-batch lead checks)", async () => {
+    const other = (await run(sql`INSERT INTO users (organization_id,email,name,role,password_hash,is_active)
+      VALUES (${org},'tech-'||gen_random_uuid()||'@throwaway.example','Probe Technician Two','technician','x',true) RETURNING id`))[0]!.id as string;
+    const leadRow = async (rid: string): Promise<string> => (await run(sql`SELECT a.id FROM appointment_assignments a JOIN appointments p ON p.id = a.appointment_id
+      WHERE p.service_request_id = ${rid} AND p.organization_id = ${org} AND a.organization_id = ${org} AND a.technician_id = ${tech} AND a.is_lead`))[0]!.id as string;
+    // The route's preamble already passed; the office hands the lead to another technician before the write.
+    const reassign = (aid: string) => db.execute(sql`UPDATE appointment_assignments SET technician_id = ${other} WHERE id = ${aid} AND organization_id = ${org}`);
+
+    const rid = await newJob();
+    const eid = data(await createVia(rid, randomUUID(), TWO())).estimateId as string;
+    const [, better] = await optionIds(eid);
+    await reassign(await leadRow(rid));
+    const s = await sellVia(rid, eid, randomUUID(), { optionId: better!, signatureName: "Pat Probe" });
+    expect([s.status, code(s)]).toEqual([403, "NOT_LEAD"]);
+    expect(await estimateRow(eid)).toMatchObject({ status: "open", sold_option_id: null, sold_by: null, signature_name: null });
+
+    const rid2 = await newJob();
+    const sold = await soldEstimate(rid2);
+    const draft = await fw.createInvoiceFromJob(actor(rid2), { invoiceId: randomUUID() });
+    if (!draft.ok) throw new Error(draft.reason);
+    await reassign(await leadRow(rid2));
+    const soldLines = await run(sql`SELECT id FROM estimate_line_items WHERE option_id = ${sold.better} AND organization_id = ${org} ORDER BY id`);
+    // Step 3 on its own (the (d2) pattern): only the INSERT's lead check stops it.
+    const stmt = fw.billLinesSql({ org, rid: rid2, me: tech, inv: draft.invoiceId, estimateId: sold.eid, lines: soldLines.map((l) => ({ id: randomUUID(), eli: String(l.id) })) });
+    expect((await db.execute(stmt)).rows).toHaveLength(0);
+    const b = await billVia(rid2, sold.eid, randomUUID());
+    expect([b.status, code(b)]).toEqual([403, "NOT_LEAD"]);
+    expect((await linesOf(draft.invoiceId)).filter((l) => l.estimate_line_item_id !== null)).toHaveLength(0);
+    expect(await invoicesOf(rid2)).toHaveLength(1);
+  }, 60_000);
+
   it("migration 0057 applies twice, statement by statement", async () => {
     const statements = readFileSync("drizzle/0057_m3c_sell_on_site.sql", "utf8").split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean);
     expect(statements.length).toBe(7);

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { classifyWriteError } from "./invoice-client-errors";
 
 describe("classifyWriteError", () => {
@@ -36,5 +36,20 @@ describe("classifyWriteError", () => {
   it("FROM_ESTIMATE and JOB_CLOSED show their message and refetch (M3c)", () => {
     expect(classifyWriteError(409, "FROM_ESTIMATE")).toBe("show_message_refetch");
     expect(classifyWriteError(409, "JOB_CLOSED")).toBe("show_message_refetch");
+  });
+
+  it("FROM_ESTIMATE and JOB_CLOSED are message conflicts in their own right, not by falling through as unstored", async () => {
+    // Pretend both were stored: only their MESSAGE_CONFLICTS entry keeps them a message.
+    vi.resetModules();
+    vi.doMock("@/lib/http/idempotency-codes", () => ({ STORED_CODES: new Set(["FROM_ESTIMATE", "JOB_CLOSED", "PROBE_STORED"]) }));
+    try {
+      const { classifyWriteError: fresh } = await import("./invoice-client-errors");
+      expect(fresh(409, "FROM_ESTIMATE")).toBe("show_message_refetch");
+      expect(fresh(409, "JOB_CLOSED")).toBe("show_message_refetch");
+      expect(fresh(409, "PROBE_STORED")).toBe("spent_new_key"); // the mock is live
+    } finally {
+      vi.doUnmock("@/lib/http/idempotency-codes");
+      vi.resetModules();
+    }
   });
 });

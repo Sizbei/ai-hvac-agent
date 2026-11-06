@@ -23,6 +23,7 @@ const TABLE: [RouteReason, number, string, string][] = [
   ["payment_id_conflict", 409, "ID_CONFLICT", "That payment token was already used. Try again."],
   ["refund_id_conflict", 409, "ID_CONFLICT", "That payment token was already used. Try again."],
   ["stale", 409, "STALE", "This job changed. Refresh and try again."],
+  ["from_estimate", 409, "FROM_ESTIMATE", "This item came from the approved estimate. Ask the office to change it."],
 ];
 
 describe("fieldError", () => {
@@ -31,13 +32,7 @@ describe("fieldError", () => {
   });
 
   it("covers every reason exactly once", () => {
-    expect(new Set(TABLE.map(([r]) => r)).size).toBe(20);
-  });
-
-  it("FROM_ESTIMATE: a line from the approved estimate", () => {
-    expect(fieldError("from_estimate")).toEqual({
-      status: 409, code: "FROM_ESTIMATE", message: "This item came from the approved estimate. Ask the office to change it.",
-    });
+    expect(new Set(TABLE.map(([r]) => r)).size).toBe(21);
   });
 });
 

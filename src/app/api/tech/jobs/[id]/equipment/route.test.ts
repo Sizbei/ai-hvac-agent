@@ -67,7 +67,9 @@ describe("GET /api/tech/jobs/[id]/equipment", () => {
     h.getView.mockResolvedValueOnce({ kind: "not_found" });
     expect((await get()).status).toBe(404);
     h.getView.mockResolvedValueOnce({ kind: "external" });
-    expect((await get()).status).toBe(409);
+    const ext = await get();
+    expect(ext.status).toBe(409);
+    expect((await json(ext)).error?.code).toBe("MANAGED_EXTERNALLY");
     h.getView.mockResolvedValueOnce({ kind: "ok", view: { units: [], canWrite: true } });
     expect((await json(await get())).data).toEqual({ units: [], canWrite: true });
     expect(h.getView).toHaveBeenLastCalledWith(ORG, U, RID);

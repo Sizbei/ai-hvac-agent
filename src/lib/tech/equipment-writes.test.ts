@@ -67,6 +67,9 @@ describe("addFieldEquipment (spec §5.6)", () => {
     expect(s[1]).toContain("r.customer_id = $");
     expect(s[1]).toContain("r.status IN ('arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status)");
     expect(s[1]).toContain("ON CONFLICT (id) DO NOTHING RETURNING id");
+    // The INSERT itself re-checks that the caller is still on the job.
+    expect(s[1]).toContain("a.technician_id = $");
+    expect(s[1]).toContain("a.status <> 'cancelled'::request_status");
     expect(renderQ((batch.mock.calls[0]![0] as unknown[])[1]).params).toContain("2026-11-06T17:00:00.000Z");
   });
 
@@ -92,6 +95,8 @@ describe("addFieldEquipment (spec §5.6)", () => {
     expect(s[3]).toContain("SET retired_at = now(), replaced_by_equipment_id = $1::uuid, updated_at = now()");
     expect(s[3]).toContain("n.xmin = pg_current_xact_id()::xid");
     for (const st of s.slice(1, 5)) expect(st).toContain("ce.customer_id = $");
+    // The INSERT and the retire UPDATE each re-check that the caller is on the job.
+    for (const st of [s[2]!, s[3]!]) expect(st).toContain("a.status <> 'cancelled'::request_status");
   });
 
   it("replace zero rows map through replaceOutcome", async () => {
