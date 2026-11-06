@@ -64,6 +64,9 @@ export function noSignatureOffered(step: ApprovalStep): boolean {
 
 export const NO_SIGNATURE_PROMPT = "Customer not here?";
 export const NO_SIGNATURE_ACTION = "Finalize without signature";
+/** The confirm step before the no-signature finalize (it can't be undone). */
+export const NO_SIGNATURE_CONFIRM = "Finalize without the customer's signature? The invoice will say 'No signature' and can't be edited.";
+export const FINALIZING = "Finalizing…";
 
 /** The pad is drawn only before a capture; later steps show the captured image. */
 export function padVisible(step: ApprovalStep): boolean {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalBlocked, approvalButtonLabel, approvalStep, NO_SIGNATURE_ACTION, NO_SIGNATURE_PROMPT, noSignatureOffered, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
+import { approvalBlocked, approvalButtonLabel, approvalStep, FINALIZING, NO_SIGNATURE_ACTION, NO_SIGNATURE_CONFIRM, NO_SIGNATURE_PROMPT, noSignatureOffered, padVisible, unknownBanner, ZERO_TOTAL_COPY, type ApprovalInput } from "./approval-flow";
 
 const base: ApprovalInput = { signatureFresh: false, signatureSent: "idle", finalizeSent: "idle", state: "draft" };
 const step = (o: Partial<ApprovalInput>) => approvalStep({ ...base, ...o });
@@ -117,5 +117,12 @@ describe("noSignatureOffered", () => {
   });
   it("copy", () => {
     expect(`${NO_SIGNATURE_PROMPT} ${NO_SIGNATURE_ACTION}`).toBe("Customer not here? Finalize without signature");
+  });
+});
+
+describe("no-signature confirm copy", () => {
+  it("names what can't be undone, with a Unicode ellipsis pending label", () => {
+    expect(NO_SIGNATURE_CONFIRM).toBe("Finalize without the customer's signature? The invoice will say 'No signature' and can't be edited.");
+    expect(FINALIZING).toBe("Finalizing…");
   });
 });

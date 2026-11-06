@@ -8,7 +8,9 @@ import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   approvalButtonLabel,
   approvalStep,
+  FINALIZING,
   NO_SIGNATURE_ACTION,
+  NO_SIGNATURE_CONFIRM,
   NO_SIGNATURE_PROMPT,
   noSignatureOffered,
   padVisible,
@@ -80,6 +82,9 @@ export function ApprovalSheet({
   const [sigUnknown, setSigUnknown] = useState(false);
   const [finSent, setFinSent] = useState<SendStatus>('idle');
   const [busy, setBusy] = useState(false);
+  // "Finalize without signature" asks first (it locks the invoice), then reads "Finalizing…".
+  const [confirmNoSig, setConfirmNoSig] = useState(false);
+  const [noSigBusy, setNoSigBusy] = useState(false);
   const busyRef = useRef(false);
   const [message, setMessage] = useState<SheetNote | null>(null);
   const captureRef = useRef<Capture | null>(null);
@@ -103,6 +108,7 @@ export function ApprovalSheet({
   // The pad's "Use this signature" only captures; nothing is sent until "Approve and finalize".
   async function onCapture(blob: Blob, name: string): Promise<void> {
     hold({ blob, name, hash: `${mintKey()}|${name}`, url: URL.createObjectURL(blob) });
+    setConfirmNoSig(false);
     setSigSent('idle');
     setMessage(null);
   }
@@ -141,6 +147,7 @@ export function ApprovalSheet({
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    setNoSigBusy(!withSignature);
     setMessage(null);
     try {
       if (withSignature && step === 'send_signature' && capture && !(await signature(capture))) return;
@@ -148,6 +155,7 @@ export function ApprovalSheet({
     } finally {
       busyRef.current = false;
       setBusy(false);
+      setNoSigBusy(false);
     }
   }
 
@@ -159,12 +167,16 @@ export function ApprovalSheet({
 
   const pending = api.view.pendingWrite;
   const lastFailure = finSent === 'failed' ? 'finalize' : sigSent === 'failed' ? 'signature' : null;
-  const label = busy ? 'Saving…' : approvalButtonLabel(step, lastFailure);
+  const label = busy ? (noSigBusy ? FINALIZING : 'Saving…') : approvalButtonLabel(step, lastFailure);
+  const close = () => {
+    setConfirmNoSig(false);
+    onClose();
+  };
 
   return (
     <TechSheet
       open={open}
-      onClose={onClose}
+      onClose={close}
       busy={busy}
       title="Customer approval"
       description={invoice.totalCents === 0 ? ZERO_TOTAL_COPY : 'The customer signs to approve the work and the total.'}
@@ -200,14 +212,39 @@ export function ApprovalSheet({
               {label}
             </Button>
           )}
-          {noSignatureOffered(step) && (
+          {noSignatureOffered(step) && confirmNoSig && (
+            <div role="alertdialog" aria-label={NO_SIGNATURE_ACTION} className="space-y-3 rounded-md border border-warning-border bg-warning-light p-3">
+              <p className="text-[15px] text-foreground">{NO_SIGNATURE_CONFIRM}</p>
+              <div className="flex flex-col gap-2">
+                <Button
+                  className="h-11 w-full rounded-xl text-[15px]"
+                  disabled={busy || pending || sigUnknown}
+                  onClick={() => void approve(false)}
+                >
+                  {noSigBusy ? FINALIZING : NO_SIGNATURE_ACTION}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-11 w-full rounded-xl text-[15px]"
+                  disabled={busy}
+                  onClick={() => setConfirmNoSig(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+          {noSignatureOffered(step) && !confirmNoSig && (
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <span className="text-[15px] text-muted-foreground">{NO_SIGNATURE_PROMPT}</span>
               <Button
                 variant="outline"
                 className="h-11 shrink-0 rounded-xl px-4 text-[15px]"
                 disabled={busy || pending || sigUnknown}
-                onClick={() => void approve(false)}
+                onClick={() => {
+                  setMessage(null);
+                  setConfirmNoSig(true);
+                }}
               >
                 {NO_SIGNATURE_ACTION}
               </Button>
