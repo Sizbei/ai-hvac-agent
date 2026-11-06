@@ -1,7 +1,10 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { AlertTriangle, Inbox } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ErrorState } from '@/components/admin/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
@@ -11,7 +14,7 @@ import { type IconChipIntent } from '@/components/admin/ui/icon-chip';
 import { formatArrivalWindow } from '@/lib/admin/arrival-window';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
 import { humanizeCode, issueTypeLabel } from '@/lib/admin/issue-type-label';
-import { customerDisplayName } from '@/lib/admin/dashboard-display';
+import { customerDisplayName, type DashboardSectionState } from '@/lib/admin/dashboard-display';
 
 type RowMeta = 'arrivalWindow' | 'followUp';
 
@@ -24,7 +27,16 @@ interface DashboardListCardProps {
    */
   readonly intent?: IconChipIntent;
   readonly requests: readonly DashboardRequest[];
-  readonly isLoading: boolean;
+  /** loading → skeletons; error → "Couldn't load" + Try again (never "All clear"). */
+  readonly state: DashboardSectionState;
+  readonly onRetry: () => void;
+  /**
+   * Rows that aren't requests but still need someone (e.g. escalated
+   * conversations), shown above the list. When present, the card is not "All clear".
+   */
+  readonly leading?: ReactNode;
+  /** How many items `leading` stands for, added to the header count. */
+  readonly leadingCount?: number;
   readonly emptyLabel: string;
   /** Which secondary line to show under the customer name. */
   readonly meta: RowMeta;
@@ -77,7 +89,10 @@ export function DashboardListCard({
   title,
   icon: Icon,
   requests,
-  isLoading,
+  state,
+  onRetry,
+  leading,
+  leadingCount = 0,
   emptyLabel,
   meta,
   onSelect,
@@ -89,7 +104,7 @@ export function DashboardListCard({
       className="flex flex-col"
       contentClassName="p-2"
       action={
-        !isLoading && (
+        state === 'ready' && (
           // Bare tabular-mono count — no pill.
           <span
             className="font-mono text-[13px] leading-none tabular-nums text-muted-foreground"
@@ -99,18 +114,31 @@ export function DashboardListCard({
                 : undefined
             }
           >
-            {requests.length}
+            {requests.length + leadingCount}
             {requests.length >= DASHBOARD_LIST_LIMIT ? '+' : ''}
           </span>
         )
       }
     >
-      {isLoading ? (
+      {state === 'loading' ? (
         <div className="space-y-2">
           {Array.from({ length: 3 }, (_, i) => (
             <Skeleton key={`skeleton-${i}`} className="h-12 w-full" />
           ))}
         </div>
+      ) : state === 'error' ? (
+        <ErrorState
+          title="Couldn't load this list"
+          description="It may not be empty. Check your connection and try again."
+          action={
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          }
+          className="py-8"
+        />
+      ) : requests.length === 0 && leading ? (
+        leading
       ) : requests.length === 0 ? (
         <EmptyState
           icon={Inbox}
@@ -119,6 +147,8 @@ export function DashboardListCard({
           className="py-8"
         />
       ) : (
+        <>
+        {leading}
         <ul className="space-y-1">
           {requests.map((request) => (
             <li key={request.id}>
@@ -165,6 +195,7 @@ export function DashboardListCard({
             </li>
           ))}
         </ul>
+        </>
       )}
     </SectionCard>
   );

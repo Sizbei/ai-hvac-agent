@@ -14,6 +14,14 @@ const { timeOffMock } = vi.hoisted(() => ({
 vi.mock('./shift-queries', () => ({
   technicianTimeOffOverlapping: timeOffMock,
 }));
+// The dashboard batches the inbox's own "Needs action" count query; the
+// definition itself is tested in conversation-queries.test.ts.
+const { needsActionCountMock } = vi.hoisted(() => ({
+  needsActionCountMock: vi.fn((_orgId: string) => Promise.resolve([{ value: 0 }] as unknown[])),
+}));
+vi.mock('./conversation-queries', () => ({
+  buildNeedsActionCountQuery: needsActionCountMock,
+}));
 const TIME_OFF_SHIFT = {
   id: 'shift-1',
   technicianId: 'tech-1',
@@ -997,6 +1005,14 @@ describe('getDashboardOverview', () => {
     expect(result.overdueInvoices).toEqual({ count: 3, cents: 450000 });
   });
 
+  it('counts conversations needing action with the inbox query, scoped to the org', async () => {
+    needsActionCountMock.mockImplementationOnce(() => Promise.resolve([{ value: '7' }]));
+    selectResolutions = [[{ pending: 0 }], [], [], [], []];
+    const result = await getDashboardOverview(ORG_ID);
+    expect(needsActionCountMock).toHaveBeenCalledWith(ORG_ID);
+    expect(result.conversationsNeedingAction).toBe(7);
+  });
+
   it('overdueInvoices defaults to a real zero (not "—") when there are no overdue invoices', async () => {
     selectResolutions = [
       [
@@ -1117,7 +1133,7 @@ describe('getDashboardOverview', () => {
     );
   });
 
-  it('batches all five queries via db.batch, not Promise.all (neon-http: 1 round-trip)', async () => {
+  it('batches all six queries (incl. the inbox needs-action count) via db.batch, not Promise.all (neon-http: 1 round-trip)', async () => {
     selectResolutions = [
       [
         {
@@ -1140,7 +1156,7 @@ describe('getDashboardOverview', () => {
     await getDashboardOverview(ORG_ID);
 
     expect(batchCallArgs).toHaveLength(1);
-    expect(batchCallArgs[0]).toHaveLength(5);
+    expect(batchCallArgs[0]).toHaveLength(6);
   });
 });
 

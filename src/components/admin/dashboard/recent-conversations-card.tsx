@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { ChevronRight, MessagesSquare } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { ErrorState } from '@/components/admin/ui/error-state';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { ChannelChip } from '@/components/admin/conversations/channel-chip';
@@ -21,7 +23,7 @@ const FETCH_LIMIT = 20;
  * navigates to /admin/conversations.
  */
 export function RecentConversationsCard() {
-  const { conversations, isLoading } = useAdminConversations({
+  const { conversations, isLoading, error, refetch } = useAdminConversations({
     limit: FETCH_LIMIT,
     intervalMs: 30_000,
   });
@@ -54,6 +56,17 @@ export function RecentConversationsCard() {
             </div>
           ))}
         </div>
+      ) : error && conversations.length === 0 ? (
+        <ErrorState
+          title="Couldn't load conversations"
+          description="There may be new ones. Check your connection and try again."
+          action={
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          }
+          className="py-10"
+        />
       ) : recent.length === 0 ? (
         <EmptyState
           icon={MessagesSquare}

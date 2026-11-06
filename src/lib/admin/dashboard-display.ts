@@ -31,3 +31,40 @@ export function conversationTitle(c: Pick<ConversationSummary, "customerName" | 
   if (c.referenceNumber) return c.referenceNumber;
   return c.channel === "phone" ? "Phone call" : c.channel === "sms" ? "Text conversation" : "Web chat";
 }
+
+export type DashboardSectionState = "loading" | "error" | "ready";
+
+/**
+ * What a dashboard section may show. A failed load with nothing loaded yet is
+ * an ERROR, never the empty state: "All clear · no unassigned urgent requests"
+ * over a failed fetch tells a dispatcher there is nothing urgent. Once data has
+ * loaded, a failed poll keeps showing it (the page banner says it's stale).
+ */
+export function dashboardSectionState(input: {
+  readonly isLoading: boolean;
+  readonly hasData: boolean;
+  readonly failed: boolean;
+}): DashboardSectionState {
+  if (input.hasData) return "ready";
+  if (input.isLoading) return "loading";
+  return input.failed ? "error" : "ready";
+}
+
+/** "1 conversation needs action" / "7 conversations need action". */
+export function needsActionLabel(count: number): string {
+  return count === 1 ? "1 conversation needs action" : `${count} conversations need action`;
+}
+
+/**
+ * Today's date as the business sees it ("Friday, November 6"), so the header
+ * matches "Today's schedule", which uses the business day — not the viewer's
+ * clock (a viewer in Tokyo saw tomorrow's date over today's jobs).
+ */
+export function businessDateLabel(now: Date, timeZone: string): string {
+  return now.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone,
+  });
+}

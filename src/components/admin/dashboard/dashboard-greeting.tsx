@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Clock, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
+import { businessDateLabel } from '@/lib/admin/dashboard-display';
 
 function greetingForHour(hour: number): string {
   if (hour < 12) return 'Good morning';
@@ -26,13 +28,8 @@ export function DashboardGreeting() {
   }, []);
 
   const greeting = now ? greetingForHour(now.getHours()) : 'Welcome';
-  const dateLabel = now
-    ? now.toLocaleDateString(undefined, {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-      })
-    : '';
+  // The business day, matching "Today's schedule" (not the viewer's clock).
+  const dateLabel = now ? businessDateLabel(now, BUSINESS_TIME_ZONE) : '';
 
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">

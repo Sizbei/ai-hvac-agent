@@ -127,6 +127,25 @@ const needsActionSql = sql<boolean>`(
   )
 )`;
 
+/**
+ * The org-wide "Needs action" count the inbox shows on its filter button. Not
+ * awaited, so callers can put it in their own db.batch. The dashboard (and the
+ * nav badge) import THIS, never a copy of the SQL, so the numbers agree.
+ */
+export function buildNeedsActionCountQuery(organizationId: string) {
+  return db
+    .select({ value: count() })
+    .from(customerSessions)
+    .where(
+      withTenant(
+        customerSessions,
+        organizationId,
+        notStandInSession(customerSessions.token),
+        needsActionSql,
+      ),
+    );
+}
+
 /** Last message time, else the session's creation time — the inbox sort key. */
 const lastActivitySql = sql<Date | string>`coalesce(
   (SELECT max(${messages.createdAt}) FROM ${messages}
@@ -247,17 +266,7 @@ export async function getConversations(
       .orderBy(desc(lastActivitySql), desc(customerSessions.id))
       .limit(limit)
       .offset(offset),
-    db
-      .select({ value: count() })
-      .from(customerSessions)
-      .where(
-        withTenant(
-          customerSessions,
-          organizationId,
-          notStandInSession(customerSessions.token),
-          needsActionSql,
-        ),
-      ),
+    buildNeedsActionCountQuery(organizationId),
   ]);
 
   const total = countResult?.value ?? 0;

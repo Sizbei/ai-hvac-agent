@@ -38,6 +38,7 @@ import { withTenant } from "@/lib/db/tenant";
 // operations page both compute AR off this exact function. Do not
 // re-implement "overdue" here (see AGENTS.md's definitional-consistency note).
 import { overdueWhere } from "./invoice-queries";
+import { buildNeedsActionCountQuery } from "./conversation-queries";
 import { referenceSearchPatterns } from "./request-search";
 import { normalizeEmail } from "./staff-queries";
 import { decrypt } from "@/lib/crypto";
@@ -1364,10 +1365,17 @@ export async function getDashboardOverview(
   const todayStart = todayBounds.start;
   const tomorrowStart = todayBounds.end;
 
-  // db.batch(): 1 HTTP round-trip for all five queries, matching the
+  // db.batch(): 1 HTTP round-trip for all six queries, matching the
   // neon-http invariant every sibling aggregation follows (ai-insights-queries,
-  // conversation-queries, crm-queries) instead of Promise.all's 5 round-trips.
-  const [statsRows, scheduleRows, attentionRows, followUpRows, overdueInvoicesRows] = await db.batch([
+  // conversation-queries, crm-queries) instead of Promise.all's 6 round-trips.
+  const [
+    statsRows,
+    scheduleRows,
+    attentionRows,
+    followUpRows,
+    overdueInvoicesRows,
+    needsActionRows,
+  ] = await db.batch([
     buildDashboardStatsQuery(organizationId),
 
     // Today's schedule: any open request whose arrival window starts today.
@@ -1435,6 +1443,10 @@ export async function getDashboardOverview(
       .limit(DASHBOARD_LIST_LIMIT),
 
     buildDashboardOverdueInvoicesQuery(organizationId),
+
+    // Escalated conversations nobody has handled: the inbox's own query, so
+    // the dashboard can never say "All clear" over a gas-smell escalation.
+    buildNeedsActionCountQuery(organizationId),
   ]);
 
   return {
@@ -1443,6 +1455,7 @@ export async function getDashboardOverview(
     needsAttention: attentionRows.map(toDashboardRequest),
     awaitingFollowUp: followUpRows.map(toDashboardRequest),
     overdueInvoices: toDashboardOverdueInvoices(overdueInvoicesRows[0]),
+    conversationsNeedingAction: Number(needsActionRows[0]?.value ?? 0),
   };
 }
 

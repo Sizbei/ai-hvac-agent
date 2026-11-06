@@ -167,3 +167,6 @@ export function authorLabel(author: MessageAuthor): string {
       return "System";
   }
 }
+
+/** The inbox with its "Needs action" filter on (conversation-inbox.tsx URL state `action=1`). */
+export const NEEDS_ACTION_INBOX_HREF = "/admin/conversations?action=1";

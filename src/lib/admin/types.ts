@@ -217,6 +217,11 @@ export interface DashboardOverview {
   readonly needsAttention: readonly DashboardRequest[];
   /** On-hold requests awaiting a follow-up, earliest follow-up first. */
   readonly awaitingFollowUp: readonly DashboardRequest[];
+  /**
+   * Conversations the inbox lists under "Needs action" (escalated, not handled
+   * since the customer last wrote) — same query as the inbox count.
+   */
+  readonly conversationsNeedingAction: number;
 }
 
 /** One technician's column on the dispatch board: the tech plus the jobs

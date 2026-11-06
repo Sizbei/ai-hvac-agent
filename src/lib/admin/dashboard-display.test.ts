@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { customerDisplayName, recentConversations, conversationTitle } from "./dashboard-display";
+import {
+  customerDisplayName,
+  recentConversations,
+  conversationTitle,
+  dashboardSectionState,
+  needsActionLabel,
+  businessDateLabel,
+} from "./dashboard-display";
 import type { ConversationSummary } from "./conversation-types";
 
 const conv = (over: Partial<ConversationSummary>): ConversationSummary => ({
@@ -36,5 +43,34 @@ describe("conversationTitle", () => {
     expect(conversationTitle(conv({ referenceNumber: "HVAC-1" }))).toBe("HVAC-1");
     expect(conversationTitle(conv({ channel: "phone" }))).toBe("Phone call");
     expect(conversationTitle(conv({ customerName: "[deleted]" }))).toBe("Web chat");
+  });
+});
+
+describe("dashboardSectionState", () => {
+  it("shows an error, not the empty state, when the first load failed", () => {
+    expect(dashboardSectionState({ isLoading: false, hasData: false, failed: true })).toBe("error");
+  });
+  it("keeps showing loaded data when a later poll fails", () => {
+    expect(dashboardSectionState({ isLoading: false, hasData: true, failed: true })).toBe("ready");
+  });
+  it("is loading before the first answer, ready (maybe empty) after a good one", () => {
+    expect(dashboardSectionState({ isLoading: true, hasData: false, failed: false })).toBe("loading");
+    expect(dashboardSectionState({ isLoading: false, hasData: false, failed: false })).toBe("ready");
+  });
+});
+
+describe("needsActionLabel", () => {
+  it("agrees in number", () => {
+    expect(needsActionLabel(1)).toBe("1 conversation needs action");
+    expect(needsActionLabel(7)).toBe("7 conversations need action");
+  });
+});
+
+describe("businessDateLabel", () => {
+  it("uses the business day, not the viewer's", () => {
+    // 01:00 UTC on Nov 6 is still Nov 5 in New York (and already Nov 6 in Tokyo).
+    const at = new Date("2026-11-06T01:00:00Z");
+    expect(businessDateLabel(at, "America/New_York")).toBe("Thursday, November 5");
+    expect(businessDateLabel(at, "Asia/Tokyo")).toBe("Friday, November 6");
   });
 });

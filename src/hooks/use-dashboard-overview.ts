@@ -19,6 +19,7 @@ const POLL_INTERVAL_MS = 30_000;
 // skeleton + a full round trip. The 30s poll keeps it current while mounted.
 const overviewCache = createSwrCache<DashboardOverview>(POLL_INTERVAL_MS);
 const CACHE_KEY = 'dashboard-overview';
+const LOAD_ERROR = "Couldn't load the dashboard.";
 
 /**
  * Fetches and polls the /admin overview payload (KPIs + dashboard lists).
@@ -50,12 +51,8 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
       const res = await adminFetch('/api/admin/overview');
       if (!isMountedRef.current) return;
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to load dashboard' },
-        }));
-        if (isMountedRef.current) {
-          setError(body?.error?.message ?? 'Failed to load dashboard');
-        }
+        // Human copy only — never the server's message.
+        if (isMountedRef.current) setError(LOAD_ERROR);
         return;
       }
 
@@ -76,7 +73,7 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current) {
-        setError('Could not connect to server. Please try again.');
+        setError(LOAD_ERROR);
       }
     } finally {
       isFetchingRef.current = false;
@@ -101,5 +98,14 @@ export function useDashboardOverview(): UseDashboardOverviewResult {
     };
   }, [fetchOverview]);
 
-  return { overview, isLoading, error, refetch: fetchOverview };
+  // Try again / after an assign: with nothing painted yet, show the skeletons
+  // while it runs so the error state visibly gives way.
+  const refetch = useCallback(async (): Promise<void> => {
+    const showSkeleton = prevDataRef.current === null && overviewCache.get(CACHE_KEY) === null;
+    if (showSkeleton) setIsLoading(true);
+    await fetchOverview();
+    if (showSkeleton && isMountedRef.current) setIsLoading(false);
+  }, [fetchOverview]);
+
+  return { overview, isLoading, error, refetch };
 }
