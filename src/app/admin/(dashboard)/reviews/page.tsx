@@ -64,6 +64,27 @@ function Stars({ rating }: { readonly rating: number | null }) {
   );
 }
 
+function ReviewCustomer({ review }: { readonly review: ReviewRow }) {
+  return review.customerId && review.customerName ? (
+    <Link href={`/admin/customers/${review.customerId}`} className="block text-link hover:underline">
+      {review.customerName}
+    </Link>
+  ) : (
+    <span className="block text-muted-foreground">Unknown customer</span>
+  );
+}
+
+function ReviewRequestLink({ review }: { readonly review: ReviewRow }) {
+  return (
+    <Link
+      href={`/admin/requests?request=${review.serviceRequestId}`}
+      className="whitespace-nowrap font-mono text-xs tabular-nums text-link hover:underline"
+    >
+      {review.referenceNumber ?? 'Open request'}
+    </Link>
+  );
+}
+
 export default function ReviewsPage() {
   useAdminPageTitle('Reviews');
   const [page, setPage] = useState(1);
@@ -119,80 +140,82 @@ export default function ReviewsPage() {
 
       {/* Review list */}
       <SectionCard title="All reviews">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b text-left text-xs text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-4 py-3 font-medium">Customer</th>
-                <th scope="col" className="px-4 py-3 font-medium">Request</th>
-                <th scope="col" className="px-4 py-3 font-medium">Status</th>
-                <th scope="col" className="px-4 py-3 font-medium">Rating</th>
-                <th scope="col" className="px-4 py-3 font-medium">Public link clicked</th>
-                <th scope="col" className="px-4 py-3 font-medium">Sent</th>
-                <th scope="col" className="px-4 py-3 font-medium">Responded</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {isLoading ? (
-                Array.from({ length: 4 }).map((_, i) => (
-                  <tr key={i}>
-                    <td className="px-4 py-3" colSpan={7}>
-                      <Skeleton className="h-5 w-full" />
-                    </td>
+        {isLoading ? (
+          <div className="flex flex-col gap-3 p-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-5 w-full" />
+            ))}
+          </div>
+        ) : reviews.length === 0 ? (
+          <EmptyState
+            icon={Star}
+            title="No reviews yet"
+            description="Review requests are sent automatically when a request is completed."
+          />
+        ) : (
+          <>
+            {/* Phone: one card per review so every field shows without a sideways scroll. */}
+            <ul className="flex flex-col divide-y divide-border sm:hidden">
+              {reviews.map((r) => (
+                <li key={r.id} className="flex flex-col gap-2 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <ReviewCustomer review={r} />
+                      <ReviewRequestLink review={r} />
+                    </div>
+                    <ReviewStatusBadge status={r.status} />
+                  </div>
+                  {r.rating !== null && <Stars rating={r.rating} />}
+                  <p className="text-xs text-muted-foreground">
+                    {r.sentAt ? `Sent ${formatDate(r.sentAt)}` : 'Not sent yet'} ·{' '}
+                    {r.respondedAt ? `Responded ${formatDate(r.respondedAt)}` : 'No response yet'} ·{' '}
+                    Public link {r.publicClicked ? 'clicked' : 'not clicked'}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="w-full text-sm">
+                <thead className="border-b text-left text-xs text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-medium">Customer</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Request</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Rating</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Public link clicked</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Sent</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Responded</th>
                   </tr>
-                ))
-              ) : reviews.length === 0 ? (
-                <tr>
-                  <td colSpan={7}>
-                    <EmptyState
-                      icon={Star}
-                      title="No reviews yet"
-                      description="Review requests are sent automatically when a request is completed."
-                    />
-                  </td>
-                </tr>
-              ) : (
-                reviews.map((r) => (
-                  <tr key={r.id}>
-                    <td className="px-4 py-3">
-                      {r.customerId && r.customerName ? (
-                        <Link
-                          href={`/admin/customers/${r.customerId}`}
-                          className="text-link hover:underline"
-                        >
-                          {r.customerName}
-                        </Link>
-                      ) : (
-                        <span className="text-muted-foreground">Unknown customer</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/admin/requests?request=${r.serviceRequestId}`}
-                        className="font-mono text-xs tabular-nums text-link hover:underline"
-                      >
-                        {r.referenceNumber ?? 'Open request'}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <ReviewStatusBadge status={r.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <Stars rating={r.rating} />
-                    </td>
-                    <td className="px-4 py-3">{r.publicClicked ? 'Yes' : 'No'}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatDate(r.sentAt)}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatDate(r.respondedAt)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="divide-y">
+                  {reviews.map((r) => (
+                    <tr key={r.id}>
+                      <td className="px-4 py-3">
+                        <ReviewCustomer review={r} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <ReviewRequestLink review={r} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <ReviewStatusBadge status={r.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Stars rating={r.rating} />
+                      </td>
+                      <td className="px-4 py-3">{r.publicClicked ? 'Yes' : 'No'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(r.sentAt)}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(r.respondedAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </SectionCard>
 
       {total > 0 && (
