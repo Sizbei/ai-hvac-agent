@@ -5,7 +5,9 @@
  * - "request": visit #1 (or no visit) is current. The sheet's technician and
  *   date/window controls edit it, as before.
  * - "visit":   a later visit is current. The request-level controls would
- *   rewrite visit #1 (the server refuses), so they give way to the Visits section.
+ *   rewrite visit #1 (the server refuses), so they give way to the Visits
+ *   section, and progress (en route / arrived / started) comes from the
+ *   technician's app on that visit.
  * - "ended":   a hold ended the visit. Nothing is booked; the way forward is
  *   "Schedule next visit", and a bare status resume is not offered.
  */
@@ -61,7 +63,9 @@ export function sheetVisitView(detail: DetailFields): SheetVisitView {
     arrivalWindowStart: v.arrivalWindowStart,
     arrivalWindowEnd: v.arrivalWindowEnd,
     requestControls: false,
-    hiddenTransitions: [],
+    // The office's progress taps mirror onto visit #1 only; on a later visit
+    // they would move the request while the technician's row stays put.
+    hiddenTransitions: RESUME_TARGET_STATUSES,
     notice: `Visit #${v.appointmentNumber} is the current visit. Change its time or technicians under Visits.`,
   };
 }

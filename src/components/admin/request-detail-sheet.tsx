@@ -1345,11 +1345,13 @@ export function RequestDetailSheet({
                 <div className="rounded-md border p-3 space-y-2">
                   {visitView.technicianName && (
                     <p className="text-sm">
-                      {visitView.mode === 'ended' ? 'Was booked with: ' : 'Currently assigned to: '}
+                      {visitView.mode === 'ended' ? 'The ended visit was booked with ' : 'Currently assigned to: '}
                       <span className="font-medium">{visitView.technicianName}</span>
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground">{visitView.notice}</p>
+                  {visitView.mode === 'visit' && (
+                    <p className="text-xs text-muted-foreground">{visitView.notice}</p>
+                  )}
                 </div>
               </section>
               )}
@@ -1515,12 +1517,12 @@ export function RequestDetailSheet({
                     </p>
                   ) : (
                   <div className="space-y-2">
-                    <span className="text-xs text-muted-foreground">
-                      Move this request to:
-                    </span>
                     {visitView?.mode === 'ended' && (
-                      <p className="text-xs text-muted-foreground">{visitView.notice}</p>
+                      <p className="text-sm">{visitView.notice}</p>
                     )}
+                    <span className="block text-xs text-muted-foreground">
+                      {visitView?.mode === 'ended' ? 'Next step:' : 'Move this request to:'}
+                    </span>
                     <div className="flex flex-wrap gap-2">
                       {visitView?.mode === 'ended' && (
                         <Button

@@ -49,7 +49,7 @@ describe("sheetVisitView", () => {
       technicianName: "Odessa Dagley",
       arrivalWindowStart: "2026-11-10T17:00:00.000Z",
       requestControls: false,
-      hiddenTransitions: [],
+      hiddenTransitions: ["scheduled", "en_route", "arrived", "in_progress"],
     });
     expect(view.notice).toMatch(/^Visit #2 is the current visit/);
   });
