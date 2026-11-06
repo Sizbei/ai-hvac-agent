@@ -153,6 +153,14 @@ export default function CustomersPage() {
     if (p.archived === '1') setShowArchived(true);
   }, []);
   useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
+  // The list waits until the URL filters are read (the effect above, which runs
+  // first), so `?q=Summit` never flashes the unfiltered list. A bare URL is
+  // ready at once and keeps the cached rows on Back.
+  const [urlRead, setUrlRead] = useState(
+    () => typeof window !== 'undefined' && window.location.search === '',
+  );
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setUrlRead(true), []);
 
   // Debounce the search box so browsing fires one request per pause, not per key.
   useEffect(() => {
@@ -178,6 +186,7 @@ export default function CustomersPage() {
       customerType,
       membershipStatus,
       fieldpulseSynced: fieldpulseSyncedFilter,
+      enabled: urlRead,
     });
 
   const setViewPersisted = useCallback((next: 'cards' | 'list') => {
@@ -254,7 +263,13 @@ export default function CustomersPage() {
     <PageShell>
       <PageHeader
         title="Customers"
-        subtitle={`${total} customer${total === 1 ? '' : 's'}`}
+        subtitle={
+          isLoading
+            ? 'Loading…'
+            : error
+              ? undefined
+              : `${total} customer${total === 1 ? '' : 's'}`
+        }
         actions={
           <Button onClick={handleShowCreate}>
             <UserPlus className="mr-2 size-4" />

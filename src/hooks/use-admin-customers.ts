@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { CustomerListRecord, CustomerDetail } from '@/lib/admin/crm-types';
 import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
+import { isStaleResponse } from '@/lib/admin/tag-picker-logic';
+
+/** Human copy for a failed load; the server's own message never reaches the UI. */
+export const CUSTOMERS_LOAD_FAILED = 'Something went wrong on our side. Please try again.';
+export const CUSTOMERS_OFFLINE = 'Check your connection, then try again.';
 
 interface CustomersPayload {
   readonly customers: readonly CustomerListRecord[];
@@ -21,6 +26,12 @@ interface UseAdminCustomersParams {
   readonly customerType?: string | null;
   readonly membershipStatus?: string | null;
   readonly fieldpulseSynced?: boolean;
+  /**
+   * False until the caller has read its URL filters. While false the hook
+   * neither fetches nor shows cached rows, so a `?q=` link never flashes the
+   * unfiltered list first.
+   */
+  readonly enabled?: boolean;
 }
 
 /**
@@ -37,26 +48,34 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
   const customerType = params.customerType ?? null;
   const membershipStatus = params.membershipStatus ?? null;
   const fieldpulseSynced = params.fieldpulseSynced ?? false;
+  const enabled = params.enabled ?? true;
 
   const key = `customers:${includeArchived}:${page}:${propertyType ?? ''}:${customerType ?? ''}:${membershipStatus ?? ''}:${fieldpulseSynced}:${search}`;
 
+  const seed = enabled ? customersCache.get(key) : null;
   const [customers, setCustomers] = useState<readonly CustomerListRecord[]>(
-    () => customersCache.get(key)?.data.customers ?? [],
+    () => seed?.data.customers ?? [],
   );
-  const [total, setTotal] = useState(() => customersCache.get(key)?.data.total ?? 0);
+  const [total, setTotal] = useState(() => seed?.data.total ?? 0);
   const [propertyTypes, setPropertyTypes] = useState<readonly string[]>(
-    () => customersCache.get(key)?.data.propertyTypes ?? [],
+    () => seed?.data.propertyTypes ?? [],
   );
-  const [isLoading, setIsLoading] = useState(() => customersCache.get(key) === null);
+  const [isLoading, setIsLoading] = useState(() => seed === null);
   const [error, setError] = useState<string | null>(null);
+  // Latest request wins: a slower response for an older query (typing "Ri"
+  // then "Riverside") must never overwrite the newer one.
+  const seqRef = useRef(0);
 
   const fetch_ = useCallback(
     async ({ bust = false }: { bust?: boolean } = {}) => {
+      if (!enabled) return;
+      const seq = ++seqRef.current;
       if (bust) customersCache.invalidate(key);
 
       const cached = customersCache.get(key);
       const hasCachedData = cached !== null;
       if (hasCachedData) {
+        setError(null);
         setCustomers(cached.data.customers);
         setTotal(cached.data.total);
         setPropertyTypes(cached.data.propertyTypes);
@@ -75,8 +94,9 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
         if (fieldpulseSynced) qs.set('fieldpulseSynced', 'true');
         const query = qs.toString();
         const res = await adminFetch(`/api/admin/customers${query ? `?${query}` : ''}`);
-        const json = await res.json();
-        if (json.success) {
+        const json = await res.json().catch(() => null);
+        if (isStaleResponse(seq, seqRef.current)) return;
+        if (json?.success) {
           setError(null);
           setCustomers(json.data.customers);
           setTotal(json.data.total);
@@ -87,16 +107,17 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
             propertyTypes: json.data.propertyTypes,
           });
         } else if (!hasCachedData) {
-          setError(json.error?.message ?? 'Failed to load customers');
+          setError(CUSTOMERS_LOAD_FAILED);
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
-        if (!hasCachedData) setError('Network error');
+        if (isStaleResponse(seq, seqRef.current)) return;
+        if (!hasCachedData) setError(CUSTOMERS_OFFLINE);
       } finally {
-        setIsLoading(false);
+        if (!isStaleResponse(seq, seqRef.current)) setIsLoading(false);
       }
     },
-    [key, includeArchived, page, search, propertyType, customerType, membershipStatus, fieldpulseSynced],
+    [enabled, key, includeArchived, page, search, propertyType, customerType, membershipStatus, fieldpulseSynced],
   );
 
   // Idiomatic data fetch: setState runs only AFTER the awaited fetch resolves,
@@ -120,16 +141,20 @@ export function useCustomerDetail(customerId: string) {
     setIsLoading(true);
     try {
       const res = await adminFetch(`/api/admin/customers/${customerId}`);
-      const json = await res.json();
-      if (json.success) {
+      const json = await res.json().catch(() => null);
+      if (json?.success) {
         setCustomer(json.data);
         setError(null); // clear any prior failure so a recovered refetch isn't stuck showing an error
+      } else if (res.status === 404) {
+        // No error text: the page shows its own "Customer not found" state.
+        setCustomer(null);
+        setError(null);
       } else {
-        setError(json.error?.message ?? 'Customer not found');
+        setError(CUSTOMERS_LOAD_FAILED);
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      setError('Network error');
+      setError(CUSTOMERS_OFFLINE);
     } finally {
       setIsLoading(false);
     }

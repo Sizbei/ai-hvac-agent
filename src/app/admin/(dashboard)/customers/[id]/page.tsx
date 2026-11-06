@@ -408,7 +408,7 @@ export default function CustomerDetailPage({
       <PageShell>
         <EmptyState
           icon={Building2}
-          title="Customer not found"
+          title={error ? "Couldn't load this customer" : 'Customer not found'}
           description={error ?? 'This customer may have been deleted or archived.'}
           action={
             <Link href="/admin/customers">
