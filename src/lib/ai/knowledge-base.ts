@@ -303,6 +303,13 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
       "wont cool",
       "still hot",
       "lukewarm air",
+      // "My AC stopped blowing cold air" — the commonest AC complaint. Kept to
+      // stopped/not phrasing so a furnace "blowing cold air" never lands here.
+      "stopped blowing cold",
+      "not blowing cold",
+      "isnt blowing cold",
+      "isn t blowing cold",
+      "no cold air",
     ],
     negationGuards: [
       // Commercial refrigeration ("walk-in cooler not cooling", "display case")
@@ -597,6 +604,16 @@ export const KNOWLEDGE_BASE: readonly KnowledgeBaseEntry[] = [
     category: "heating",
     title: "Furnace blowing cold air",
     triggerKeywords: ["blowing cold air", "blows cold", "cold air"],
+    negationGuards: [
+      // Enforces the note below: cold air from an AC is a COOLING complaint
+      // ("my AC stopped blowing cold air" → cooling-not-cooling). normalize()
+      // aliases "ac" / "a/c" to "air conditioner", so that guard covers all three.
+      "ac",
+      "a/c",
+      "air conditioner",
+      "air conditioning",
+      "cooling",
+    ],
     action: "COLLECT_INFO",
     cannedResponse:
       "Cold air when you're calling for heat usually means something needs attention. I can get a technician out. What's the service address?",

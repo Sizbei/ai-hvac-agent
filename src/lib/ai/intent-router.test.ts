@@ -326,3 +326,34 @@ describe("deterministic ambiguity probes (Step 16)", () => {
     expect(v.urgency).toBeNull();
   });
 });
+
+describe("heating-blowing-cold vs AC (round-2 UX N-P0-1)", () => {
+  it.each([
+    "My AC stopped blowing cold air this afternoon",
+    "My A/C stopped blowing cold air",
+    "my air conditioning stopped blowing cold air",
+    "the air conditioner is not blowing cold air",
+    "my ac isn't blowing cold air anymore",
+  ])("routes %j to a cooling issue, never heating", (msg) => {
+    const v = routeMessage(msg);
+    expect(v.intentId).not.toBe("heating-blowing-cold");
+    expect(v.intentId).toBe("cooling-not-cooling");
+    expect(v.issueType).toBe("cooling_not_working");
+  });
+
+  it("does not match heating-blowing-cold when 'cooling' is mentioned", () => {
+    expect(routeMessage("cooling system blows cold then warm").intentId).not.toBe(
+      "heating-blowing-cold",
+    );
+  });
+
+  it("still routes a furnace blowing cold air to heating", () => {
+    const v = routeMessage("my furnace is blowing cold air");
+    expect(v.intentId).toBe("heating-blowing-cold");
+    expect(v.issueType).toBe("heating_not_working");
+  });
+
+  it("'ac' inside HVAC does not trip the guard", () => {
+    expect(routeMessage("my hvac furnace blows cold").intentId).toBe("heating-blowing-cold");
+  });
+});
