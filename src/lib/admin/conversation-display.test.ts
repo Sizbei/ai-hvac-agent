@@ -3,6 +3,9 @@ import {
   needsAction,
   customerNameFromMetadata,
   conversationTitle,
+  conversationTimeLabel,
+  previewSnippet,
+  shortConversationId,
   phoneDigitsQuery,
   extractedFields,
   messageAuthors,
@@ -24,14 +27,61 @@ describe("needsAction", () => {
 });
 
 describe("titles", () => {
+  const id = "abfeb0ea-0000-0000-0000-000000000000";
   it("prefers the customer name, then the reference, then a short id", () => {
     expect(customerNameFromMetadata({ customerName: "  Ada Hill " })).toBe("Ada Hill");
     expect(customerNameFromMetadata({ customerName: "" })).toBeNull();
     expect(customerNameFromMetadata(null)).toBeNull();
-    const id = "abfeb0ea-0000-0000-0000-000000000000";
     expect(conversationTitle({ customerName: "Ada", referenceNumber: "HVAC-1", id })).toBe("Ada");
     expect(conversationTitle({ customerName: null, referenceNumber: "HVAC-1", id })).toBe("HVAC-1");
     expect(conversationTitle({ customerName: null, referenceNumber: null, id })).toBe("abfeb0ea");
+  });
+
+  it("falls back to the linked request's customer before anything generic", () => {
+    expect(
+      conversationTitle({ customerName: null, requestCustomerName: "Watauga Storage", referenceNumber: "HVAC-1", id, channel: "web" }),
+    ).toBe("Watauga Storage");
+  });
+
+  it("titles an anonymous chat by channel, first words and start time", () => {
+    const now = new Date("2026-11-06T20:00:00Z");
+    expect(
+      conversationTitle(
+        {
+          customerName: null,
+          referenceNumber: "HVAC-1",
+          id,
+          channel: "web",
+          preview: "my AC is not cooling at all since last night",
+          startedAt: "2026-11-06T19:14:00Z",
+        },
+        { now, timeZone: "America/New_York" },
+      ),
+    ).toBe("Web chat \u00b7 \u201cmy AC is not cooling at\u2026\u201d \u00b7 2:14 PM");
+    expect(conversationTitle({ customerName: null, referenceNumber: null, id, channel: "phone", preview: null })).toBe(
+      "Phone call",
+    );
+    expect(shortConversationId(id)).toBe("abfeb0ea");
+  });
+});
+
+describe("previewSnippet", () => {
+  it("keeps short text and cuts long text at a word", () => {
+    expect(previewSnippet("  no heat  ")).toBe("no heat");
+    expect(previewSnippet("I smell gas in the basement right now")).toBe("I smell gas in the\u2026");
+    expect(previewSnippet("")).toBeNull();
+    expect(previewSnippet(null)).toBeNull();
+  });
+});
+
+describe("conversationTimeLabel", () => {
+  const tz = "America/New_York";
+  const now = new Date("2026-11-06T20:00:00Z");
+  it("shows the time today, the date this year, and the year otherwise", () => {
+    expect(conversationTimeLabel("2026-11-06T13:05:00Z", now, tz)).toBe("8:05 AM");
+    expect(conversationTimeLabel("2026-11-02T13:05:00Z", now, tz)).toBe("Nov 2, 8:05 AM");
+    expect(conversationTimeLabel("2025-12-31T18:00:00Z", now, tz)).toBe("Dec 31, 2025, 1:00 PM");
+    expect(conversationTimeLabel("not a date", now, tz)).toBeNull();
   });
 });
 
@@ -39,7 +89,9 @@ describe("phoneDigitsQuery", () => {
   it("extracts digits from phone-shaped searches only", () => {
     expect(phoneDigitsQuery("5125550177")).toBe("5125550177");
     expect(phoneDigitsQuery("(512) 555-0177")).toBe("5125550177");
-    expect(phoneDigitsQuery("+1 512.555.0177")).toBe("15125550177");
+    expect(phoneDigitsQuery("+1 512.555.0177")).toBe("5125550177");
+    expect(phoneDigitsQuery("+1 512 555 0177")).toBe("5125550177");
+    expect(phoneDigitsQuery("44 20 7946 0958")).toBe("442079460958");
     expect(phoneDigitsQuery("HVAC-DEMO0002")).toBeNull();
     expect(phoneDigitsQuery("555-01")).toBeNull();
   });

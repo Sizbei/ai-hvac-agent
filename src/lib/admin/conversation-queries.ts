@@ -11,10 +11,11 @@
  * NOTE: messages/sessions are NOT encrypted (unlike serviceRequests PII) — do
  * not attempt to decrypt message content here.
  */
-import { eq, sql, count, desc, asc, inArray, type SQL } from "drizzle-orm";
+import { and, eq, sql, count, desc, asc, inArray, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customerSessions,
+  customers,
   messages,
   serviceRequests,
   serviceHistory,
@@ -24,6 +25,8 @@ import {
   sessionChannelEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { decrypt } from "@/lib/crypto";
+import { ERASED_PLACEHOLDER } from "./report-format";
 import { notStandInSession } from "./stand-in-session";
 import { sessionContactMatches, sessionPhoneDigitsMatch } from "./session-contact-search";
 import {
@@ -110,10 +113,40 @@ function parseMetadata(raw: string | null): Record<string, unknown> | null {
 }
 
 /**
- * Escalated and not handled since the customer last wrote. Mirrors the pure
- * `needsAction` helper in conversation-display.ts.
+ * The linked request's customer name (the request's own copy, else the
+ * customer row's — FieldPulse imports only have the latter). Null when neither
+ * decrypts or the customer was erased.
  */
-const needsActionSql = sql<boolean>`(
+function requestCustomerName(
+  requestNameEncrypted: string | null,
+  customerNameEncrypted: string | null,
+): string | null {
+  for (const encrypted of [requestNameEncrypted, customerNameEncrypted]) {
+    if (!encrypted) continue;
+    try {
+      const name = decrypt(encrypted).trim();
+      if (name.length > 0 && name !== ERASED_PLACEHOLDER) return name;
+    } catch {
+      // Undecryptable (rotated key / bad row): try the next copy.
+    }
+  }
+  return null;
+}
+
+/** Org-scoped left join from a request to its customer row (names only). */
+function requestCustomerJoin(organizationId: string): SQL | undefined {
+  return and(
+    eq(customers.id, serviceRequests.customerId),
+    eq(customers.organizationId, organizationId),
+  );
+}
+
+/**
+ * Escalated and not handled since the customer last wrote. Mirrors the pure
+ * `needsAction` helper in conversation-display.ts. Exported so ⌘K labels a
+ * result "Needs action" by the inbox's own definition.
+ */
+export const needsActionSql = sql<boolean>`(
   ${customerSessions.status} = 'escalated'
   AND (
     ${customerSessions.handledAt} IS NULL
@@ -256,7 +289,10 @@ export async function getConversations(
         turnCount: customerSessions.turnCount,
         tokensUsed: customerSessions.tokensUsed,
         metadata: customerSessions.metadata,
-        needsAction: needsActionSql,
+        // Not needsActionSql: drizzle leaves a single-table select list
+        // unqualified, so its messages subquery would compare messages.id.
+        // The flag is derived below from the same inputs instead.
+        handledAt: customerSessions.handledAt,
         createdAt: customerSessions.createdAt,
         updatedAt: customerSessions.updatedAt,
       })
@@ -322,8 +358,11 @@ export async function getConversations(
       .select({
         sessionId: serviceRequests.sessionId,
         referenceNumber: serviceRequests.referenceNumber,
+        requestNameEncrypted: serviceRequests.customerNameEncrypted,
+        customerNameEncrypted: customers.nameEncrypted,
       })
       .from(serviceRequests)
+      .leftJoin(customers, requestCustomerJoin(organizationId))
       .where(
         withTenant(
           serviceRequests,
@@ -345,23 +384,33 @@ export async function getConversations(
   }
 
   const previewBySession = new Map<string, string | null>();
+  const lastCustomerMessageAt = new Map<string, string>();
   for (const row of userMessageRows) {
     if (!previewBySession.has(row.sessionId)) {
       previewBySession.set(row.sessionId, buildPreview(row.content));
     }
+    // Ascending order: the last write wins.
+    lastCustomerMessageAt.set(row.sessionId, row.createdAt.toISOString());
   }
 
-  const referenceBySession = new Map<string, string>();
+  const requestBySession = new Map<
+    string,
+    { referenceNumber: string; customerName: string | null }
+  >();
   for (const row of requestRows) {
-    if (!referenceBySession.has(row.sessionId)) {
-      referenceBySession.set(row.sessionId, row.referenceNumber);
+    if (!requestBySession.has(row.sessionId)) {
+      requestBySession.set(row.sessionId, {
+        referenceNumber: row.referenceNumber,
+        customerName: requestCustomerName(row.requestNameEncrypted, row.customerNameEncrypted),
+      });
     }
   }
 
   const conversations: readonly ConversationSummary[] = sessionRows.map(
     (row) => {
       const aggregate = aggregateBySession.get(row.id);
-      const referenceNumber = referenceBySession.get(row.id) ?? null;
+      const request = requestBySession.get(row.id);
+      const referenceNumber = request?.referenceNumber ?? null;
       const lastMessageAt = aggregate?.lastMessageAt ?? null;
       return {
         id: row.id,
@@ -377,8 +426,12 @@ export async function getConversations(
         updatedAt: row.updatedAt.toISOString(),
         lastMessageAt: toIsoOrNull(lastMessageAt),
         customerName: customerNameFromMetadata(parseMetadata(row.metadata)),
-        // The driver may hand a boolean expression back as a string.
-        needsAction: row.needsAction === true || String(row.needsAction) === "true",
+        requestCustomerName: request?.customerName ?? null,
+        needsAction: needsAction({
+          status: row.status,
+          handledAt: row.handledAt ? row.handledAt.toISOString() : null,
+          lastCustomerMessageAt: lastCustomerMessageAt.get(row.id) ?? null,
+        }),
       };
     },
   );
@@ -447,8 +500,14 @@ export async function getConversationById(
   // the staff-reply audit rows that tell office replies apart from the AI's.
   const [[requestRow], replyAuditRows] = await db.batch([
     db
-      .select({ id: serviceRequests.id, referenceNumber: serviceRequests.referenceNumber })
+      .select({
+        id: serviceRequests.id,
+        referenceNumber: serviceRequests.referenceNumber,
+        requestNameEncrypted: serviceRequests.customerNameEncrypted,
+        customerNameEncrypted: customers.nameEncrypted,
+      })
       .from(serviceRequests)
+      .leftJoin(customers, requestCustomerJoin(organizationId))
       .where(
         withTenant(
           serviceRequests,
@@ -490,6 +549,9 @@ export async function getConversationById(
     mode: sessionRow.mode,
     referenceNumber,
     serviceRequestId: requestRow?.id ?? null,
+    requestCustomerName: requestRow
+      ? requestCustomerName(requestRow.requestNameEncrypted, requestRow.customerNameEncrypted)
+      : null,
     hasServiceRequest: referenceNumber !== null,
     handledAt,
     needsAction: needsAction({

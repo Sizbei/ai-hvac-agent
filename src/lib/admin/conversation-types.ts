@@ -24,6 +24,8 @@ export interface ConversationSummary {
   readonly updatedAt: string; // ISO
   readonly lastMessageAt: string | null; // ISO of most recent message, or null
   readonly customerName: string | null; // metadata.customerName from intake
+  // The linked request's customer name (decrypted; null when none or erased).
+  readonly requestCustomerName?: string | null;
   // Escalated and not marked handled since the customer last wrote.
   readonly needsAction: boolean;
 }
@@ -55,6 +57,7 @@ export interface ConversationDetail {
   readonly metadata: Record<string, unknown> | null;
   readonly referenceNumber: string | null;
   readonly serviceRequestId: string | null; // for the "Open request" link
+  readonly requestCustomerName: string | null; // linked request's customer, if any
   readonly hasServiceRequest: boolean;
   readonly handledAt: string | null; // ISO; when "Needs action" was cleared
   readonly needsAction: boolean;

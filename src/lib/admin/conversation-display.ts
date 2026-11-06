@@ -32,13 +32,96 @@ export function customerNameFromMetadata(
   return name.length > 0 ? name : null;
 }
 
-/** Row / header title: the customer's name, else the request number, else a short id. */
-export function conversationTitle(input: {
+const CHANNEL_TITLES: Record<string, string> = {
+  web: "Web chat",
+  phone: "Phone call",
+  sms: "Text message",
+};
+
+/** "Web chat" / "Phone call" / "Text message". */
+export function channelTitle(channel: string): string {
+  return CHANNEL_TITLES[channel] ?? "Conversation";
+}
+
+const SNIPPET_MAX = 24;
+const SNIPPET_MIN_WORD_CUT = 10;
+
+/** The first few words of the customer's first message, cut at a word: "my AC is not…". */
+export function previewSnippet(preview: string | null | undefined): string | null {
+  const text = (preview ?? "").replace(/\s+/g, " ").trim().replace(/…$/, "");
+  if (text.length === 0) return null;
+  if (text.length <= SNIPPET_MAX) return text;
+  const cut = text.slice(0, SNIPPET_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  const head = lastSpace >= SNIPPET_MIN_WORD_CUT ? cut.slice(0, lastSpace) : cut;
+  return `${head.replace(/[\s,.;:!?-]+$/, "")}…`;
+}
+
+function dayKey(date: Date, timeZone: string | undefined): string {
+  return date.toLocaleDateString("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+/** "2:14 PM" today, "Nov 6, 2:14 PM" this year, else "Nov 6, 2025, 2:14 PM". */
+export function conversationTimeLabel(
+  iso: string,
+  now: Date = new Date(),
+  timeZone?: string,
+): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const time = date.toLocaleTimeString("en-US", { timeZone, hour: "numeric", minute: "2-digit" });
+  if (dayKey(date, timeZone) === dayKey(now, timeZone)) return time;
+  const sameYear =
+    date.toLocaleDateString("en-US", { timeZone, year: "numeric" }) ===
+    now.toLocaleDateString("en-US", { timeZone, year: "numeric" });
+  const day = date.toLocaleDateString("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+  return `${day}, ${time}`;
+}
+
+export interface ConversationTitleInput {
   readonly customerName: string | null;
+  /** The linked request's customer, when the bot captured no name. */
+  readonly requestCustomerName?: string | null;
   readonly referenceNumber: string | null;
   readonly id: string;
-}): string {
-  return input.customerName ?? input.referenceNumber ?? input.id.slice(0, 8);
+  readonly channel?: string;
+  /** The customer's first message. */
+  readonly preview?: string | null;
+  /** When the conversation started (ISO); omitted → no time in the title. */
+  readonly startedAt?: string;
+}
+
+/**
+ * Row / header / ⌘K title, by what is known: the captured name, else the linked
+ * request's customer, else "Web chat · “my AC is…” · 2:14 PM". The request
+ * number and short id are fallbacks only when even the channel is unknown.
+ */
+export function conversationTitle(
+  input: ConversationTitleInput,
+  options: { readonly now?: Date; readonly timeZone?: string } = {},
+): string {
+  if (input.customerName) return input.customerName;
+  if (input.requestCustomerName) return input.requestCustomerName;
+  if (input.channel) {
+    const snippet = previewSnippet(input.preview);
+    const time = input.startedAt
+      ? conversationTimeLabel(input.startedAt, options.now, options.timeZone)
+      : null;
+    return [channelTitle(input.channel), snippet ? `\u201c${snippet}\u201d` : null, time]
+      .filter((part): part is string => part !== null)
+      .join(" \u00b7 ");
+  }
+  return input.referenceNumber ?? shortConversationId(input.id);
+}
+
+/** The 8-character id the inbox shows and ⌘K matches ("7d111fea"). */
+export function shortConversationId(id: string): string {
+  return id.slice(0, 8);
 }
 
 /**
@@ -49,7 +132,9 @@ export function conversationTitle(input: {
 export function phoneDigitsQuery(search: string): string | null {
   if (!/^[\d\s()+.\-]+$/.test(search)) return null;
   const digits = search.replace(/\D/g, "");
-  return digits.length >= 7 ? digits : null;
+  // "+1 512 555 0177": stored numbers may lack the country code.
+  const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  return national.length >= 7 ? national : null;
 }
 
 // Sentinel a skipped optional intake step writes (triage.SKIP_SENTINEL); it must

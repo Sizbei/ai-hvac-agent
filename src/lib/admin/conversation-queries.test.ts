@@ -79,13 +79,23 @@ vi.mock('@/lib/db/schema', () => ({
     organizationId: 'sr.org',
     referenceNumber: 'sr.ref',
   },
+  customers: { id: 'customers.id', organizationId: 'customers.org', nameEncrypted: 'customers.name' },
   serviceHistory: { serviceRequestId: 'sh.srid', organizationId: 'sh.org' },
   entityTags: { entity: 'tags.entity', entityId: 'tags.eid', organizationId: 'tags.org' },
   auditLog: { sessionId: 'audit.sid', organizationId: 'audit.org' },
 }));
 
+// "enc:<plain>" decrypts to <plain>; anything else is undecryptable.
+vi.mock('@/lib/crypto', () => ({
+  decrypt: (v: string) => {
+    if (!v.startsWith('enc:')) throw new Error('bad ciphertext');
+    return v.slice(4);
+  },
+}));
+
 import {
   deleteConversation,
+  getConversations,
   getConversationById,
   setConversationHandled,
 } from './conversation-queries';
@@ -101,6 +111,46 @@ beforeEach(() => {
   updateCalls.length = 0;
   updateQueue.length = 0;
   insertCalls.length = 0;
+});
+
+describe('getConversations', () => {
+  const sessionRow = (handledAt: Date | null) => ({
+    id: 's1',
+    status: 'escalated',
+    channel: 'web',
+    turnCount: 2,
+    tokensUsed: 10,
+    metadata: null,
+    handledAt,
+    createdAt: new Date('2026-06-08T00:00:00Z'),
+    updatedAt: new Date('2026-06-08T00:05:00Z'),
+  });
+  const run = async (handledAt: Date | null, customerWroteAt: string) => {
+    batchMock.mockResolvedValueOnce([[{ value: 1 }], [sessionRow(handledAt)], [{ value: 1 }]]);
+    // The three batched builders call db.select() too (results come from batch).
+    selectQueue.push([], [], []);
+    selectQueue.push([]); // aggregates
+    selectQueue.push([
+      { sessionId: 's1', content: 'first', createdAt: new Date('2026-06-08T00:00:30Z') },
+      { sessionId: 's1', content: 'again', createdAt: new Date(customerWroteAt) },
+    ]); // customer messages, ascending
+    selectQueue.push([{ sessionId: 's1', referenceNumber: 'HVAC-1', requestNameEncrypted: 'enc:Ada', customerNameEncrypted: null }]);
+    return (await getConversations(ORG, {})).conversations[0];
+  };
+
+  it('flags needs action from handledAt and the LAST customer message', async () => {
+    expect((await run(null, '2026-06-08T00:01:00Z')).needsAction).toBe(true);
+    expect((await run(new Date('2026-06-08T00:02:00Z'), '2026-06-08T00:01:00Z')).needsAction).toBe(false);
+    // The customer wrote again after it was marked handled → back in the queue.
+    expect((await run(new Date('2026-06-08T00:02:00Z'), '2026-06-08T00:03:00Z')).needsAction).toBe(true);
+  });
+
+  it("carries the first message preview and the request's customer name", async () => {
+    const row = await run(null, '2026-06-08T00:01:00Z');
+    expect(row.preview).toBe('first');
+    expect(row.requestCustomerName).toBe('Ada');
+    expect(row.referenceNumber).toBe('HVAC-1');
+  });
 });
 
 describe('getConversationById', () => {
@@ -157,6 +207,36 @@ describe('getConversationById', () => {
     expect(detail?.referenceNumber).toBe('HVAC-1');
     expect(detail?.needsAction).toBe(true);
     expect(detail?.staffReplyTimes).toEqual(['2026-06-08T00:04:00.000Z']);
+  });
+
+  it("names the linked request's customer, falling back to the customer row, never an erased one", async () => {
+    const session = {
+      id: 's1',
+      status: 'submitted',
+      channel: 'web',
+      turnCount: 3,
+      tokensUsed: 100,
+      tokenBudget: 10000,
+      metadata: null,
+      runningSummary: null,
+      handledAt: null,
+      createdAt: new Date('2026-06-08T00:00:00Z'),
+      updatedAt: new Date('2026-06-08T00:05:00Z'),
+    };
+    const run = async (requestNameEncrypted: string | null, customerNameEncrypted: string | null) => {
+      selectQueue.push([session]);
+      selectQueue.push([]);
+      batchMock.mockResolvedValueOnce([
+        [{ id: 'req-1', referenceNumber: 'HVAC-1', requestNameEncrypted, customerNameEncrypted }],
+        [],
+      ]);
+      return (await getConversationById(ORG, 's1'))?.requestCustomerName;
+    };
+    expect(await run('enc:Watauga Storage', 'enc:Other')).toBe('Watauga Storage');
+    expect(await run(null, 'enc:Watauga Storage')).toBe('Watauga Storage');
+    expect(await run('garbage', 'enc:Watauga Storage')).toBe('Watauga Storage');
+    expect(await run('enc:[deleted]', null)).toBeNull();
+    expect(await run(null, null)).toBeNull();
   });
 
   it('returns null when the session is not in the org', async () => {
