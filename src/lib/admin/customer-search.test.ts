@@ -3,6 +3,8 @@ import {
   customerMatchesSearch,
   phoneQueryDigits,
   CustomerScanCache,
+  customerScanKey,
+  customerScanKeyOrgPrefix,
 } from "./customer-search";
 
 const stored = {
@@ -89,5 +91,35 @@ describe("CustomerScanCache", () => {
     expect(cache.get("b", "f", 3)).toBeNull();
     expect(cache.get("a", "f", 3)).toEqual([1]);
     expect(cache.get("c", "f", 3)).toEqual([3]);
+  });
+
+  it("sweeps every expired entry on get and on set, not just the key read", () => {
+    const cache = new CustomerScanCache<number>(100);
+    cache.set("a", "f", [1], 0);
+    cache.set("b", "f", [2], 50);
+    cache.get("zzz", "f", 120); // a miss on another key still sweeps "a"
+    expect(cache.size).toBe(1);
+    cache.set("c", "f", [3], 200); // sweeps "b"
+    expect(cache.size).toBe(1);
+    expect(cache.get("c", "f", 200)).toEqual([3]);
+  });
+
+  it("drops one org's entries by key prefix and keeps the others", () => {
+    const cache = new CustomerScanCache<number>();
+    const orgA = "11111111-1111-4111-8111-111111111111";
+    const orgB = "22222222-2222-4222-8222-222222222222";
+    cache.set(customerScanKey(orgA, false, null), "f", [1], 0);
+    cache.set(customerScanKey(orgA, true, "residential"), "f", [2], 0);
+    cache.set(customerScanKey(orgB, false, null), "f", [3], 0);
+    cache.deleteByPrefix(customerScanKeyOrgPrefix(orgA));
+    expect(cache.size).toBe(1);
+    expect(cache.get(customerScanKey(orgB, false, null), "f", 1)).toEqual([3]);
+  });
+
+  it("org prefix matches only that org's keys", () => {
+    const key = customerScanKey("org-1", false, null);
+    expect(key.startsWith(customerScanKeyOrgPrefix("org-1"))).toBe(true);
+    expect(key.startsWith(customerScanKeyOrgPrefix("org-"))).toBe(false);
+    expect(customerScanKey("org-10").startsWith(customerScanKeyOrgPrefix("org-1"))).toBe(false);
   });
 });

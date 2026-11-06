@@ -58,6 +58,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { logAudit } from "@/lib/admin/audit";
+import { invalidateCustomerSearchCache } from "@/lib/admin/crm-queries";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { getStorageClient } from "@/lib/storage/r2-client";
 import { storageKeyFromPublicUrl } from "@/lib/storage/storage-key";
@@ -495,6 +496,7 @@ export async function anonymizeCustomer(
     }),
   ]);
 
+  invalidateCustomerSearchCache(organizationId);
   scheduleStorageCleanup(storageKeys);
 
   return true;

@@ -38,7 +38,12 @@ import {
   type CustomerMatchCandidate,
 } from "@/lib/admin/customer-match";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
-import { customerMatchesSearch, CustomerScanCache } from "@/lib/admin/customer-search";
+import {
+  customerMatchesSearch,
+  CustomerScanCache,
+  customerScanKey,
+  customerScanKeyOrgPrefix,
+} from "@/lib/admin/customer-search";
 import {
   sanitizeName,
   sanitizePhone,
@@ -83,6 +88,15 @@ interface SearchScanRow {
 }
 
 const searchScanCache = new CustomerScanCache<SearchScanRow>();
+
+/**
+ * Drops this instance's cached search scans for an org. Called after a
+ * customer is erased or deleted so their ciphertext doesn't stay in memory;
+ * other instances age out within the cache TTL.
+ */
+export function invalidateCustomerSearchCache(organizationId: string): void {
+  searchScanCache.deleteByPrefix(customerScanKeyOrgPrefix(organizationId));
+}
 
 /**
  * Paginated customers list. The heavy former version fetched ALL customers with
@@ -287,14 +301,14 @@ export async function getCustomers(
   // (~800 KB at 2.6k customers), so the scan is cached per instance and only
   // re-read when a one-row fingerprint of the same filtered set changes. The
   // counts are then aggregated for the returned page only.
-  const scanKey = JSON.stringify([
+  const scanKey = customerScanKey(
     organizationId,
     includeArchived,
     propertyType,
     customerType,
     membershipStatus,
     fieldpulseSynced,
-  ]);
+  );
   const fingerprintPromise = db
     .select({
       fp: sql<string>`md5(coalesce(string_agg(${customers.id}::text || coalesce(${customers.nameEncrypted}, '') || coalesce(${customers.phoneEncrypted}, '') || coalesce(${customers.emailEncrypted}, '') || coalesce(${customers.addressEncrypted}, '') || coalesce(${customers.anonymizedAt}::text, ''), ',' order by ${customers.createdAt} desc, ${customers.id} desc), ''))`,
@@ -1185,6 +1199,7 @@ export async function deleteCustomer(
     }),
   ]);
 
+  invalidateCustomerSearchCache(organizationId);
   return true;
 }
 

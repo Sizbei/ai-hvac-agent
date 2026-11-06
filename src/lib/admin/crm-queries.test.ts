@@ -486,6 +486,39 @@ describe('deleteCustomer', () => {
   });
 });
 
+describe('deleteCustomer — search cache', () => {
+  // Search-path queue order: types, fingerprint, then the scan on a miss.
+  const SEARCH_ORG = '00000000-0000-0000-0000-0000000000d9';
+  const scanRow = {
+    id: 'c1',
+    nameEncrypted: 'enc:Alice',
+    phoneEncrypted: null,
+    emailEncrypted: null,
+    addressEncrypted: null,
+  };
+  const SENTINEL = [{ id: 'never-read' }];
+
+  it("drops the org's cached scan, so the next search re-reads it", async () => {
+    selectQueue.push([], [{ fp: 'F' }], [scanRow]);
+    await getCustomers(SEARCH_ORG, { search: 'nomatch' });
+    expect(selectQueue).toHaveLength(0);
+
+    // Same fingerprint: served from the cache, the scan slot is left unread.
+    selectQueue.push([], [{ fp: 'F' }], SENTINEL);
+    await getCustomers(SEARCH_ORG, { search: 'nomatch' });
+    expect(selectQueue).toEqual([SENTINEL]);
+    selectQueue.length = 0;
+
+    selectQueue.push([{ id: 'c1' }]); // existence check
+    await deleteCustomer(SEARCH_ORG, 'c1');
+
+    // Same fingerprint again, but the cache was cleared: the scan is read.
+    selectQueue.push([], [{ fp: 'F' }], SENTINEL);
+    await getCustomers(SEARCH_ORG, { search: 'nomatch' });
+    expect(selectQueue).toHaveLength(0);
+  });
+});
+
 describe('archiveCustomer', () => {
   it('returns false and does not write when the customer is not in the org', async () => {
     selectQueue.push([]); // existence check → no row

@@ -62,6 +62,20 @@ export const SCAN_CACHE_TTL_MS = 5 * 60 * 1000;
 /** Most scans kept per instance (one per org + filter combination). */
 export const SCAN_CACHE_MAX_ENTRIES = 24;
 
+/**
+ * Cache key for one org's scan with a given filter combination. JSON keeps two
+ * keys from colliding, and every key for an org starts with
+ * {@link customerScanKeyOrgPrefix}.
+ */
+export function customerScanKey(organizationId: string, ...filters: readonly unknown[]): string {
+  return JSON.stringify([organizationId, ...filters]);
+}
+
+/** The prefix shared by every {@link customerScanKey} of one org. */
+export function customerScanKeyOrgPrefix(organizationId: string): string {
+  return `[${JSON.stringify(organizationId)},`;
+}
+
 interface CacheEntry<T> {
   readonly fingerprint: string;
   readonly storedAt: number;
@@ -73,6 +87,10 @@ interface CacheEntry<T> {
  * plaintext). An entry is served only when the caller's fresh fingerprint of
  * the same filtered set matches the one stored with it, so any insert, delete,
  * archive or contact edit invalidates it on the next search.
+ *
+ * Expired entries are swept on every get and set, and an org's entries are
+ * dropped outright when one of its customers is erased or deleted, so an
+ * erased person's ciphertext does not linger in instance memory.
  */
 export class CustomerScanCache<T> {
   private readonly entries = new Map<string, CacheEntry<T>>();
@@ -83,9 +101,10 @@ export class CustomerScanCache<T> {
   ) {}
 
   get(key: string, fingerprint: string, now: number = Date.now()): readonly T[] | null {
+    this.sweepExpired(now);
     const entry = this.entries.get(key);
     if (!entry) return null;
-    if (entry.fingerprint !== fingerprint || now - entry.storedAt > this.ttlMs) {
+    if (entry.fingerprint !== fingerprint) {
       this.entries.delete(key);
       return null;
     }
@@ -96,12 +115,26 @@ export class CustomerScanCache<T> {
   }
 
   set(key: string, fingerprint: string, rows: readonly T[], now: number = Date.now()): void {
+    this.sweepExpired(now);
     this.entries.delete(key);
     this.entries.set(key, { fingerprint, storedAt: now, rows });
     while (this.entries.size > this.maxEntries) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
       this.entries.delete(oldest);
+    }
+  }
+
+  /** Drops every entry whose key starts with `prefix`. */
+  deleteByPrefix(prefix: string): void {
+    for (const key of [...this.entries.keys()]) {
+      if (key.startsWith(prefix)) this.entries.delete(key);
+    }
+  }
+
+  private sweepExpired(now: number): void {
+    for (const [key, entry] of [...this.entries]) {
+      if (now - entry.storedAt > this.ttlMs) this.entries.delete(key);
     }
   }
 

@@ -179,6 +179,12 @@ vi.mock("@/lib/crypto", () => ({
 
 vi.mock("@/lib/admin/audit", () => ({ logAudit: vi.fn() }));
 
+const invalidateCustomerSearchCache = vi.fn();
+vi.mock("@/lib/admin/crm-queries", () => ({
+  invalidateCustomerSearchCache: (orgId: string) =>
+    invalidateCustomerSearchCache(orgId),
+}));
+
 const deleteFile = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/storage/r2-client", () => ({
   getStorageClient: () => ({ deleteFile }),
@@ -403,6 +409,17 @@ describe("anonymizeCustomer", () => {
     ]);
     expect(selectWhereCalls[3]).toEqual(att?.cond);
     expect(batch.indexOf(att!)).toBeLessThan(batch.indexOf(opFor("messages")!));
+  });
+
+  it("clears the org's cached search scans after the erase, and not when nothing was erased", async () => {
+    invalidateCustomerSearchCache.mockClear();
+    selectQueue.push([]); // customer not found
+    await anonymizeCustomer(ORG, CUST);
+    expect(invalidateCustomerSearchCache).not.toHaveBeenCalled();
+
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    expect(invalidateCustomerSearchCache).toHaveBeenCalledExactlyOnceWith(ORG);
   });
 
   it("deletes messages, customer notes, and attachments", async () => {
