@@ -10,6 +10,11 @@
  * pushes a fresh one. So every close is one Back onto the estimate page, never
  * further.
  */
+import { estimateWriteCopy, type EnvelopeLike } from "./estimate-intents";
+import { saleResult } from "./estimate-page-copy";
+import type { WriteOutcome } from "./invoice-key-state";
+import type { TechEstimate } from "./estimate-view";
+
 export const CUSTOMER_HASH = "#customer";
 
 export type LayerState = { readonly open: boolean };
@@ -37,4 +42,39 @@ export function layerStep(s: LayerState, e: LayerEvent): { state: LayerState; ef
     case "close":
       return s.open ? { state: LAYER_CLOSED, effect: "back" } : { state: s, effect: "none" };
   }
+}
+
+/**
+ * Approve's first answer (Task 9 fix round 1). A send that went nowhere (a sell
+ * for this estimate is already in flight) or that re-sent an older stored sell
+ * never counts as this choice's success: refetch and check.
+ */
+export function approveFirst(
+  r: { readonly sent: false } | { readonly sent: true; readonly outcome: WriteOutcome; readonly resentOld: boolean },
+): "success" | "check" | "failed" {
+  if (!r.sent || r.resentOld) return "check";
+  return saleResult(r.outcome);
+}
+
+/** The estimate left `open`, so a stored sell is settled (the server state moved). */
+export function sellAdvanced(e: Pick<TechEstimate, "status"> | null): boolean {
+  return e !== null && e.status !== "open";
+}
+
+/**
+ * What the technician reads after a failed sale (the customer only ever sees
+ * CUSTOMER_COPY.failed). Null when a re-sent older sell landed: the page then
+ * shows that sold state, which is the reason.
+ */
+export function saleFailNote(
+  r: { readonly sent: false } | { readonly sent: true; readonly outcome: WriteOutcome; readonly envelope: EnvelopeLike | null },
+): string | null {
+  if (!r.sent) return estimateWriteCopy("retry_same_key_after_refetch", null);
+  if (r.outcome === "success_refetch" || r.outcome === "already_saved_refetch") return null;
+  return estimateWriteCopy(r.outcome, r.envelope);
+}
+
+/** An open layer whose estimate a refetch removed or made unsellable closes, unless a sale started in it. */
+export function layerStale(p: { readonly open: boolean; readonly saleStarted: boolean; readonly sellable: boolean }): boolean {
+  return p.open && !p.saleStarted && !p.sellable;
 }

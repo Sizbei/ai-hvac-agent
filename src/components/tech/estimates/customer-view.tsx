@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { approveBlockedHint } from '@/lib/portal/estimate-decision';
 import { MAX_SIGNATURE, signatureNameOk } from '@/lib/tech/estimate-input';
 import {
-  CUSTOMER_COPY, approveConfirmCopy, customerHeading, footerSummary, initialChoice, previewLines, showAllLabel,
+  CUSTOMER_COPY, approveConfirmCopy, customerHeading, initialChoice, previewLines, showAllLabel,
 } from '@/lib/tech/estimate-page-copy';
 import type { TechEstimate } from '@/lib/tech/estimate-view';
 
@@ -52,6 +52,12 @@ export function CustomerView({
   const hint = approveBlockedHint(chosen !== null, nameOk);
   const sending = screen === 'sending' || screen === 'checking';
   const choosing = screen === 'choose';
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  // Opening the layer moves focus to its heading, so a screen reader starts at the customer's estimate.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   async function confirm(): Promise<void> {
     if (!chosen || !nameOk || sending) return;
@@ -81,7 +87,7 @@ export function CustomerView({
       <header className="flex items-start justify-between gap-3 border-b border-border bg-surface px-4 py-3">
         <div className="min-w-0">
           {companyName && <p className="truncate text-[13px] text-muted-foreground">{companyName}</p>}
-          <h2 className="text-[20px] font-semibold tracking-tight">{customerHeading(customerDisplayName)}</h2>
+          <h2 ref={headingRef} tabIndex={-1} className="text-[20px] font-semibold tracking-tight outline-none">{customerHeading(customerDisplayName)}</h2>
         </div>
         <Button variant="ghost" className="h-11 shrink-0 rounded-xl px-3 text-[15px]" disabled={sending} onClick={() => setScreen('handback')}>
           {CUSTOMER_COPY.notNow}
@@ -160,7 +166,9 @@ export function CustomerView({
         <div className="border-t border-border bg-surface px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {choosing ? (
             <div className="flex items-center gap-3">
-              <p className={`min-w-0 flex-1 truncate text-[15px] ${MONEY}`}>{footerSummary(chosen)}</p>
+              <p className="min-w-0 flex-1 truncate text-[15px]">
+                {chosen ? <>{chosen.name} · <span className={MONEY}>{formatCentsExact(chosen.totalCents)}</span></> : CUSTOMER_COPY.choose}
+              </p>
               <Button className="h-12 rounded-xl px-6 text-[16px]" disabled={!chosen || !nameOk} onClick={() => setScreen('confirm')}>
                 {CUSTOMER_COPY.approve}
               </Button>
