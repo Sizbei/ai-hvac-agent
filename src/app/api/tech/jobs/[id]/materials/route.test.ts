@@ -12,7 +12,10 @@ vi.mock("@/lib/tech/field-queries", () => ({
   isJobOwnedByTech: vi.fn(),
 }));
 
+vi.mock("@/lib/tech/invoice-queries", () => ({ billedMaterialIds: vi.fn() }));
+
 import { GET, POST } from "./route";
+import { billedMaterialIds } from "@/lib/tech/invoice-queries";
 import { getTechSession } from "@/lib/auth/tech-session";
 import { addJobMaterial, isJobOwnedByTech, listJobMaterials } from "@/lib/tech/field-queries";
 
@@ -40,6 +43,7 @@ describe("GET /api/tech/jobs/[id]/materials", () => {
 
   it("200 without the cost field", async () => {
     (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    (billedMaterialIds as unknown as Mock).mockResolvedValue(new Set());
     (listJobMaterials as unknown as Mock).mockResolvedValue([
       { id: "m", pricebookItemId: null, description: "Cap", quantity: 1, unitCostCents: 100, unitPriceCents: 900 },
     ]);
@@ -48,6 +52,21 @@ describe("GET /api/tech/jobs/[id]/materials", () => {
     expect(res.status).toBe(200);
     expect(body.data.materials[0]).not.toHaveProperty("unitCostCents");
     expect(body.data.materials[0].unitPriceCents).toBe(900);
+  });
+});
+
+describe("GET materials — onInvoice", () => {
+  it("flags each material by whether it is on a non-void invoice, never exposing cost", async () => {
+    (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    (listJobMaterials as unknown as Mock).mockResolvedValue([
+      { id: "a", pricebookItemId: null, description: "Cap", quantity: 1, unitCostCents: 100, unitPriceCents: 900 },
+      { id: "b", pricebookItemId: null, description: "Tab", quantity: 1, unitCostCents: 50, unitPriceCents: 1200 },
+    ]);
+    (billedMaterialIds as unknown as Mock).mockResolvedValue(new Set(["a"]));
+    const body = await (await GET(req(), ctx(VALID_ID) as never)).json();
+    expect(body.data.materials.map((m: { id: string; onInvoice: boolean }) => [m.id, m.onInvoice])).toEqual([["a", true], ["b", false]]);
+    expect(JSON.stringify(body)).not.toMatch(/cost/i);
+    expect(billedMaterialIds).toHaveBeenCalledWith("o", VALID_ID);
   });
 });
 
@@ -83,6 +102,15 @@ describe("POST /api/tech/jobs/[id]/materials — manual price", () => {
       expect(res.status).toBe(400);
     }
     expect(addJobMaterial).not.toHaveBeenCalled();
+  });
+
+  it("409 JOB_CLOSED on a completed or cancelled request", async () => {
+    (addJobMaterial as unknown as Mock).mockResolvedValue({ ok: false, reason: "job_closed" });
+    const res = await POST(post({ description: "x", quantity: 1 }), ctx(VALID_ID) as never);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("JOB_CLOSED");
+    expect(body.error.message).toBe("This job is closed. Ask the office to add parts.");
   });
 
   it("400 when the query layer refuses the line total", async () => {

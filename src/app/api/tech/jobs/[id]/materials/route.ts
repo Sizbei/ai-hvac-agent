@@ -1,9 +1,11 @@
 /**
  * Technician field workflow — materials used on a job.
  *
- * GET    list the materials recorded on a job (org-scoped read).
+ * GET    list the materials recorded on a job (org-scoped read), each with
+ *        `onInvoice` (on a non-void native invoice of the request).
  * POST   add a material (catalog line snapshots cost/price server-side; manual
  *        line keeps cost 0 and takes an optional unitPriceCents, capped). Assignee + tenant guarded in field-queries.
+ *        409 JOB_CLOSED on a completed or cancelled request.
  * DELETE remove a material by ?materialId=. Assignee + tenant guarded.
  *
  * Auth mirrors the tech status route: getTechSession (technician role) + the
@@ -18,6 +20,7 @@ import {
   removeJobMaterial,
   isJobOwnedByTech,
 } from "@/lib/tech/field-queries";
+import { billedMaterialIds } from "@/lib/tech/invoice-queries";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -54,12 +57,15 @@ export async function GET(
     if (!(await isJobOwnedByTech(session.organizationId, session.userId, id))) {
       return errorResponse("Job not found", "NOT_FOUND", 404);
     }
-    const materials = await listJobMaterials(session.organizationId, id);
+    const [materials, billed] = await Promise.all([
+      listJobMaterials(session.organizationId, id),
+      billedMaterialIds(session.organizationId, id),
+    ]);
     // Strip unitCostCents — vendor cost / margin data. Techs get unitPriceCents
     // (what the customer is charged); exposing cost contradicts the H13/M34
-    // cost-hiding intent.
+    // cost-hiding intent. onInvoice: on a non-void native invoice of the request.
     const publicMaterials = materials.map(
-      ({ unitCostCents: _unitCostCents, ...rest }) => rest,
+      ({ unitCostCents: _unitCostCents, ...rest }) => ({ ...rest, onInvoice: billed.has(rest.id) }),
     );
     return successResponse({ materials: publicMaterials });
   } catch (error) {
@@ -104,6 +110,13 @@ export async function POST(
           "Job not found or not assigned to you",
           "NOT_FOUND",
           404,
+        );
+      }
+      if (result.reason === "job_closed") {
+        return errorResponse(
+          "This job is closed. Ask the office to add parts.",
+          "JOB_CLOSED",
+          409,
         );
       }
       if (result.reason === "item_not_found") {

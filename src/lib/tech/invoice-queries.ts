@@ -183,6 +183,17 @@ async function fullInvoice(org: string, rid: string, inv: Row, meta: Row): Promi
 
 // ---------------------------------------------------------------- the view
 
+/**
+ * Ids of the request's job materials that sit on a non-void native invoice
+ * (the job page's "Not on an invoice" chip reads the complement).
+ */
+export async function billedMaterialIds(org: string, rid: string): Promise<ReadonlySet<string>> {
+  const found = await rows(sql`SELECT m.id FROM job_materials m
+    WHERE m.service_request_id = ${rid}::uuid AND m.organization_id = ${org}::uuid
+      AND ${materialBilledSql(org, rid, sql.raw("m.id"))}`);
+  return new Set(found.map((r) => String(r.id)));
+}
+
 export type TechInvoiceViewResult =
   | { kind: "not_found" }
   | { kind: "external" }

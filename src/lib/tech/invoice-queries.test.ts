@@ -33,7 +33,7 @@ vi.mock("@/lib/tech/ownership", async (orig) => ({
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: h.getDefaultTaxBps, getPricebookItemById: vi.fn() }));
 vi.mock("@/lib/storage/r2-client", () => ({ getStorageClient: h.getStorageClient }));
 
-import { getTechInvoiceView } from "./invoice-queries";
+import { billedMaterialIds, getTechInvoiceView } from "./invoice-queries";
 import type { TechInvoice } from "./invoice-view";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -399,5 +399,23 @@ describe("getTechInvoiceView", () => {
       { id: "p1", method: "cash", checkNumber: null, amountCents: 500, status: "succeeded", createdAt: "2026-11-04T11:00:00.000Z" },
     ]);
     expect(stmt(M.customer)!.sql).toContain("phone_encrypted IS NOT NULL");
+  });
+});
+
+describe("billedMaterialIds", () => {
+  beforeEach(() => {
+    h.executed.length = 0;
+    h.answers.clear();
+  });
+
+  it("returns the materials on a non-void native invoice of the request, org-scoped", async () => {
+    h.answers.set("FROM job_materials m", [{ id: "m1" }, { id: "m3" }]);
+    const ids = await billedMaterialIds(ORG, REQ);
+    expect([...ids]).toEqual(["m1", "m3"]);
+    const text = new PgDialect().sqlToQuery(h.executed[0] as SQL).sql;
+    expect(text).toContain("i.state <> 'void'::invoice_state");
+    expect(text).toContain("i.fieldpulse_invoice_id IS NULL");
+    expect(text).toContain("m.organization_id = $");
+    expect(text).not.toMatch(/cost/);
   });
 });

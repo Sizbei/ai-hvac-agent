@@ -237,7 +237,7 @@ export type AddJobMaterialResult =
   | { readonly ok: true; readonly id: string }
   | {
       readonly ok: false;
-      readonly reason: "not_owned" | "item_not_found" | "invalid_input";
+      readonly reason: "not_owned" | "item_not_found" | "invalid_input" | "job_closed";
     };
 
 export interface AddJobMaterialInput {
@@ -262,7 +262,9 @@ export function validManualPrice(unitPriceCents: number, quantity: number): bool
  * Record a material the tech used on a job. If pricebookItemId is given, the unit
  * cost/price are SNAPSHOTTED from the pricebook item (server-authoritative — any
  * client-sent costs are ignored). Otherwise it's a manual line: costs default to
- * 0 and a description is required. Assignee + tenant guarded.
+ * 0 and a description is required. Assignee + tenant guarded. A completed or
+ * cancelled request takes no new materials (`job_closed`): the office bills
+ * late parts. Notes and photos stay allowed there.
  */
 export async function addJobMaterial(
   organizationId: string,
@@ -274,9 +276,12 @@ export async function addJobMaterial(
     return { ok: false, reason: "invalid_input" };
   }
 
-  const owned = await findOwnedJob(organizationId, techUserId, serviceRequestId);
-  if (!owned) {
+  const job = await findReadableJob(organizationId, techUserId, serviceRequestId);
+  if (!job) {
     return { ok: false, reason: "not_owned" };
+  }
+  if (job.status === "completed" || job.status === "cancelled") {
+    return { ok: false, reason: "job_closed" };
   }
 
   let pricebookItemId: string | null = null;

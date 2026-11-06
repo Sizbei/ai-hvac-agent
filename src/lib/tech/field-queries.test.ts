@@ -267,6 +267,15 @@ describe("assignee guard", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 
+  it("refuses a new material on a completed or cancelled request", async () => {
+    for (const status of ["completed", "cancelled"] as const) {
+      vi.mocked(findReadableJob).mockResolvedValue({ id: JOB, customerId: null, native: true, status });
+      const r = await addJobMaterial(ORG, TECH, JOB, { description: "x", quantity: 1 });
+      expect(r).toEqual({ ok: false, reason: "job_closed" });
+    }
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
   it("a tech cannot remove a material on a job not assigned to them", async () => {
     // 1) material lookup -> found on JOB; 2) ownership guard -> not owned
     mockSelectSeq([[{ serviceRequestId: JOB }]]);
