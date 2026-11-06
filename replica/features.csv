@@ -126,11 +126,11 @@ Job forms and checklists,tech-app,must,yes,no,FP+ST; FP forms are an add-on
 Required forms block close-out,tech-app,should,yes,no,ST
 Non-job and PDF-overlay forms,tech-app,could,yes,no,FP+ST; FP PDF overlay is an add-on
 Guided status flows,tech-app,should,yes,no,FP
-Equipment add / replace from field,tech-app,must,yes,no,ST; equipment registry not exposed in tech routes
+Equipment add / replace from field,tech-app,must,yes,yes,"ST; job page Equipment card: add or replace at the job's address (location rule), old unit retired and linked; no photos/barcode/warranty"
 Equipment barcode / serial capture,tech-app,should,yes,partial,ST; serial field in equipment form - no barcode scan
 Location info tab (history / opportunities / recurring),tech-app,must,yes,partial,ST; /tech/jobs/[id] summary only
-Present estimate with options on site,tech-app,must,yes,no,FP+ST; estimates are admin-only
-Sold items onto invoice now or later,tech-app,must,yes,no,ST
+Present estimate with options on site,tech-app,must,yes,yes,"FP+ST; builder (1-3 pricebook options) + #customer layer: pick, typed-name signature, approve on the lead's phone"
+Sold items onto invoice now or later,tech-app,must,yes,yes,"ST; now = the job's invoice (once per estimate); later = office Generate invoice + Sold, not invoiced filter"
 Invoice presentation and signature on site,tech-app,must,yes,yes,ST; S40 /tech/jobs/[id]/invoice - lines + totals on the phone and a customer approval sheet (signature then finalize; the invoice snapshots a fresh signature)
 Take payment in the field,tech-app,must,yes,yes,ST; manual cash/check via POST /api/tech/jobs/[id]/invoice/payments (idempotency key) + SMS pay link; card in the field is M4
 Tech scorecard in app,tech-app,should,yes,no,ST; scorecards are admin-only

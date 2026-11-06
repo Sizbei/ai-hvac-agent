@@ -192,6 +192,8 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Activity rows: "Payment recorded · $200.00 · Check", "Refund issued · $50.00".
 - Phones: the document drops the unit-price column below `sm`.
 
+**Estimate-linked lines (M3c):** `invoice_line_items.estimate_line_item_id` marks lines copied from a sold estimate (field bill and office Generate); the field can't remove them (409 `FROM_ESTIMATE` 'This item came from the approved estimate. Ask the office to change it.'); the tech view marks them `fromEstimate` ('From the estimate').
+
 **Gotchas:**
 - The SummaryBand is suppressed during initial load (`!isLoading`) to avoid the
   zero-data flash before stats arrive — do not remove the guard.

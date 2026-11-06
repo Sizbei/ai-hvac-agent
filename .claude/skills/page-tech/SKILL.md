@@ -265,6 +265,55 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   suite: `VITEST_INTEGRATION=1 npx vitest run
   tests/integration/field-invoice.test.ts`.
 
+**Sell on site (M3c, `/tech/jobs/[id]/estimates/new`, `/tech/jobs/[id]/estimates/[eid]`):**
+- **Files:** pages `src/app/tech/jobs/[id]/estimates/{new,[eid]}/page.tsx` · components
+  `src/components/tech/estimates/` (`estimates-card.tsx`, `estimate-builder-client.tsx`,
+  `estimate-page-client.tsx`, `customer-view.tsx`, `use-estimate-write.ts`,
+  `recover-intents.ts`, `fetch-estimates.ts`) and `src/components/tech/equipment/`
+  (`equipment-card.tsx`, `equipment-sheet.tsx`) · writers `src/lib/tech/estimate-writes.ts`,
+  `src/lib/tech/equipment-writes.ts`, `billSoldEstimate` in
+  `src/lib/admin/invoice-field-writes.ts` · billed(eid) SQL `src/lib/admin/estimate-billing-sql.ts`
+  · read models `src/lib/tech/estimate-queries.ts`, `src/lib/tech/equipment-queries.ts` · pure
+  `estimate-input.ts`, `estimate-builder.ts`, `estimate-display.ts`, `estimate-page-copy.ts`,
+  `customer-view-state.ts`, `estimate-intents.ts`, `equipment-input.ts`, `equipment-display.ts`,
+  `material-overlap.ts`, `field-sale-statuses.ts`, `add-item-done.ts` (all `src/lib/tech/`).
+- **Routes:** `GET/POST /api/tech/jobs/[id]/estimates`, `POST …/estimates/[eid]/{sell,bill,decline}`,
+  `GET/POST /api/tech/jobs/[id]/equipment`. Preambles: estimate create/sell/decline =
+  lead + arrived/in_progress/on_hold ("Arrive at the job first." / "This job is closed.");
+  bill = lead + invoicing statuses, same copy; equipment = any technician with a
+  non-cancelled assignment (403 `NOT_ASSIGNED`) + arrived…completed. Invoice routes: a
+  cancelled request now answers 409 `JOB_CLOSED` (copy unchanged).
+- **Billing once:** billed(eid) = a non-void invoice with `estimate_id = eid` (office) OR a
+  linked line (`invoice_line_items.estimate_line_item_id`) on a non-void native invoice
+  with `estimate_id IS NULL` (job). The bill pre-checks, drafts through
+  `createInvoiceFromJob` (seeds materials), then inserts under L_req → L_inv with
+  `NOT billed(eid)` (`billLinesSql`). `ALREADY_BILLED` renders as the billed state. Linked
+  lines can't be removed in the field (`FROM_ESTIMATE`). Spec deviations: when this key's
+  derived invoice is paid, refunded or voided the bill answers STORED `INVOICE_CHANGED`
+  "The job's invoice changed. Try again." (a new key derives a new invoice; unstored STALE
+  looped forever); `INVOICE_LOCKED` copy is "The job's invoice is already finalized. Ask
+  the office to bill this estimate." (Generate refuses while a paid draft exists).
+- **GET contract** adds `requestStatus` and `priorInvoicePaid` to spec §6; the bill success
+  adds `hasMaterials`. Never cost, never the typed signature name.
+- **Customer view:** `#customer` via native pushState/popstate (`layerStep`); Back closes
+  onto the estimate page, never further; a reload reopens the layer only while sellable,
+  else strips the hash; a reload that reopens it runs replaceState (strip) then
+  pushState('#customer'), so every close is one Back (spec deviation; a reload on an
+  already-pushed entry leaves one extra estimate-page entry). Customer-facing failures
+  read "Something went wrong. Please hand the phone back to your technician." only.
+- **Keys:** estimate/equipment intents live under `tech:estimate:<rid>:intents`
+  (`useIdempotencyKey({ storageKey, rehydrate })`); the builder, the estimate page and the
+  equipment card re-send stored intents on mount (`recoverEstimateIntents`) and stay
+  locked with "Try again" while any is unanswered; the equipment sheet rehydrates its own
+  intent and re-sends the old body with the old key before Save unlocks. The invoice
+  view's `pendingWrite` counts only `/invoice%` and `/signature` keys.
+- **Equipment:** location rule `(r.location_id IS NULL OR ce.location_id IS NULL OR
+  ce.location_id = r.location_id)` in the GET and every write; replace = lock old →
+  insert while old is live → retire old only when this transaction wrote the new row.
+  Install date stored as noon Eastern.
+- **Verify:** `npx vitest run src/lib/tech/estimate-*.test.ts src/lib/tech/equipment-*.test.ts src/lib/tech/customer-view-state.test.ts "src/app/api/tech/jobs/[id]/estimates" "src/app/api/tech/jobs/[id]/equipment"`;
+  dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-estimate.test.ts`.
+
 **Invariants:**
 - **Assignee + tenant guard** (legacy sub-routes): every mutation route checks BOTH
   `assignedTo == techUserId` AND the session's `organizationId`. A technician may only

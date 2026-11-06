@@ -1,8 +1,8 @@
-## Parity: 45.9 / 100
+## Parity: 47.4 / 100
 
-features 45.9  (275 counted, must-haves 53 of 111 done)
+features 47.4  (275 counted, must-haves 56 of 111 done)
 
-Not shippable yet: 58 must-have features are not done.
+Not shippable yet: 55 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -19,10 +19,10 @@ Not shippable yet: 58 must-have features are not done.
 - estimates                     49.0  (22 features)
 - crm                           50.0  (29 features)
 - dispatch                      50.0  (25 features)
-- tech-app                      51.4  (29 features)
 - jobs                          56.7  (26 features)
 - reporting                     56.7  (8 features)
 - payments                      61.8  (7 features)
+- tech-app                      63.9  (29 features)
 - scheduling                    68.2  (13 features)
 
 ## Missing, in build order
@@ -37,11 +37,8 @@ Not shippable yet: 58 must-have features are not done.
 - [must] memberships: Recurring membership billing (monthly to annual), no  (FP+ST; billing mocked - providerSubscriptionId placeholder)
 - [must] pricebook: Discounts and fees, no  (ST)
 - [must] team-settings: Business units (trades / divisions / invoice header / tax default), no  (ST; single org = single business)
-- [must] tech-app: Equipment add / replace from field, no  (ST; equipment registry not exposed in tech routes)
 - [must] tech-app: Job forms and checklists, no  (FP+ST; FP forms are an add-on)
 - [must] tech-app: Offline mode with cached jobs and pricebook, no  (FP+ST)
-- [must] tech-app: Present estimate with options on site, no  (FP+ST; estimates are admin-only)
-- [must] tech-app: Sold items onto invoice now or later, no  (ST)
 - [must] comms: Manual send to customer, partial  (FP; /admin/conversations SMS reply only)
 - [must] comms: On-the-way text with tracking link, partial  (FP+ST; technician_enroute template - no en-route action or tracking link)
 - [must] comms: Two-way SMS inbox, partial  (FP+ST; /admin/conversations - no polling and SMS-only reply)

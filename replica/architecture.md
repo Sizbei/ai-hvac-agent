@@ -593,7 +593,10 @@ until a tech can finish and collect on a job here.
      invoices, and `purgeOrganization` passes object keys (it used to pass
      URLs).
    - **M3c Sell on site.** Tech estimates with options from the pricebook,
-     present + sign (`markEstimateSold` variant, signer + signature), sold
+     present + sign (field writer `sellFieldEstimate`; typed full name +
+     `sold_by`/`sold_via='field'` — drawn signature deferred, accepted
+     downgrade: weaker evidence than the portal's remote e-sign, the office
+     view says 'Signed on site with <technician>'), sold
      lines appended to the draft invoice exactly once; equipment add /
      replace from the field. Must-haves closed: 129, 132, 133 (now).
      Adversarial review (estimate → invoice money path).
@@ -601,6 +604,8 @@ until a tech can finish and collect on a job here.
      signs on the device, the estimate is sold and its lines are on the
      draft invoice once even when signed twice; a replaced unit shows
      `retired_at` and `replaced_by`.
+     Shipped 2026-11-06 (plan
+     `docs/superpowers/plans/2026-11-06-replica-m3c-sell-on-site.md`).
    - **M3d Forms + site view.** `forms` (flat `fields` jsonb) +
      `form_submissions` (unique per request/visit/form; values encrypted;
      erased), an admin forms builder under Settings, tech fill with draft
