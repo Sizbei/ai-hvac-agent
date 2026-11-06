@@ -829,7 +829,7 @@ export async function billSoldEstimate(
 - [ ] **Step 4: Run them to verify they pass**
 
 Run: `npx vitest run src/lib/admin/invoice-field-writes.test.ts src/lib/tech/invoice-errors.test.ts`
-Expected: PASS except the existing case "removes under the draft + unpaid gate, T with amount_paid_cents = 0", whose parameter array pins the old state SELECT. Change its `expect(params()).toEqual([2, 2, 10, 5, 3, 4]);` to `expect(params()).toEqual([2, 2, 10, 5, 6, 4]);` (the state SELECT now also binds lineId, invoiceId and org for `from_estimate`); its `s[2]` text assertion still matches (the new `AND estimate_line_item_id IS NULL` sits before the gate it pins). Re-run → PASS.
+Expected: PASS except the existing case "removes under the draft + unpaid gate, T with amount_paid_cents = 0", whose parameter array pins the old state SELECT. Change its `expect(params()).toEqual([2, 2, 10, 5, 3, 4]);` to `expect(params()).toEqual([2, 2, 10, 5, 6, 4]);` (the state SELECT now also binds lineId, invoiceId and org for `from_estimate`); also update its two text assertions, which the new SQL breaks: change the `s[2]` regex `/^DELETE FROM invoice_line_items WHERE id = \$1::uuid AND invoice_id = \$2::uuid AND organization_id = \$3::uuid AND \(EXISTS/` to `/^DELETE FROM invoice_line_items WHERE id = \$1::uuid AND invoice_id = \$2::uuid AND organization_id = \$3::uuid AND estimate_line_item_id IS NULL AND \(EXISTS/`, and change `expect(s[4]).toMatch(/^SELECT state, amount_paid_cents FROM invoices/)` to `expect(s[4]).toMatch(/^SELECT state, amount_paid_cents, EXISTS \(/)` plus `expect(s[4]).toContain(" AS from_estimate FROM invoices")` (adjust the exact strings to the SQL you wrote in Step 3 if they differ, but keep both assertions). Re-run → PASS (plan review round 2, M1).
 
 - [ ] **Step 5: Failing office-guard tests** in `src/lib/admin/invoice-queries.test.ts` (this task owns the file; its existing cases change as shown).
   - `mockCreateSeq` becomes (adds `orderBy` for the lines read):
@@ -2398,6 +2398,7 @@ export function replacedOnLabel(iso: string, timeZone: string = BUSINESS_BASE_LO
 ```
 
   (`crm-equipment-records.ts` imports `BUSINESS_BASE_LOCATION` from `@/lib/config/business-location` next to the `EquipmentRecord` type import.)
+  Put that import at the top of the file in the code block above (plan review round 2, m2: the block omitted it).
 
   Office edits:
   - `crm-types.ts` `EquipmentRecord`: add `/** M3c: set when a newer unit replaced this one (listed last, muted). */ readonly retiredAt: string | null;` and `/** The replacing unit, only while it still exists. */ readonly replacedByEquipmentId: string | null;`.
