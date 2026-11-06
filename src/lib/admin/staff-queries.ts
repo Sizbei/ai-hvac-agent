@@ -241,6 +241,22 @@ export async function createStaff(
   return { ok: true, staff: toStaffRecord(created) };
 }
 
+/**
+ * Whether one staff member is currently active (org-scoped). null when the
+ * user isn't in this org. Used by the reactivation seat gate.
+ */
+export async function isStaffActive(
+  organizationId: string,
+  userId: string,
+): Promise<boolean | null> {
+  const [row] = await db
+    .select({ isActive: users.isActive })
+    .from(users)
+    .where(withTenant(users, organizationId, eq(users.id, userId)))
+    .limit(1);
+  return row ? row.isActive : null;
+}
+
 export type UpdateStaffResult =
   | { ok: true; staff: StaffRecord }
   | {

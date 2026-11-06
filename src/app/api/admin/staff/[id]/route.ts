@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
-import { updateStaff } from "@/lib/admin/staff-queries";
+import { isStaffActive, updateStaff } from "@/lib/admin/staff-queries";
+import { getSeatUsage } from "@/lib/admin/seats";
+import { seatsFull } from "@/lib/admin/seat-usage";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -89,6 +91,21 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           409,
         );
       }
+    }
+
+    // Reactivation takes a seat, so it gets the same gate as invites and
+    // POST /api/admin/staff. Only an inactive -> active change is checked: an
+    // already-active user re-sending isActive: true uses no new seat.
+    if (
+      parsed.data.isActive === true &&
+      (await isStaffActive(session.organizationId, id)) === false &&
+      seatsFull(await getSeatUsage(session.organizationId))
+    ) {
+      return errorResponse(
+        "Your plan's staff limit has been reached. Upgrade your plan to reactivate this team member.",
+        "SEAT_LIMIT_REACHED",
+        403,
+      );
     }
 
     const result = await updateStaff(
