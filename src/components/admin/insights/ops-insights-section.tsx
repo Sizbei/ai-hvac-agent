@@ -20,7 +20,13 @@ import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { DataTableShell } from '@/components/admin/ui/data-table-shell';
 import type { OpsInsights } from '@/lib/admin/ops-insights-types';
-import { formatCents, hourLabel } from '@/lib/admin/ops-insights-format';
+import {
+  formatCents,
+  hourLabel,
+  peakHour as findPeakHour,
+  sortByUrgency,
+  timeZoneLabel,
+} from '@/lib/admin/ops-insights-format';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import { groupIssueTypes, humanizeCode } from '@/lib/admin/issue-type-label';
 
@@ -81,7 +87,7 @@ function BarList({
   );
 }
 
-/** Top issue types plus "Other" (imported job titles are not issue types). */
+/** Top issue types plus "Other"; imported job titles are not issue types and are left out. */
 function IssueTypeChart({
   rows,
 }: {
@@ -94,7 +100,7 @@ function IssueTypeChart({
       <BarList rows={bars} labels={labels} />
       {importedTitles > 0 && (
         <p className="mt-3 text-xs text-muted-foreground">
-          Other includes {importedTitles} imported request{importedTitles === 1 ? '' : 's'} with no issue type.
+          {importedTitles} imported request{importedTitles === 1 ? ' has' : 's have'} no issue type and {importedTitles === 1 ? "isn't" : "aren't"} shown.
         </p>
       )}
     </>
@@ -108,13 +114,11 @@ function HourHistogram({
 }: {
   readonly rows: readonly { readonly hour: number; readonly count: number }[];
 }) {
-  const total = rows.reduce((sum, r) => sum + r.count, 0);
-  if (total === 0) {
+  const peakHour = findPeakHour(rows);
+  if (peakHour === null) {
     return <p className="text-sm text-muted-foreground">No data yet.</p>;
   }
   const max = Math.max(1, ...rows.map((r) => r.count));
-  // Strictly-greater picks the FIRST maximum on a tie (earliest hour in 0–23).
-  const peakHour = rows.reduce((a, b) => (b.count > a.count ? b : a)).hour;
 
   return (
     <div>
@@ -122,7 +126,9 @@ function HourHistogram({
         {rows.map((r) => (
           <div
             key={r.hour}
-            className="group flex flex-1 flex-col items-center justify-end"
+            // h-full: in an items-end row a column without a height collapses
+            // to its content (0 px), so every bar's % height resolved to 0.
+            className="group flex h-full flex-1 flex-col items-center justify-end"
             title={`${hourLabel(r.hour)} — ${r.count} request${r.count === 1 ? '' : 's'}`}
           >
             <div
@@ -172,10 +178,7 @@ export function OpsInsightsSection() {
     try {
       const res = await adminFetch('/api/admin/ops-insights');
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch operations insights' },
-        }));
-        setError(body?.error?.message ?? 'Failed to fetch operations insights');
+        setError("Couldn't load the operations numbers.");
         return;
       }
       const body = (await res.json()) as { success: boolean; data: OpsInsights };
@@ -185,7 +188,7 @@ export function OpsInsightsSection() {
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      setError('Could not connect to server. Please try again.');
+      setError("Couldn't reach the server.");
     } finally {
       isFetchingRef.current = false;
     }
@@ -209,7 +212,7 @@ export function OpsInsightsSection() {
               onClick={() => { setError(null); void fetchOps(); }}
             >
               <RefreshCw className="mr-2 size-4" />
-              Retry
+              Try again
             </Button>
           </AlertDescription>
         </Alert>
@@ -270,7 +273,7 @@ export function OpsInsightsSection() {
           {isLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : (
-            <BarList rows={data?.byUrgency ?? []} labels={URGENCY_LABELS} />
+            <BarList rows={sortByUrgency(data?.byUrgency ?? [])} labels={URGENCY_LABELS} />
           )}
         </Card>
       </div>
@@ -304,8 +307,12 @@ export function OpsInsightsSection() {
           <div className="mb-3 flex items-center gap-2">
             <Sunrise className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium">Requests by time of day</p>
-            <span className="ml-auto text-xs text-muted-foreground">UTC</span>
           </div>
+          {data && (
+            <p className="-mt-2 mb-3 text-xs text-muted-foreground">
+              Requests booked here, by the hour they came in ({timeZoneLabel(data.timeZone)}).
+            </p>
+          )}
           {isLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : (

@@ -30,10 +30,11 @@ export interface IssueTypeBar {
 export const ISSUE_CHART_TOP_N = 8;
 
 /**
- * Known issue types, largest first, capped at `topN`; everything else (smaller
- * known types, and imported free-text job titles that are not issue types at
- * all) is summed into one "Other" bar. `importedTitles` counts the requests
- * whose issue type was free text, for the caption.
+ * Known issue types, largest first, capped at `topN`; smaller known types and
+ * "other" are summed into one "Other" bar. Imported free-text job titles are
+ * not issue types at all and get NO bar: folded into Other they made one
+ * 209-request bar that dwarfed every real one (7, 6, 5…). `importedTitles`
+ * counts them for the caption.
  */
 export function groupIssueTypes(
   rows: readonly { readonly key: string; readonly count: number }[],
@@ -45,10 +46,7 @@ export function groupIssueTypes(
   for (const r of rows) {
     if (r.key === "other") other += r.count;
     else if (isKnownIssueType(r.key)) known.push({ key: r.key, label: issueTypeLabel(r.key), count: r.count });
-    else {
-      other += r.count;
-      importedTitles += r.count;
-    }
+    else importedTitles += r.count;
   }
   const sorted = [...known].sort((a, b) => b.count - a.count);
   const top = sorted.slice(0, topN);

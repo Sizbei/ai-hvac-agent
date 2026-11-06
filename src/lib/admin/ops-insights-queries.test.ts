@@ -37,6 +37,7 @@ vi.mock('drizzle-orm', () => ({
   inArray: (...a: unknown[]) => a,
   or: (...a: unknown[]) => a,
   isNotNull: (...a: unknown[]) => a,
+  isNull: (...a: unknown[]) => a,
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -52,6 +53,10 @@ vi.mock('@/lib/db/schema', () => ({
   serviceHistory: { cost: 'sh.cost', organizationId: 'sh.org' },
   requestStatusEnum: { enumValues: [] },
   holdReasonEnum: { enumValues: [] },
+}));
+
+vi.mock('./org-time-zone', () => ({
+  getOrgTimeZone: async () => 'America/Chicago',
 }));
 
 import { getOpsInsights } from './ops-insights-queries';
@@ -104,6 +109,12 @@ describe('getOpsInsights', () => {
     expect(r.requestsByHour.every((h) => h.count === 0)).toBe(true);
     expect(r.requestsByHour[0]).toEqual({ hour: 0, count: 0 });
     expect(r.costStats).toEqual({ count: 0, totalCents: 0, averageCents: 0 });
+  });
+
+  it("returns the org's time zone the hour buckets are in", async () => {
+    seed({ issue: [], urgency: [], status: [], last7: 0, tech: [] });
+    const r = await getOpsInsights(ORG);
+    expect(r.timeZone).toBe('America/Chicago');
   });
 
   it('backfills missing hours to zero and coerces string hour keys', async () => {

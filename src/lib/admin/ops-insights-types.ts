@@ -30,7 +30,7 @@ export interface TechnicianLoad {
  * Neon session default). Surfaces peak demand windows; apply the org's local
  * offset for local interpretation. */
 export interface HourlyCount {
-  /** Hour of day, 0–23 (UTC). */
+  /** Hour of day, 0–23, in the org's business time zone (`OpsInsights.timeZone`). */
   readonly hour: number;
   readonly count: number;
 }
@@ -62,6 +62,8 @@ export interface OpsInsights {
   readonly technicianLoad: readonly TechnicianLoad[];
   /** Request volume by hour of day (always 24 entries, hour 0–23). */
   readonly requestsByHour: readonly HourlyCount[];
+  /** IANA zone the hour buckets are in (the org's business time zone). */
+  readonly timeZone: string;
   /** Recorded service-cost aggregates (cents). */
   readonly costStats: CostStats;
 }

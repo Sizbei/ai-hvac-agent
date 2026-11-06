@@ -22,7 +22,7 @@ describe("humanizeCode", () => {
 });
 
 describe("groupIssueTypes", () => {
-  it("keeps the top N known types and folds the rest plus free text into Other", () => {
+  it("keeps the top N known types, folds the rest into Other and leaves imported free text out", () => {
     const rows = [
       { key: "heating_not_working", count: 50 },
       { key: "cooling_not_working", count: 40 },
@@ -35,9 +35,17 @@ describe("groupIssueTypes", () => {
     expect(bars).toEqual([
       { key: "heating_not_working", label: "Heating not working", count: 50 },
       { key: "cooling_not_working", label: "Cooling not working", count: 40 },
-      { key: "other", label: "Other", count: 9 },
+      { key: "other", label: "Other", count: 7 },
     ]);
     expect(importedTitles).toBe(2);
+  });
+  it("never lets imported titles make an Other bar on their own", () => {
+    const { bars, importedTitles } = groupIssueTypes([
+      { key: "water_leak", count: 3 },
+      { key: "Job for Arby's Elizabethton", count: 209 },
+    ]);
+    expect(bars).toEqual([{ key: "water_leak", label: "Water leak", count: 3 }]);
+    expect(importedTitles).toBe(209);
   });
   it("has no Other bar when nothing is folded", () => {
     expect(groupIssueTypes([{ key: "water_leak", count: 3 }]).bars).toEqual([

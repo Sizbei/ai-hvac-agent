@@ -91,10 +91,7 @@ export default function AiInsightsPage() {
       const res = await adminFetch('/api/admin/ai-insights');
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch AI insights' },
-        }));
-        setError(body?.error?.message ?? 'Failed to fetch AI insights');
+        setError("Couldn't load the AI assistant numbers.");
         return;
       }
 
@@ -109,7 +106,7 @@ export default function AiInsightsPage() {
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      setError('Could not connect to server. Please try again.');
+      setError("Couldn't reach the server.");
     } finally {
       isFetchingRef.current = false;
     }
@@ -146,7 +143,12 @@ export default function AiInsightsPage() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span>{error}</span>
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading}>
+              Try again
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 

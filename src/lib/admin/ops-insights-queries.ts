@@ -8,11 +8,12 @@
  * NOTE: the neon-http driver returns SQL aggregates (count) as strings, so each
  * aggregate value is coerced with Number() before use.
  */
-import { eq, and, sql, count, gte, inArray, or, isNotNull } from "drizzle-orm";
+import { eq, and, sql, count, gte, inArray, or, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests, serviceHistory, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { OPEN_STATUSES } from "./request-status";
+import { getOrgTimeZone } from "./org-time-zone";
 import type {
   OpsInsights,
   CategoryCount,
@@ -31,6 +32,9 @@ export async function getOpsInsights(
   organizationId: string,
 ): Promise<OpsInsights> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  // Validated IANA zone (resolveAfterHoursConfig), bound as a parameter.
+  const timeZone = await getOrgTimeZone(organizationId);
+  const localHour = sql`extract(hour from ${serviceRequests.createdAt} at time zone ${timeZone})`;
 
   // Grouped breakdowns and the per-tech load run independently; send them as a
   // single db.batch to reduce 8 HTTP round-trips to 1. Each is org-scoped via withTenant.
@@ -100,20 +104,32 @@ export async function getOpsInsights(
       .where(withTenant(serviceRequests, organizationId))
       .groupBy(serviceRequests.assignedTo, users.name),
 
-    // Request volume by hour of day. extract(hour from ...) returns 0–23 in the
-    // session timezone — which on Neon defaults to UTC, so these are UTC hours
-    // (the UI labels them as such). Hours with no requests are simply absent and
+    // Request volume by hour of day in the ORG's business time zone (a
+    // timestamptz AT TIME ZONE gives local wall-clock time, DST included).
+    // Bucketing by UTC put a 9 pm Eastern call at "1a". NATIVE requests only:
+    // an imported FieldPulse/HCP job's created_at is when the import ran
+    // (dev default org: 41 of 42 "1a" requests were one import batch), not
+    // when the customer called. Hours with no requests are simply absent and
     // are backfilled to 0 below. The ::int is a Postgres-side normalisation;
     // neon-http still returns it as a string over the wire, so toNumber() (in
     // the mapping) does the real coercion.
     db
       .select({
-        hour: sql<number | string>`extract(hour from ${serviceRequests.createdAt})::int`,
+        hour: sql<number | string>`${localHour}::int`,
         value: count(),
       })
       .from(serviceRequests)
-      .where(withTenant(serviceRequests, organizationId))
-      .groupBy(sql`extract(hour from ${serviceRequests.createdAt})`),
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          isNull(serviceRequests.fieldpulseJobId),
+          isNull(serviceRequests.hcpJobId),
+        ),
+      )
+      // By output position: the zone is a bound parameter, and Postgres
+      // would not match a second copy of the expression ($1 vs $2).
+      .groupBy(sql`1`),
 
     // Service-cost aggregates over recorded history rows that carry a cost.
     // count()/sum()/avg() come back as strings on neon-http → coerced below.
@@ -205,6 +221,7 @@ export async function getOpsInsights(
     byStatus,
     technicianLoad,
     requestsByHour,
+    timeZone,
     costStats,
     openImported: toNumber(openImportedRow[0]?.value),
   };
