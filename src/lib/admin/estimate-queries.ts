@@ -10,6 +10,7 @@ import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { and, asc, count, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { OFFICE_SIGNATURE } from "@/lib/tech/estimate-input";
 import {
   estimates,
   estimateOptions,
@@ -781,7 +782,7 @@ export async function getEstimateDetailById(
   const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, billingInvoiceId, soldVia, soldByName, ...header } = est;
   // Only pre-M3c office rows need the audit log; since M3c sold_by names the admin.
   const markedSoldBy =
-    est.signatureName === ADMIN_SIGNATURE && soldVia == null ? await findMarkedSoldBy(organizationId, est.id) : null;
+    est.signatureName === OFFICE_SIGNATURE && soldVia == null ? await findMarkedSoldBy(organizationId, est.id) : null;
   // Admin detail: include snapshotted cost so the UI can show margin.
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return {
@@ -799,9 +800,6 @@ export async function getEstimateDetailById(
     jobInvoiceId: invoiceId ? null : billingInvoiceId ?? null,
   };
 }
-
-/** signature_name marker for an office "Mark sold" (no customer signature). */
-const ADMIN_SIGNATURE = "(admin)";
 
 /** Name of the staff member whose `estimate_marked_sold` audit row is newest. */
 async function findMarkedSoldBy(organizationId: string, estimateId: string): Promise<string | null> {
@@ -867,7 +865,7 @@ export async function markEstimateSold(
       status: "sold",
       soldOptionId: optionId,
       signedAt: now,
-      signatureName: ADMIN_SIGNATURE,
+      signatureName: OFFICE_SIGNATURE,
       soldVia: "office",
       soldBy,
       updatedAt: now,

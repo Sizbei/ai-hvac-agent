@@ -12,10 +12,6 @@ const MAP: Record<EquipmentReason, Shape> = {
   stale: { status: 409, code: "STALE", message: "This job changed. Try again." },
 };
 
-export function equipmentError(reason: EquipmentReason): Shape {
-  return { ...MAP[reason] };
-}
-
 export function equipmentReasonResult(reason: EquipmentReason): RunResult {
   const { status, code, message } = MAP[reason];
   return { status, envelope: { success: false, error: { message, code } } };

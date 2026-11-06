@@ -14,6 +14,7 @@ import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
+import { INT32_MAX } from "@/lib/tech/estimate-input";
 import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { invoiceStateEnum } from "@/lib/db/schema";
 
@@ -70,7 +71,6 @@ export async function GET(request: NextRequest) {
     // Reject out-of-range amount filters with a 400: silently dropping them
     // would make the UI show all invoices as if no filter were applied,
     // which is confusing and potentially misleading.
-    const INT32_MAX = 2_147_483_647;
     const inCentsRange = (n: number) => Number.isFinite(n) && n >= 0 && n <= INT32_MAX;
 
     const rawMinStr = sp.get("minCents");

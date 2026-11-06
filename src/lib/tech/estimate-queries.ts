@@ -43,7 +43,7 @@ export function optionsSql(org: string, rid: string): SQL {
     ORDER BY o.sort_order, o.id`;
 }
 
-export function linesSql(org: string, rid: string): SQL {
+export function estimateLinesSql(org: string, rid: string): SQL {
   return sql`SELECT l.id, l.option_id, l.pricebook_item_id, l.name, l.quantity, l.unit_price_cents, l.line_total_cents
     FROM estimate_line_items l JOIN estimate_options o ON o.id = l.option_id JOIN estimates e ON e.id = o.estimate_id
     WHERE l.organization_id = ${org}::uuid AND o.organization_id = ${org}::uuid AND e.organization_id = ${org}::uuid
@@ -140,7 +140,7 @@ export async function getTechEstimatesView(
     findActiveVisit(org, rid),
     rows(estimatesSql(org, rid, me)),
     rows(optionsSql(org, rid)),
-    rows(linesSql(org, rid)),
+    rows(estimateLinesSql(org, rid)),
     rows(jobInvoiceSql(org, rid)),
     rows(priorPaidSql(org, rid)),
     getDefaultTaxBps(org),

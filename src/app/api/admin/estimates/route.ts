@@ -19,11 +19,9 @@ import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logger } from "@/lib/logger";
+import { INT32_MAX } from "@/lib/tech/estimate-input";
 import { MAX_PRICE_CENTS } from "@/lib/admin/money-format";
 import { computeOptionTotals, lineTotalCents } from "@/lib/admin/money";
-
-/** Ceiling of a signed int4 — the width of every money column on estimates. */
-const INT32_MAX = 2_147_483_647;
 
 /** Generous vs any real estimate line — mirrors the purchase-order quantity cap
  * (inventory/purchase-orders/route.ts) and keeps quantity*price sane. */

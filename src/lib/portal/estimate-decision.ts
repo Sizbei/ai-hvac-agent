@@ -4,8 +4,7 @@
  * price, date, signer) instead of "already decided / nothing more to do".
  */
 
-/** signatureName stamped by the admin "mark sold" path — not a customer signer. */
-const OFFICE_SIGNATURE = "(admin)";
+import { OFFICE_SIGNATURE } from "@/lib/tech/estimate-input";
 
 export interface EstimateDecisionInput {
   readonly status: string;

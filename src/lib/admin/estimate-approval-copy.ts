@@ -5,7 +5,7 @@
  * reads "Marked sold by <admin name>"; portal and pre-M3c rows read as today.
  * Names are `strong` segments (today's bold names). Pure.
  */
-const OFFICE_SIGNATURE = "(admin)";
+import { OFFICE_SIGNATURE } from "@/lib/tech/estimate-input";
 
 export interface ApprovalSegment {
   readonly text: string;

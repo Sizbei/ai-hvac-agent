@@ -231,8 +231,9 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   yet on a non-void native invoice of the request (`invoice_line_items.
   job_material_id`, ids `materialLineId(invoice, material)`). Adding a material
   that is already billed → 409 `ALREADY_BILLED`, across invoices. A second
-  invoice after a paid one seeds only the unbilled materials. Sold-estimate
-  jobs bill materials through the office.
+  invoice after a paid one seeds only the unbilled materials. A sold-estimate job bills on
+  the phone: the field bill (M3c) puts the estimate's lines on the job's draft, and
+  materials still seed through the normal create above.
 - **Target scope:** lines and finalize need the request's newest live invoice,
   else 409 `STALE`. Payments and pay link accept any non-void native invoice
   of the request; the writer then refuses `INVOICE_NOT_CHARGEABLE`. Both
@@ -306,11 +307,25 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   stored tax (`optionTaxLabel`). The technician's failure note shows only once the layer closes
   (`techNoteVisible`). Unknown writes on every M3c surface read `MAY_NOT_HAVE_SAVED`.
 - **Customer view:** `#customer` via native pushState/popstate (`layerStep`); Back closes
-  onto the estimate page, never further; a reload reopens the layer only while sellable,
-  else strips the hash; a reload that reopens it runs replaceState (strip) then
-  pushState('#customer'), so every close is one Back (spec deviation; a reload on an
-  already-pushed entry leaves one extra estimate-page entry). Customer-facing failures
-  read "Something went wrong. Please hand the phone back to your technician." only.
+  onto the estimate page, never further; a reload reopens the layer only while sellable
+  AND no stored intent for the estimate is unanswered (`left === 0`), else strips the hash;
+  a reload that reopens it runs replaceState (strip) then pushState('#customer'), so every
+  close is one Back (spec deviation; a reload on an already-pushed entry leaves one extra
+  estimate-page entry). Customer-facing failures read "Something went wrong. Please hand
+  the phone back to your technician." only; the technician reads the real reason on the page
+  after the layer closes (`saleFailNote`, `techNoteVisible`). Money locks: after an unknown
+  sell the page stays locked behind `MAY_NOT_HAVE_SAVED` with Try again, which re-sends the
+  stored sell (old body, old key); a second Approve after an unknown sell never shows a blind
+  success (`approveFirst`); a refetch that makes the estimate unsellable closes an open layer
+  unless a sale started in it (`layerStale`); the whole page is locked while a sell is `sent`
+  or `unknown` (`pageLocked`).
+- **Builder:** adding a pricebook item already on the option adds to its quantity (capped at
+  999) instead of a second line (`addLine`); the add-item sheet shows no rows while the query
+  differs from the one its hits answer (`hitsUsable`). When the re-sent earlier body lands
+  (`resentOld`), the builder says `EARLIER_SAVE_WON` ("Your earlier save went through. Your
+  newer edits weren't saved.") with an "Open the estimate" button and does not navigate on
+  its own. One Subtotal · Tax · Total formatter (`totalsLine`) serves the builder, the
+  estimate page and the customer view.
 - **Keys:** estimate/equipment intents live under `tech:estimate:<rid>:intents`
   (`useIdempotencyKey({ storageKey, rehydrate })`); the builder, the estimate page and the
   equipment card re-send stored intents on mount (`recoverEstimateIntents`) and stay
@@ -320,7 +335,13 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
 - **Equipment:** location rule `(r.location_id IS NULL OR ce.location_id IS NULL OR
   ce.location_id = r.location_id)` in the GET and every write; replace = lock old →
   insert while old is live → retire old only when this transaction wrote the new row.
-  Install date stored as noon Eastern.
+  Install date stored as noon Eastern. An "Other" unit's description (`notes`) shows under its
+  type on the card (`unitDescription`). The add/replace tail SELECTs re-check the customer and
+  the on-job predicate, so a replay by a technician taken off the job answers NOT_FOUND
+  (replace) or STALE (add) instead of the stored success.
+- **Erasure:** customer erasure scrubs `signature_name` / `signature_ip` on the customer's
+  estimates and on estimates of the customer's requests; `sold_by` is a technician id, not
+  customer data, and is kept (lead ruling).
 - **Verify:** `npx vitest run src/lib/tech/estimate-*.test.ts src/lib/tech/equipment-*.test.ts src/lib/tech/customer-view-state.test.ts "src/app/api/tech/jobs/[id]/estimates" "src/app/api/tech/jobs/[id]/equipment"`;
   dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-estimate.test.ts`.
 

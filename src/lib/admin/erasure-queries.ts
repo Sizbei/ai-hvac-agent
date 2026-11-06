@@ -333,11 +333,11 @@ export async function anonymizeCustomer(
           ),
         ),
       ),
-    // Estimates: drop the e-signature name + IP and who sold it, on the
+    // Estimates: drop the e-signature name + IP (sold_by is a technician id, kept), on the
     // customer's own estimates OR any estimate on the customer's requests.
     db
       .update(estimates)
-      .set({ signatureName: null, signatureIp: null, soldBy: null })
+      .set({ signatureName: null, signatureIp: null })
       .where(withTenant(estimates, organizationId, estimateSignatureMatch)),
     // Detach + scrub the chat sessions (the messages are already deleted
     // above). metadata holds the plaintext intake slots (name, phone, email,

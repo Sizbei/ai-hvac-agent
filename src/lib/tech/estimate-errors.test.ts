@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateError, estimateReasonResult } from "./estimate-errors";
+import { estimateReasonResult } from "./estimate-errors";
 import { isStorable } from "@/lib/http/idempotency";
 
 describe("estimate route reasons (spec §4–§5)", () => {
@@ -22,7 +22,7 @@ describe("estimate route reasons (spec §4–§5)", () => {
     ["invoice_locked", 409, "INVOICE_LOCKED", "The job's invoice is already finalized. Ask the office to bill this estimate."],
     ["invoice_changed", 409, "INVOICE_CHANGED", "The job's invoice changed. Try again."],
   ] as const)("%s → %i %s", (reason, status, code, message) => {
-    expect(estimateError(reason)).toEqual({ status, code, message });
+    expect(estimateReasonResult(reason)).toEqual({ status, envelope: { success: false, error: { message, code } } });
   });
 
   it("ALREADY_BILLED carries the invoice id", () => {

@@ -313,7 +313,7 @@ describe("anonymizeCustomer", () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
     const est = opFor("estimates");
-    expect(est?.set).toEqual({ signatureName: null, signatureIp: null, soldBy: null });
+    expect(est?.set).toEqual({ signatureName: null, signatureIp: null });
     const [match] = est?.cond as TaggedCondition[];
     expect(match.op).toBe("or");
     expect(match.args).toHaveLength(2);

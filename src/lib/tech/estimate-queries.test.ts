@@ -5,7 +5,7 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/crypto", () => ({ decrypt: (s: string) => s }));
 vi.mock("@/lib/admin/org-config-queries", () => ({ getOrgConfig: vi.fn() }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: vi.fn(), getPricebookItemById: vi.fn() }));
-import { assembleEstimates, estimatesSql, jobInvoiceSql, linesSql, optionsSql, shownCustomerName } from "./estimate-queries";
+import { assembleEstimates, estimatesSql, jobInvoiceSql, estimateLinesSql, optionsSql, shownCustomerName } from "./estimate-queries";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const RID = "22222222-2222-4222-8222-222222222222";
@@ -25,11 +25,11 @@ describe("tech estimates GET SQL (spec §6)", () => {
     expect(q(estimatesSql(ORG, RID, ME)).params.filter((p) => p === ORG).length).toBeGreaterThanOrEqual(1 + 1 + 4 + 1 + 4);
   });
   it("options and lines never select a cost; every table is org-bound", () => {
-    for (const s of [optionsSql(ORG, RID), linesSql(ORG, RID)]) {
+    for (const s of [optionsSql(ORG, RID), estimateLinesSql(ORG, RID)]) {
       expect(render(s)).not.toContain("cost");
     }
-    expect(q(linesSql(ORG, RID)).params.filter((p) => p === ORG)).toHaveLength(3);
-    expect(render(linesSql(ORG, RID))).toContain("ORDER BY l.id");
+    expect(q(estimateLinesSql(ORG, RID)).params.filter((p) => p === ORG)).toHaveLength(3);
+    expect(render(estimateLinesSql(ORG, RID))).toContain("ORDER BY l.id");
   });
   it("the job's invoice is the newest live native one", () => {
     const t = render(jobInvoiceSql(ORG, RID));

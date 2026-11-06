@@ -35,10 +35,6 @@ const MAP: Record<EstimateRouteReason, Shape> = {
   invoice_changed: { status: 409, code: "INVOICE_CHANGED", message: "The job's invoice changed. Try again." },
 };
 
-export function estimateError(reason: EstimateRouteReason): Shape {
-  return { ...MAP[reason] };
-}
-
 export function estimateReasonResult(reason: EstimateRouteReason, details?: Record<string, unknown>): RunResult {
   const { status, code, message } = MAP[reason];
   return { status, envelope: { success: false, error: details ? { message, code, details } : { message, code } } };

@@ -12,6 +12,7 @@
  */
 import { sql, type SQL } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
+import { INT32_MAX } from "@/lib/tech/estimate-input";
 import { db } from "@/lib/db";
 import { getDefaultTaxBps, getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { materialLineId } from "@/lib/http/idempotency";
@@ -348,7 +349,6 @@ export type BillResult =
   | { ok: true; invoiceId: string; added: number; hasMaterials: boolean }
   | { ok: false; reason: BillReason; invoiceId?: string };
 
-const INT32_MAX = 2_147_483_647;
 const BILL_IN = statusInSql(BILL_STATUSES);
 
 /** subtotal + its tax would not fit an int4 money column. */
