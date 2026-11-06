@@ -1,5 +1,6 @@
 'use client';
 
+import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
@@ -25,8 +26,9 @@ interface RequestTableProps {
   readonly onClearFilters?: () => void;
 }
 
+/** Submitted day in business time, like the sheet and calendar (not the viewer's zone). */
 function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString();
+  return new Date(dateString).toLocaleDateString('en-US', { timeZone: BUSINESS_TIME_ZONE });
 }
 
 const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequest>> = [

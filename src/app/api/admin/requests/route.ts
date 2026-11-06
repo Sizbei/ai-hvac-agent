@@ -173,6 +173,7 @@ export async function POST(request: NextRequest) {
             scheduleConflictMessage({
               conflictCount: result.detail.conflicts.length,
               outsideAvailability: result.detail.outsideAvailability,
+              conflictReference: result.detail.conflicts[0]?.referenceNumber ?? null,
             }),
             "SCHEDULE_CONFLICT",
             409,

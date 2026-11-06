@@ -306,14 +306,20 @@ export function resolveJobType(issueType: IssueType, jobType: JobType | null): J
 export function scheduleConflictMessage(detail: {
   readonly conflictCount: number;
   readonly outsideAvailability: boolean;
+  /** Reference of the first clashing request, named when known. */
+  readonly conflictReference?: string | null;
 }): string {
+  const other =
+    detail.conflictCount === 1 && detail.conflictReference
+      ? `request ${detail.conflictReference}`
+      : "another job";
   if (detail.outsideAvailability && detail.conflictCount > 0) {
-    return "This time overlaps another job and is outside the technician's hours.";
+    return `This time overlaps ${other} and is outside the technician's hours.`;
   }
   if (detail.outsideAvailability) {
     return "This time is outside the technician's working hours.";
   }
-  return "This time overlaps another job for the technician.";
+  return `This time overlaps ${other} for the technician.`;
 }
 
 /** Open/capacity counts for one band from an availability payload. */
@@ -487,4 +493,30 @@ export function isDraftDirty(draft: CreateRequestDraft, searchInput = ""): boole
     text.some((v) => v.trim() !== "") ||
     (draft.tagTypeIds?.length ?? 0) > 0
   );
+}
+
+// ── Form errors (round-2 P1-3) ─────────────────────────────────────────────
+
+/** Order the New request form lists its fields in; focus goes to the first invalid one. */
+export const CREATE_FORM_FIELDS = ["customer", "address", "issueType", "description"] as const;
+export type CreateFormField = (typeof CREATE_FORM_FIELDS)[number];
+
+/** Errors to show: the ones from the last submit that the form still has.
+ * A field the dispatcher has since fixed drops its message straight away. */
+export function pruneFixedErrors<K extends string>(
+  shown: Partial<Record<K, string>>,
+  current: Partial<Record<K, string>>,
+): Partial<Record<K, string>> {
+  const out: Partial<Record<K, string>> = {};
+  for (const key of Object.keys(shown) as K[]) {
+    if (shown[key] && current[key]) out[key] = shown[key];
+  }
+  return out;
+}
+
+/** The first field (in form order) with an error, or null. */
+export function firstInvalidField(
+  errors: Partial<Record<CreateFormField, string>>,
+): CreateFormField | null {
+  return CREATE_FORM_FIELDS.find((f) => Boolean(errors[f])) ?? null;
 }

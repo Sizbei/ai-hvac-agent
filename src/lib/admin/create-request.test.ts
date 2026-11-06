@@ -403,3 +403,32 @@ describe("past windows (round-2 P1-2)", () => {
     expect(initialVisitDay(null, days, windows, EVENING_NOV5)).toBe("2026-11-06");
   });
 });
+
+describe("New request form errors (round-2 P1-3)", () => {
+  it("drops a message once its field is fixed, keeps the rest", async () => {
+    const { pruneFixedErrors } = await import("./create-request");
+    const shown = { customer: "Pick a customer.", address: "Enter the service address.", description: "Describe the job." };
+    // The dispatcher picked a customer (which filled the address); the description is still empty.
+    expect(pruneFixedErrors(shown, { description: "Describe the job." })).toEqual({ description: "Describe the job." });
+    // Never adds a message the dispatcher hasn't been shown yet.
+    expect(pruneFixedErrors({}, { address: "Enter the service address." })).toEqual({});
+  });
+
+  it("firstInvalidField follows the form order", async () => {
+    const { firstInvalidField } = await import("./create-request");
+    expect(firstInvalidField({ description: "x", address: "y" })).toBe("address");
+    expect(firstInvalidField({ issueType: "x" })).toBe("issueType");
+    expect(firstInvalidField({})).toBeNull();
+  });
+});
+
+describe("scheduleConflictMessage names the clash (round-2 P2-2)", () => {
+  it("names a single clashing request, stays generic for several", () => {
+    expect(scheduleConflictMessage({ conflictCount: 1, outsideAvailability: false, conflictReference: "HVAC-810C7763" })).toBe(
+      "This time overlaps request HVAC-810C7763 for the technician.",
+    );
+    expect(scheduleConflictMessage({ conflictCount: 2, outsideAvailability: false, conflictReference: "HVAC-810C7763" })).toBe(
+      "This time overlaps another job for the technician.",
+    );
+  });
+});

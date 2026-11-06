@@ -192,7 +192,7 @@ export function scoreTechnician(
   if (tech.avgJobRevenueCents > 0) {
     reasons.push(`$${Math.round(tech.avgJobRevenueCents / 100)} avg ticket`);
   }
-  reasons.push(plural(tech.sameDayJobCount, 'request today', 'requests today'));
+  reasons.push(plural(tech.sameDayJobCount, 'request that day', 'requests that day'));
 
   return {
     technicianId: tech.technicianId,

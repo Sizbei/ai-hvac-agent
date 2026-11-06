@@ -43,7 +43,8 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!isConfirming) onOpenChange(next); }}>
-      <DialogContent className="max-w-sm">
+      {/* alertdialog: a confirmation that interrupts, announced as such. */}
+      <DialogContent className="max-w-sm" role="alertdialog">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

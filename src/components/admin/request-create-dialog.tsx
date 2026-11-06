@@ -32,7 +32,9 @@ import {
   JOB_TYPE_LABELS,
   URGENCY_LABELS,
   buildCreateRequestPayload,
+  firstInvalidField,
   firstOpenDay,
+  pruneFixedErrors,
   isDraftDirty,
   type CreateRequestDraft,
 } from '@/lib/admin/create-request';
@@ -216,7 +218,7 @@ export function RequestCreateDialog({
   const [searchInput, setSearchInput] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
-  // Time off is never overridable, so its conflict hides "Schedule anyway?".
+  // Time off is never overridable, so its conflict hides "Schedule anyway".
   const [conflict, setConflict] = useState<{ message: string; overridable: boolean } | null>(null);
   const [notice, setNotice] = useState<{ id: string; message: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -333,7 +335,20 @@ export function RequestCreateDialog({
     setServerError(null);
     const found = validate(draft, newCustomerMode);
     setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    const firstInvalid = firstInvalidField(found);
+    if (firstInvalid) {
+      // Move focus to the first field that needs fixing (after the render that shows its message).
+      requestAnimationFrame(() => {
+        const selector: Record<typeof firstInvalid, string> = {
+          customer: newCustomerMode ? '#nr-name' : 'input[aria-label="Search customers"]',
+          address: '#nr-address',
+          issueType: '[aria-labelledby="nr-issue-label"]',
+          description: '#nr-description',
+        };
+        document.querySelector<HTMLElement>(`#new-request-form ${selector[firstInvalid]}`)?.focus();
+      });
+      return;
+    }
     if (submittingRef.current) return;
     submittingRef.current = true;
     setIsSubmitting(true);
@@ -382,6 +397,8 @@ export function RequestCreateDialog({
   }
 
   const customerErrorId = 'new-request-customer-error';
+  // A message from the last submit stays only while its field is still wrong.
+  const shownErrors = pruneFixedErrors(errors, validate(draft, newCustomerMode));
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : requestClose())}>
@@ -433,8 +450,8 @@ export function RequestCreateDialog({
                       id="nr-name"
                       value={draft.newCustomer.name}
                       onChange={(e) => patch({ newCustomer: { ...draft.newCustomer, name: e.target.value } })}
-                      aria-invalid={Boolean(errors.customer)}
-                      aria-describedby={errors.customer ? customerErrorId : undefined}
+                      aria-invalid={Boolean(shownErrors.customer)}
+                      aria-describedby={shownErrors.customer ? customerErrorId : undefined}
                       placeholder="Jordan Smith"
                       autoComplete="off"
                     />
@@ -479,8 +496,8 @@ export function RequestCreateDialog({
                       onChange={(e) => setSearchInput(e.target.value)}
                       placeholder="Search by name, phone, email or address"
                       aria-label="Search customers"
-                      aria-invalid={Boolean(errors.customer)}
-                      aria-describedby={errors.customer ? customerErrorId : undefined}
+                      aria-invalid={Boolean(shownErrors.customer)}
+                      aria-describedby={shownErrors.customer ? customerErrorId : undefined}
                       className="pl-9"
                       autoFocus
                     />
@@ -532,7 +549,7 @@ export function RequestCreateDialog({
                   </Button>
                 </div>
               )}
-              <FieldError id={customerErrorId} message={errors.customer} />
+              <FieldError id={customerErrorId} message={shownErrors.customer} />
             </fieldset>
 
             {/* ── Job ── */}
@@ -544,12 +561,12 @@ export function RequestCreateDialog({
                   id="nr-address"
                   value={draft.address}
                   onChange={(e) => patch({ address: e.target.value, locationId: '' })}
-                  aria-invalid={Boolean(errors.address)}
-                  aria-describedby={errors.address ? 'nr-address-error' : undefined}
+                  aria-invalid={Boolean(shownErrors.address)}
+                  aria-describedby={shownErrors.address ? 'nr-address-error' : undefined}
                   placeholder="123 Main St, Johnson City, TN 37601"
                   autoComplete="off"
                 />
-                <FieldError id="nr-address-error" message={errors.address} />
+                <FieldError id="nr-address-error" message={shownErrors.address} />
               </div>
               {draft.customerId && (
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -612,7 +629,7 @@ export function RequestCreateDialog({
                     <SelectTrigger
                       className="w-full"
                       aria-labelledby="nr-issue-label"
-                      aria-invalid={Boolean(errors.issueType)}
+                      aria-invalid={Boolean(shownErrors.issueType)}
                     >
                       <SelectValue placeholder="Pick one" />
                     </SelectTrigger>
@@ -624,7 +641,7 @@ export function RequestCreateDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FieldError id="nr-issue-error" message={errors.issueType} />
+                  <FieldError id="nr-issue-error" message={shownErrors.issueType} />
                 </div>
                 <div className="space-y-1.5">
                   <Label id="nr-jobtype-label">Job type</Label>
@@ -684,11 +701,11 @@ export function RequestCreateDialog({
                   maxLength={DESCRIPTION_MAX}
                   value={draft.description}
                   onChange={(e) => patch({ description: e.target.value })}
-                  aria-invalid={Boolean(errors.description)}
-                  aria-describedby={errors.description ? 'nr-description-error' : undefined}
+                  aria-invalid={Boolean(shownErrors.description)}
+                  aria-describedby={shownErrors.description ? 'nr-description-error' : undefined}
                   placeholder="What the customer reported"
                 />
-                <FieldError id="nr-description-error" message={errors.description} />
+                <FieldError id="nr-description-error" message={shownErrors.description} />
               </div>
               <div className="space-y-1.5">
                 <Label>Tags</Label>
@@ -755,7 +772,7 @@ export function RequestCreateDialog({
                 <div className="flex gap-2">
                   {conflict.overridable && (
                     <Button type="button" size="sm" onClick={() => void submit(true)} disabled={isSubmitting}>
-                      Schedule anyway?
+                      Schedule anyway
                     </Button>
                   )}
                   <Button type="button" size="sm" variant="outline" onClick={() => setConflict(null)}>
