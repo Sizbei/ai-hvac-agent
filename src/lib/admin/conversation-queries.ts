@@ -25,6 +25,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { notStandInSession } from "./stand-in-session";
+import { sessionContactMatches, sessionPhoneDigitsMatch } from "./session-contact-search";
 import {
   customerNameFromMetadata,
   needsAction,
@@ -188,16 +189,16 @@ export async function getConversations(
     // literally instead of becoming a wildcard that full-scans messages.content.
     const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
     const pattern = `%${escaped}%`;
-    // A phone-shaped search also matches the digits of the captured phone
-    // (metadata) and the SMS token, however the number was formatted.
+    // A phone-shaped search also matches the digits of the captured phone and
+    // of an SMS thread's number, however the number was formatted.
     const digits = phoneDigitsQuery(search);
     const digitsMatch = digits
-      ? sql`OR regexp_replace(coalesce(${customerSessions.metadata}, '') || ' ' || ${customerSessions.token}, '[^0-9]', '', 'g') LIKE ${`%${digits}%`}`
+      ? sql`OR ${sessionPhoneDigitsMatch(customerSessions.metadata, customerSessions.token, digits)}`
       : sql``;
     conditions.push(
       sql`(
         ${customerSessions.id}::text ILIKE ${pattern}
-        OR coalesce(${customerSessions.metadata}, '') ILIKE ${pattern}
+        OR ${sessionContactMatches(customerSessions.metadata, pattern)}
         OR EXISTS (
           SELECT 1 FROM ${serviceRequests}
           WHERE ${serviceRequests.sessionId} = ${customerSessions.id}

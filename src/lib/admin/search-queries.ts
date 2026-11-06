@@ -13,6 +13,7 @@ import { decrypt } from "@/lib/crypto";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
 import { issueTypeLabel, humanizeCode } from "@/lib/admin/request-labels";
 import { notStandInSession } from "@/lib/admin/stand-in-session";
+import { sessionContactMatches } from "@/lib/admin/session-contact-search";
 import { customerNameFromMetadata } from "@/lib/admin/conversation-display";
 
 export type SearchResult = {
@@ -211,7 +212,7 @@ export async function searchConversations(
         organizationId,
         notStandInSession(customerSessions.token),
         sql`(
-            coalesce(${customerSessions.metadata}, '') ILIKE ${pattern}
+            ${sessionContactMatches(customerSessions.metadata, pattern)}
             OR EXISTS (
               SELECT 1 FROM ${serviceRequests}
               WHERE ${serviceRequests.sessionId} = ${customerSessions.id}
