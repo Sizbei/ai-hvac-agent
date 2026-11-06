@@ -393,6 +393,13 @@
       "when": 1793880785578,
       "tag": "0055_conversation_handled",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793927152374,
+      "tag": "0056_erased_session_scrub",
+      "breakpoints": true
     }
   ]
 }
