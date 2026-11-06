@@ -143,38 +143,36 @@ export async function listInventory(
   return { items, total: countResult[0]?.n ?? 0 };
 }
 
-export interface UpsertInventoryInput {
+export interface InventoryFieldsInput {
   readonly quantityOnHand?: number;
   readonly reorderPoint?: number | null;
   readonly unitCostCents?: number;
   readonly location?: string | null;
 }
 
+/** The pricebook ids of every material this org already tracks. */
+export async function listTrackedPricebookItemIds(
+  organizationId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ pricebookItemId: inventoryItems.pricebookItemId })
+    .from(inventoryItems)
+    .where(eq(inventoryItems.organizationId, organizationId));
+  return rows.map((r) => r.pricebookItemId);
+}
+
 /**
- * Create or update the stock row for a pricebook material. Upserts on the
- * (org, pricebookItem) unique index so an item is tracked exactly once. Only
- * the provided fields are written on conflict.
+ * Start tracking a pricebook material. Insert-only: when the material is
+ * already tracked the existing row is left exactly as it is and this returns
+ * false (the caller answers 409). It never overwrites stock with form
+ * defaults.
  */
-export async function upsertInventoryItem(
+export async function createInventoryItem(
   organizationId: string,
   pricebookItemId: string,
-  input: UpsertInventoryInput,
-): Promise<void> {
-  const setOnConflict: Record<string, unknown> = { updatedAt: new Date() };
-  if (input.quantityOnHand !== undefined) {
-    setOnConflict.quantityOnHand = input.quantityOnHand;
-  }
-  if (input.reorderPoint !== undefined) {
-    setOnConflict.reorderPoint = input.reorderPoint;
-  }
-  if (input.unitCostCents !== undefined) {
-    setOnConflict.unitCostCents = input.unitCostCents;
-  }
-  if (input.location !== undefined) {
-    setOnConflict.location = input.location;
-  }
-
-  await db
+  input: InventoryFieldsInput,
+): Promise<boolean> {
+  const inserted = await db
     .insert(inventoryItems)
     .values({
       organizationId,
@@ -184,10 +182,40 @@ export async function upsertInventoryItem(
       unitCostCents: input.unitCostCents ?? 0,
       location: input.location ?? null,
     })
-    .onConflictDoUpdate({
+    .onConflictDoNothing({
       target: [inventoryItems.organizationId, inventoryItems.pricebookItemId],
-      set: setOnConflict,
-    });
+    })
+    .returning({ id: inventoryItems.id });
+  return inserted.length > 0;
+}
+
+/**
+ * Update an existing stock row. Only the fields provided are written; returns
+ * false when the material isn't tracked in this org.
+ */
+export async function updateInventoryItem(
+  organizationId: string,
+  pricebookItemId: string,
+  input: InventoryFieldsInput,
+): Promise<boolean> {
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.quantityOnHand !== undefined) set.quantityOnHand = input.quantityOnHand;
+  if (input.reorderPoint !== undefined) set.reorderPoint = input.reorderPoint;
+  if (input.unitCostCents !== undefined) set.unitCostCents = input.unitCostCents;
+  if (input.location !== undefined) set.location = input.location;
+
+  const updated = await db
+    .update(inventoryItems)
+    .set(set)
+    .where(
+      withTenant(
+        inventoryItems,
+        organizationId,
+        eq(inventoryItems.pricebookItemId, pricebookItemId),
+      ),
+    )
+    .returning({ id: inventoryItems.id });
+  return updated.length > 0;
 }
 
 /**

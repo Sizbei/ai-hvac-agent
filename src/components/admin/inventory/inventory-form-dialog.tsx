@@ -20,7 +20,7 @@ import { selectLabel } from '@/lib/admin/select-label';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { parseDollarsToCents } from '@/lib/admin/money-format';
+import { parseMoneyInput } from '@/lib/admin/money-format';
 import type { InventoryItem } from '@/hooks/use-inventory';
 
 /** A pricebook material the inventory row links to. */
@@ -37,7 +37,10 @@ interface InventoryFormDialogProps {
   readonly onSuccess: () => void;
   /** Non-null when editing an existing tracked item; null when adding. */
   readonly editing: InventoryItem | null;
-  /** Pricebook materials available to track (shown only when adding). */
+  /**
+   * Pricebook materials available to track (shown only when adding). The
+   * caller leaves out materials that are already tracked.
+   */
   readonly materials: readonly MaterialOption[];
 }
 
@@ -102,23 +105,46 @@ export function InventoryFormDialog({
       return;
     }
 
+    let unitCostCents: number | null = null;
+    if (form.unitCost.trim()) {
+      const cost = parseMoneyInput(form.unitCost);
+      if (!cost.ok) {
+        setError(cost.error);
+        return;
+      }
+      unitCostCents = cost.cents;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const payload = {
-        pricebookItemId: form.pricebookItemId,
-        quantityOnHand: form.quantityOnHand.trim()
-          ? parseInt(form.quantityOnHand, 10)
-          : 0,
-        reorderPoint: form.reorderPoint.trim()
-          ? parseInt(form.reorderPoint, 10)
-          : null,
-        unitCostCents: form.unitCost.trim()
-          ? parseDollarsToCents(form.unitCost)
-          : 0,
-        location: form.location.trim() || null,
-      };
+      const payload = isEditMode
+        ? {
+            pricebookItemId: form.pricebookItemId,
+            update: true,
+            quantityOnHand: form.quantityOnHand.trim()
+              ? parseInt(form.quantityOnHand, 10)
+              : 0,
+            reorderPoint: form.reorderPoint.trim()
+              ? parseInt(form.reorderPoint, 10)
+              : null,
+            unitCostCents: unitCostCents ?? 0,
+            location: form.location.trim() || null,
+          }
+        : // Adding: send only what was filled in. The server inserts and
+          // refuses (409) a material that is already tracked.
+          {
+            pricebookItemId: form.pricebookItemId,
+            ...(form.quantityOnHand.trim()
+              ? { quantityOnHand: parseInt(form.quantityOnHand, 10) }
+              : {}),
+            ...(form.reorderPoint.trim()
+              ? { reorderPoint: parseInt(form.reorderPoint, 10) }
+              : {}),
+            ...(unitCostCents !== null ? { unitCostCents } : {}),
+            ...(form.location.trim() ? { location: form.location.trim() } : {}),
+          };
 
       const res = await fetch('/api/admin/inventory', {
         method: 'POST',
@@ -128,9 +154,13 @@ export function InventoryFormDialog({
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'An unexpected error occurred' },
+          error: null,
         }));
-        setError(body?.error?.message ?? 'Failed to save stock');
+        setError(
+          body?.error?.code === 'ALREADY_TRACKED'
+            ? 'This material is already tracked. Edit its row in the list instead.'
+            : "Couldn't save the stock. Please try again.",
+        );
         return;
       }
 
@@ -194,6 +224,12 @@ export function InventoryFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {materials.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Every active pricebook material is already tracked. Add a
+                  material to the pricebook first, or edit an existing row.
+                </p>
+              )}
             </div>
           )}
 
@@ -260,7 +296,7 @@ export function InventoryFormDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : 'Save'}
+              {isSubmitting ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
         </form>

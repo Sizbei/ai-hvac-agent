@@ -3,7 +3,9 @@ import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import {
   listInventory,
-  upsertInventoryItem,
+  listTrackedPricebookItemIds,
+  createInventoryItem,
+  updateInventoryItem,
   type InventorySortKey,
 } from "@/lib/admin/inventory-queries";
 import { getPricebookItemById } from "@/lib/admin/pricebook-queries";
@@ -18,6 +20,8 @@ const upsertSchema = z.object({
   reorderPoint: z.number().int().min(0).nullable().optional(),
   unitCostCents: z.number().int().min(0).optional(),
   location: z.string().trim().max(255).nullable().optional(),
+  // "Track material" omits this (insert-only); "Edit stock" sends true.
+  update: z.boolean().optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -53,8 +57,11 @@ export async function GET(request: NextRequest) {
       ? (rawSort as InventorySortKey)
       : undefined;
 
-    const { items, total } = await listInventory(session.organizationId, { page, limit, search, belowReorder, sort });
-    return successResponse({ items, total });
+    const [{ items, total }, trackedPricebookItemIds] = await Promise.all([
+      listInventory(session.organizationId, { page, limit, search, belowReorder, sort }),
+      listTrackedPricebookItemIds(session.organizationId),
+    ]);
+    return successResponse({ items, total, trackedPricebookItemIds });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch inventory");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
@@ -92,13 +99,29 @@ export async function POST(request: NextRequest) {
       return errorResponse("Pricebook item not found", "NOT_FOUND", 404);
     }
 
-    const { pricebookItemId, ...fields } = parsed.data;
-    await upsertInventoryItem(session.organizationId, pricebookItemId, fields);
+    const { pricebookItemId, update, ...fields } = parsed.data;
+    if (update) {
+      const updated = await updateInventoryItem(session.organizationId, pricebookItemId, fields);
+      if (!updated) {
+        return errorResponse("This material isn't tracked yet.", "NOT_FOUND", 404);
+      }
+    } else {
+      // Insert-only: tracking a material that already has a stock row must
+      // never overwrite its on-hand count, reorder point or cost.
+      const created = await createInventoryItem(session.organizationId, pricebookItemId, fields);
+      if (!created) {
+        return errorResponse(
+          "This material is already tracked. Edit its row in the list instead.",
+          "ALREADY_TRACKED",
+          409,
+        );
+      }
+    }
 
     await logAudit({
       organizationId: session.organizationId,
       userId: session.userId,
-      action: "upsert_inventory_item",
+      action: update ? "update_inventory_item" : "create_inventory_item",
       entity: "inventory_item",
       entityId: pricebookItemId,
       details: Object.keys(fields).sort().join(","),
@@ -109,7 +132,7 @@ export async function POST(request: NextRequest) {
       );
     });
 
-    return successResponse({ pricebookItemId }, 200);
+    return successResponse({ pricebookItemId }, update ? 200 : 201);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to upsert inventory item");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

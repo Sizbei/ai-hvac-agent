@@ -74,6 +74,7 @@ export default function InventoryPage() {
   const {
     inventory,
     inventoryTotal,
+    trackedPricebookItemIds,
     purchaseOrders,
     isLoading,
     error,
@@ -92,6 +93,13 @@ export default function InventoryPage() {
         .map((i) => ({ id: i.id, name: i.name, costCents: i.costCents })),
     [pricebookItems],
   );
+
+  // Track material offers only materials with no stock row yet — picking a
+  // tracked one used to overwrite its counts (the server now refuses, 409).
+  const untrackedMaterials = useMemo(() => {
+    const tracked = new Set(trackedPricebookItemIds);
+    return materials.filter((m) => !tracked.has(m.id));
+  }, [materials, trackedPricebookItemIds]);
 
   const totalPages = Math.max(1, Math.ceil(inventoryTotal / PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -197,7 +205,7 @@ export default function InventoryPage() {
         onClose={() => setFormOpen(false)}
         onSuccess={handleRefetch}
         editing={editing}
-        materials={materials}
+        materials={untrackedMaterials}
       />
     </PageShell>
   );

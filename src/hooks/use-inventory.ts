@@ -29,6 +29,8 @@ export interface PurchaseOrderSummary {
 interface InventoryPayload {
   readonly items: readonly InventoryItem[];
   readonly total: number;
+  /** Every pricebook id the org already tracks (not just this page). */
+  readonly trackedPricebookItemIds: readonly string[];
 }
 
 interface PurchaseOrderPayload {
@@ -52,6 +54,7 @@ interface UseInventoryParams {
 interface UseInventoryResult {
   readonly inventory: readonly InventoryItem[];
   readonly inventoryTotal: number;
+  readonly trackedPricebookItemIds: readonly string[];
   readonly purchaseOrders: readonly PurchaseOrderSummary[];
   readonly purchaseOrdersTotal: number;
   readonly isLoading: boolean;
@@ -83,6 +86,9 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
   const [inventoryTotal, setInventoryTotal] = useState(
     () => inventoryCache.get(invKey)?.data.total ?? 0,
   );
+  const [trackedPricebookItemIds, setTrackedIds] = useState<readonly string[]>(
+    () => inventoryCache.get(invKey)?.data.trackedPricebookItemIds ?? [],
+  );
   const [purchaseOrders, setPurchaseOrders] = useState<readonly PurchaseOrderSummary[]>(
     () => poCache.get(poKey)?.data.purchaseOrders ?? [],
   );
@@ -111,6 +117,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
       if (cachedInv && cachedPo) {
         setInventory(cachedInv.data.items);
         setInventoryTotal(cachedInv.data.total);
+        setTrackedIds(cachedInv.data.trackedPricebookItemIds);
         setPurchaseOrders(cachedPo.data.purchaseOrders);
         setPurchaseOrdersTotal(cachedPo.data.total);
         return;
@@ -149,7 +156,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
 
         const invBody = (await invRes.json()) as {
           success: boolean;
-          data: { items: InventoryItem[]; total: number };
+          data: { items: InventoryItem[]; total: number; trackedPricebookItemIds?: string[] };
         };
         const poBody = (await poRes.json()) as {
           success: boolean;
@@ -160,11 +167,14 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         if (seq !== fetchSeqRef.current) return;
 
         if (invBody.success) {
+          const trackedIds = invBody.data.trackedPricebookItemIds ?? [];
           setInventory(invBody.data.items);
           setInventoryTotal(invBody.data.total);
+          setTrackedIds(trackedIds);
           inventoryCache.set(invKey, {
             items: invBody.data.items,
             total: invBody.data.total,
+            trackedPricebookItemIds: trackedIds,
           });
         }
         if (poBody.success) {
@@ -202,6 +212,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
   return {
     inventory,
     inventoryTotal,
+    trackedPricebookItemIds,
     purchaseOrders,
     purchaseOrdersTotal,
     isLoading,

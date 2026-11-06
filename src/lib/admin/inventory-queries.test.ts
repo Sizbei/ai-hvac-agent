@@ -5,6 +5,8 @@ import {
   createPurchaseOrder,
   receivePurchaseOrder,
   adjustStock,
+  createInventoryItem,
+  updateInventoryItem,
 } from "./inventory-queries";
 import { db } from "@/lib/db";
 
@@ -368,5 +370,52 @@ describe("adjustStock", () => {
   it("is a no-op for a zero delta (no DB write)", async () => {
     await adjustStock(ORG, "pb-1", 0);
     expect(db.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("createInventoryItem (Track material)", () => {
+  it("is insert-only: on conflict it does nothing and reports false", async () => {
+    const onConflictDoNothing = vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) }));
+    const onConflictDoUpdate = vi.fn();
+    const values = vi.fn(() => ({ onConflictDoNothing, onConflictDoUpdate }));
+    vi.mocked(db.insert).mockReturnValue({ values } as never);
+
+    const created = await createInventoryItem(ORG, "pb-1", {});
+
+    expect(created).toBe(false);
+    expect(onConflictDoNothing).toHaveBeenCalledOnce();
+    expect(onConflictDoUpdate).not.toHaveBeenCalled();
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORG, pricebookItemId: "pb-1", quantityOnHand: 0 }),
+    );
+  });
+
+  it("reports true when a new row was inserted", async () => {
+    const returning = vi.fn().mockResolvedValue([{ id: "inv-1" }]);
+    vi.mocked(db.insert).mockReturnValue({
+      values: () => ({ onConflictDoNothing: () => ({ returning }) }),
+    } as never);
+    expect(await createInventoryItem(ORG, "pb-1", { unitCostCents: 2000 })).toBe(true);
+  });
+});
+
+describe("updateInventoryItem (Edit stock)", () => {
+  it("writes only the fields provided", async () => {
+    const returning = vi.fn().mockResolvedValue([{ id: "inv-1" }]);
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    vi.mocked(db.update).mockReturnValue({ set } as never);
+
+    expect(await updateInventoryItem(ORG, "pb-1", { quantityOnHand: 4 })).toBe(true);
+    const written = (set.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    expect(Object.keys(written).sort()).toEqual(["quantityOnHand", "updatedAt"]);
+    expect(where).toHaveBeenCalledOnce();
+  });
+
+  it("reports false when the material isn't tracked", async () => {
+    vi.mocked(db.update).mockReturnValue({
+      set: () => ({ where: () => ({ returning: vi.fn().mockResolvedValue([]) }) }),
+    } as never);
+    expect(await updateInventoryItem(ORG, "pb-1", { quantityOnHand: 4 })).toBe(false);
   });
 });
