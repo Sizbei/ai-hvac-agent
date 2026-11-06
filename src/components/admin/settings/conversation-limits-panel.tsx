@@ -22,10 +22,14 @@ import {
   MAX_TURNS_MAX,
 } from '@/lib/ai/chat-limits';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
+import { hasUnsavedChanges } from '@/lib/admin/unsaved-changes';
+import { useReportDirty } from '@/hooks/use-unsaved-changes-guard';
 
 interface ConversationLimitsPanelProps {
   readonly config: OrgConfig;
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
+  /** Called when the draft starts or stops differing from what's saved. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
 /** Empty input → null (reset to default). A parseable in-range int → that int.
@@ -45,6 +49,7 @@ function parseLimit(
 export function ConversationLimitsPanel({
   config,
   onSave,
+  onDirtyChange,
 }: ConversationLimitsPanelProps) {
   const [budget, setBudget] = useState(
     config.chatTokenBudget != null ? String(config.chatTokenBudget) : '',
@@ -55,6 +60,14 @@ export function ConversationLimitsPanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dirty = hasUnsavedChanges(
+    {
+      budget: config.chatTokenBudget != null ? String(config.chatTokenBudget) : '',
+      turns: config.chatMaxTurns != null ? String(config.chatMaxTurns) : '',
+    },
+    { budget: budget.trim(), turns: turns.trim() },
+  );
+  useReportDirty(dirty, onDirtyChange);
 
   async function handleSave(): Promise<void> {
     const parsedBudget = parseLimit(budget, TOKEN_BUDGET_MIN, TOKEN_BUDGET_MAX);

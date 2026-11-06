@@ -22,13 +22,17 @@ import {
 } from '@/lib/admin/org-config-types';
 import { settingsFieldErrorCopy } from '@/lib/admin/settings-errors';
 import { mergeBusinessInfo } from '@/lib/admin/business-info-merge';
+import { hasUnsavedChanges } from '@/lib/admin/unsaved-changes';
+import { useReportDirty } from '@/hooks/use-unsaved-changes-guard';
 
 interface BusinessInfoPanelProps {
   readonly config: OrgConfig;
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
+  /** Called when the draft starts or stops differing from what's saved. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
+export function BusinessInfoPanel({ config, onSave, onDirtyChange }: BusinessInfoPanelProps) {
   const bi = config.businessInfo;
   const [serviceArea, setServiceArea] = useState(bi.serviceArea ?? '');
   const [businessHours, setBusinessHours] = useState(bi.businessHours ?? '');
@@ -45,6 +49,30 @@ export function BusinessInfoPanel({ config, onSave }: BusinessInfoPanelProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Trimmed: the save trims, so " x" vs "x" isn't an unsaved change.
+  const dirty = hasUnsavedChanges(
+    {
+      serviceArea: (bi.serviceArea ?? '').trim(),
+      businessHours: (bi.businessHours ?? '').trim(),
+      phone: (bi.phone ?? '').trim(),
+      email: (bi.email ?? '').trim(),
+      licensedInsured: (bi.licensedInsured ?? '').trim(),
+      paymentMethods: (bi.paymentMethods ?? '').trim(),
+      website: (bi.website ?? '').trim(),
+      financing: bi.financingAvailable ?? false,
+    },
+    {
+      serviceArea: serviceArea.trim(),
+      businessHours: businessHours.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      licensedInsured: licensedInsured.trim(),
+      paymentMethods: paymentMethods.trim(),
+      website: website.trim(),
+      financing,
+    },
+  );
+  useReportDirty(dirty, onDirtyChange);
 
   async function handleSave(): Promise<void> {
     // The PATCH replaces businessInfo wholesale, so merge onto the stored

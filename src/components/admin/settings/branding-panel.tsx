@@ -28,16 +28,20 @@ import type {
   OrgConfigUpdate,
   LauncherPosition,
 } from '@/lib/admin/org-config-types';
+import { hasUnsavedChanges } from '@/lib/admin/unsaved-changes';
+import { useReportDirty } from '@/hooks/use-unsaved-changes-guard';
 
 interface BrandingPanelProps {
   readonly config: OrgConfig;
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
+  /** Called when the draft starts or stops differing from what's saved. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const DEFAULT_COLOR = '#2563eb';
 
-export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
+export function BrandingPanel({ config, onSave, onDirtyChange }: BrandingPanelProps) {
   const [companyName, setCompanyName] = useState(config.companyName ?? '');
   const [primaryColor, setPrimaryColor] = useState(
     config.primaryColor ?? DEFAULT_COLOR,
@@ -51,6 +55,23 @@ export function BrandingPanel({ config, onSave }: BrandingPanelProps) {
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const dirty = hasUnsavedChanges(
+    {
+      companyName: (config.companyName ?? '').trim(),
+      primaryColor: config.primaryColor ?? DEFAULT_COLOR,
+      welcomeMessage: (config.welcomeMessage ?? '').trim(),
+      logoUrl: (config.logoUrl ?? '').trim(),
+      launcherPosition: config.launcherPosition,
+    },
+    {
+      companyName: companyName.trim(),
+      primaryColor,
+      welcomeMessage: welcomeMessage.trim(),
+      logoUrl: logoUrl.trim(),
+      launcherPosition,
+    },
+  );
+  useReportDirty(dirty, onDirtyChange);
 
   const colorValid = HEX.test(primaryColor);
   const previewColor = colorValid ? primaryColor : DEFAULT_COLOR;

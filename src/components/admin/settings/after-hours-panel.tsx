@@ -28,13 +28,17 @@ import {
   timezoneOptions,
   type Option,
 } from '@/lib/admin/after-hours-options';
+import { hasUnsavedChanges } from '@/lib/admin/unsaved-changes';
+import { useReportDirty } from '@/hooks/use-unsaved-changes-guard';
 
 interface AfterHoursPanelProps {
   readonly config: OrgConfig;
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
+  /** Called when the draft starts or stops differing from what's saved. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
+export function AfterHoursPanel({ config, onSave, onDirtyChange }: AfterHoursPanelProps) {
   const current = config.afterHoursConfig;
   const [enabled, setEnabled] = useState(current.enabled);
   const [startHour, setStartHour] = useState(String(current.startHour));
@@ -44,6 +48,17 @@ export function AfterHoursPanel({ config, onSave }: AfterHoursPanelProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dirty = hasUnsavedChanges(
+    {
+      enabled: current.enabled,
+      startHour: String(current.startHour),
+      endHour: String(current.endHour),
+      weekends: current.weekendsAreAfterHours,
+      timezone: current.timezone,
+    },
+    { enabled, startHour, endHour, weekends, timezone },
+  );
+  useReportDirty(dirty, onDirtyChange);
 
   async function handleSave(): Promise<void> {
     const candidate = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,8 @@ import {
   unknownVariables,
   variablesForTrigger,
 } from "@/lib/admin/template-variables";
+import { hasUnsavedChanges } from "@/lib/admin/unsaved-changes";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 
 export interface Template {
   id: string;
@@ -88,32 +90,74 @@ export function TemplateEditorDialog({
   template,
   onSaved,
 }: TemplateEditorDialogProps) {
+  // Esc, the X, the backdrop and Cancel ask first when the form has edits.
+  const dirtyRef = useRef(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+
+  function close(): void {
+    dirtyRef.current = false;
+    setDiscardOpen(false);
+    onOpenChange(false);
+  }
+
+  function requestClose(): void {
+    if (dirtyRef.current) {
+      setDiscardOpen(true);
+      return;
+    }
+    close();
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => (next ? onOpenChange(true) : requestClose())}
+    >
       {/* Remount the form on each open / template change so its state
        * re-seeds from the latest props without a setState-in-effect. */}
       {open && (
         <TemplateEditorForm
           key={template?.id ?? "new"}
           template={template}
-          onOpenChange={onOpenChange}
-          onSaved={onSaved}
+          onRequestClose={requestClose}
+          onDirtyChange={(dirty) => {
+            dirtyRef.current = dirty;
+          }}
+          onSaved={() => {
+            dirtyRef.current = false;
+            onSaved();
+          }}
         />
       )}
+      <ConfirmDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard your changes?"
+        description="Your edits to this template haven't been saved and will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={close}
+      />
     </Dialog>
   );
 }
 
 function TemplateEditorForm({
   template,
-  onOpenChange,
+  onRequestClose,
+  onDirtyChange,
   onSaved,
 }: {
   readonly template: Template | null;
-  readonly onOpenChange: (open: boolean) => void;
+  readonly onRequestClose: () => void;
+  readonly onDirtyChange: (dirty: boolean) => void;
   readonly onSaved: () => void;
 }) {
   const [form, setForm] = useState(() => buildInitialForm(template));
+  const dirty = hasUnsavedChanges(buildInitialForm(template), form);
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -162,13 +206,23 @@ function TemplateEditorForm({
           {template ? "Edit template" : "Create template"}
         </DialogTitle>
         <DialogDescription>
-          Use {"{{ variable }}"} placeholders to insert customer and appointment
+          Use {"{{variable}}"} placeholders to insert customer and appointment
           details. The variables you can use depend on the trigger.
         </DialogDescription>
       </DialogHeader>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <p className="text-sm text-destructive">{error}</p>}
+
+        <div className="space-y-2">
+          <Label htmlFor="template-name">Name</Label>
+          <Input
+            id="template-name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
+        </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -205,16 +259,6 @@ function TemplateEditorForm({
               When two active templates share a trigger, the lower number is used.
             </p>
           </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="template-name">Name</Label>
-          <Input
-            id="template-name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            required
-          />
         </div>
 
         <div className="space-y-2">
@@ -337,7 +381,7 @@ function TemplateEditorForm({
           <Button
             type="button"
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={onRequestClose}
             disabled={saving}
           >
             Cancel

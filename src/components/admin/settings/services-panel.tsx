@@ -16,10 +16,14 @@ import { Label } from '@/components/ui/label';
 import { SERVICE_TAGS } from '@/lib/admin/org-config-types';
 import { issueTypeValues, type IssueType } from '@/lib/ai/extraction-schema';
 import type { OrgConfig, OrgConfigUpdate } from '@/lib/admin/org-config-types';
+import { hasUnsavedChanges } from '@/lib/admin/unsaved-changes';
+import { useReportDirty } from '@/hooks/use-unsaved-changes-guard';
 
 interface ServicesPanelProps {
   readonly config: OrgConfig;
   readonly onSave: (update: OrgConfigUpdate) => Promise<boolean>;
+  /** Called when the draft starts or stops differing from what's saved. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
 // Record<IssueType, …> so a new issue type fails the build until it has a label.
@@ -49,7 +53,7 @@ const TAG_LABELS: Record<string, string> = {
   duct_cleaning: 'Duct cleaning',
 };
 
-export function ServicesPanel({ config, onSave }: ServicesPanelProps) {
+export function ServicesPanel({ config, onSave, onDirtyChange }: ServicesPanelProps) {
   // We store the DISABLED sets but present them as "offered" toggles (on = we
   // offer it), which is the natural mental model for an admin.
   const [disabledIssues, setDisabledIssues] = useState<Set<string>>(
@@ -60,6 +64,11 @@ export function ServicesPanel({ config, onSave }: ServicesPanelProps) {
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const dirty = hasUnsavedChanges(
+    { issues: config.disabledIssueTypes, tags: config.disabledServiceTags },
+    { issues: [...disabledIssues], tags: [...disabledTags] },
+  );
+  useReportDirty(dirty, onDirtyChange);
 
   function toggle(
     set: Set<string>,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -46,6 +46,24 @@ import { setupStepForTab } from '@/lib/admin/setup-view';
 import type { OrgConfigUpdate } from '@/lib/admin/org-config-types';
 import { resolveSettingsTab, settingsTabSearch } from '@/lib/admin/settings-tabs';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { useUnsavedChangesGuard } from '@/hooks/use-unsaved-changes-guard';
+import { LEAVE_UNSAVED_COPY, LEAVE_UNSAVED_TITLE } from '@/lib/admin/unsaved-changes';
+
+// Config-form tabs that hold a draft; each reports when it differs from what's saved.
+const DRAFT_TABS = ['branding', 'services', 'business', 'limits', 'after-hours'] as const;
+type DraftTab = (typeof DRAFT_TABS)[number];
+
+/** Small dot on a tab with unsaved changes (plus a screen-reader label). */
+function UnsavedDot({ show }: { readonly show: boolean }) {
+  if (!show) return null;
+  return (
+    <>
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-warning" />
+      <span className="sr-only">(unsaved changes)</span>
+    </>
+  );
+}
 
 export default function SettingsPage() {
   useAdminPageTitle('Settings');
@@ -57,6 +75,27 @@ export default function SettingsPage() {
   const fromSetup = useFromSetup();
   const [bannerEvent, setBannerEvent] = useState<BannerEvent>(null);
   const setupStep = fromSetup ? setupStepForTab(initialTab) : undefined;
+
+  // Unsaved drafts per tab: a dot on the tab, and leaving the page asks first.
+  const [dirtyTabs, setDirtyTabs] = useState<ReadonlySet<DraftTab>>(() => new Set());
+  const markDirty = useCallback((tab: DraftTab, dirty: boolean) => {
+    setDirtyTabs((prev) => {
+      if (prev.has(tab) === dirty) return prev;
+      const next = new Set(prev);
+      if (dirty) next.add(tab);
+      else next.delete(tab);
+      return next;
+    });
+  }, []);
+  const dirtyHandlers = useMemo(
+    () =>
+      Object.fromEntries(DRAFT_TABS.map((t) => [t, (d: boolean) => markDirty(t, d)])) as Record<
+        DraftTab,
+        (dirty: boolean) => void
+      >,
+    [markDirty],
+  );
+  const leaveGuard = useUnsavedChangesGuard(dirtyTabs.size > 0);
 
   // Setup-guide tabs: a successful save refreshes the guide so the banner can
   // flip; the 'saved' event only counts on the tab the banner belongs to.
@@ -103,10 +142,12 @@ export default function SettingsPage() {
             <TabsTrigger value="branding">
               <Palette className="size-4" />
               Branding
+              <UnsavedDot show={dirtyTabs.has('branding')} />
             </TabsTrigger>
             <TabsTrigger value="services">
               <Wrench className="size-4" />
               Services
+              <UnsavedDot show={dirtyTabs.has('services')} />
             </TabsTrigger>
             <TabsTrigger value="job-types">
               <ClipboardList className="size-4" />
@@ -119,6 +160,7 @@ export default function SettingsPage() {
             <TabsTrigger value="business">
               <Building2 className="size-4" />
               Business info
+              <UnsavedDot show={dirtyTabs.has('business')} />
             </TabsTrigger>
             <TabsTrigger value="faqs">
               <MessageSquarePlus className="size-4" />
@@ -131,10 +173,12 @@ export default function SettingsPage() {
             <TabsTrigger value="limits">
               <SlidersHorizontal className="size-4" />
               Limits
+              <UnsavedDot show={dirtyTabs.has('limits')} />
             </TabsTrigger>
             <TabsTrigger value="after-hours">
               <Clock className="size-4" />
               After-hours
+              <UnsavedDot show={dirtyTabs.has('after-hours')} />
             </TabsTrigger>
             <TabsTrigger value="dispatch">
               <Truck className="size-4" />
@@ -149,10 +193,18 @@ export default function SettingsPage() {
           {/* keepMounted on the form tabs: a draft survives switching tabs
               and back (they were lost silently before). */}
           <TabsContent value="branding" className="mt-6" keepMounted>
-            <BrandingPanel config={settings.config} onSave={(u) => saveFromSetup('branding', u)} />
+            <BrandingPanel
+              config={settings.config}
+              onSave={(u) => saveFromSetup('branding', u)}
+              onDirtyChange={dirtyHandlers.branding}
+            />
           </TabsContent>
           <TabsContent value="services" className="mt-6" keepMounted>
-            <ServicesPanel config={settings.config} onSave={settings.saveConfig} />
+            <ServicesPanel
+              config={settings.config}
+              onSave={settings.saveConfig}
+              onDirtyChange={dirtyHandlers.services}
+            />
           </TabsContent>
           <TabsContent value="job-types" className="mt-6">
             <JobTypesPanel />
@@ -164,6 +216,7 @@ export default function SettingsPage() {
             <BusinessInfoPanel
               config={settings.config}
               onSave={(u) => saveFromSetup('business', u)}
+              onDirtyChange={dirtyHandlers.business}
             />
           </TabsContent>
           <TabsContent value="faqs" className="mt-6" keepMounted>
@@ -181,12 +234,14 @@ export default function SettingsPage() {
             <ConversationLimitsPanel
               config={settings.config}
               onSave={settings.saveConfig}
+              onDirtyChange={dirtyHandlers.limits}
             />
           </TabsContent>
           <TabsContent value="after-hours" className="mt-6" keepMounted>
             <AfterHoursPanel
               config={settings.config}
               onSave={settings.saveConfig}
+              onDirtyChange={dirtyHandlers['after-hours']}
             />
           </TabsContent>
           <TabsContent value="dispatch" className="mt-6" keepMounted>
@@ -208,6 +263,18 @@ export default function SettingsPage() {
           </TabsContent>
         </Tabs>
       )}
+
+      <ConfirmDialog
+        open={leaveGuard.pendingHref !== null}
+        onOpenChange={(open) => {
+          if (!open) leaveGuard.stay();
+        }}
+        title={LEAVE_UNSAVED_TITLE}
+        description={LEAVE_UNSAVED_COPY}
+        confirmLabel="Leave"
+        cancelLabel="Keep editing"
+        onConfirm={leaveGuard.leave}
+      />
     </PageShell>
   );
 }
