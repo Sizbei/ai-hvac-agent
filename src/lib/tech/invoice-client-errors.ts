@@ -8,7 +8,7 @@ import type { WriteOutcome } from "./invoice-key-state";
 
 export type { WriteOutcome };
 
-const MESSAGE_CONFLICTS: ReadonlySet<string> = new Set(["STALE", "INVOICE_LOCKED", "INVOICE_VOIDED"]);
+const MESSAGE_CONFLICTS: ReadonlySet<string> = new Set(["STALE", "INVOICE_LOCKED", "INVOICE_VOIDED", "FROM_ESTIMATE", "JOB_CLOSED"]);
 
 const isStored = (code: string | null): boolean => code !== null && STORED_CODES.has(code);
 

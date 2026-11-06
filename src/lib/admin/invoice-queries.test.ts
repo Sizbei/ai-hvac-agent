@@ -381,7 +381,7 @@ function mockCreateSeq(results: unknown[][]): void {
           where: () => {
             const r = results[i++] ?? [];
             const p = Promise.resolve(r);
-            return Object.assign(p, { limit: () => Promise.resolve(r) });
+            return Object.assign(p, { limit: () => Promise.resolve(r), orderBy: () => Promise.resolve(r) });
           },
         }),
       }) as never,
@@ -429,11 +429,13 @@ describe("createInvoiceFromSoldEstimate", () => {
   });
 
   it("creates an invoice (state 'open') from the sold option's snapshot on first call (no request)", async () => {
+    const valuesSpy = vi.fn((v: unknown) => v);
+    vi.mocked(db.insert).mockReturnValue({ values: valuesSpy } as never);
     mockCreateSeq([
       [{ id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: null }],
       [], // no existing invoice yet
       [{ subtotalCents: 9000, taxCents: 1000, totalCents: 10000 }], // option totals
-      [{ name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 }],
+      [{ id: "el-1", name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 }],
     ]);
     const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
     expect(r.ok).toBe(true);
@@ -441,12 +443,15 @@ describe("createInvoiceFromSoldEstimate", () => {
     // invoice insert + line-items insert batched atomically; no request → no lock.
     expect(db.batch).toHaveBeenCalledTimes(1);
     expect(db.execute).not.toHaveBeenCalled();
+    const lineRows = valuesSpy.mock.calls.map((c) => c[0]).find(Array.isArray) as { id: string; estimateLineItemId: string }[];
+    expect(lineRows[0]!.estimateLineItemId).toBe("el-1");
+    expect(lineRows[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/); // v7
   });
 
   describe("with a service request (spec §5.8)", () => {
     const EST = { id: "est-1", status: "sold", soldOptionId: "opt-1", customerId: "c", serviceRequestId: "req-1" };
     const OPT = { subtotalCents: 9000, taxCents: 1000, totalCents: 10000 };
-    const LINE = { name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 };
+    const LINE = { id: "el-1", name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 };
 
     it("returns the existing estimate invoice FIRST, before any lock", async () => {
       mockCreateSeq([[EST], [{ id: "inv-existing" }]]);
@@ -456,7 +461,7 @@ describe("createInvoiceFromSoldEstimate", () => {
       expect(db.batch).not.toHaveBeenCalled();
     });
 
-    it("locks the request, then inserts only when no native draft exists, lines gated on the invoice xmin", async () => {
+    it("locks the request, then inserts only when no native draft exists and the job's invoice does not hold the lines; lines linked and xmin-gated", async () => {
       mockCreateSeq([[EST], [], [OPT], [LINE]]);
       vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [{ id: "x" }] }, { rows: [] }] as never);
       const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
@@ -466,14 +471,24 @@ describe("createInvoiceFromSoldEstimate", () => {
       expect(lock).toContain("FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE");
       expect(insert).toMatch(/^INSERT INTO invoices .* SELECT .*'open'::invoice_state/);
       expect(insert).toContain(
-        "WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = $9::uuid AND service_request_id = $10::uuid AND state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL) ON CONFLICT DO NOTHING RETURNING id",
+        "WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = $9::uuid AND service_request_id = $10::uuid AND state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL) AND NOT EXISTS (SELECT 1 FROM invoice_line_items jbx",
       );
-      expect(renderQ(batchStmts()[1]).params).toHaveLength(10);
-      expect(lines).toMatch(/^INSERT INTO invoice_line_items /);
+      expect(insert).toContain("jbi.estimate_id IS NULL");
+      expect(insert.endsWith("ON CONFLICT DO NOTHING RETURNING id")).toBe(true);
+      expect(renderQ(batchStmts()[1]).params).toHaveLength(15);
+      expect(lines).toMatch(/^INSERT INTO invoice_line_items \(id, organization_id, invoice_id, estimate_line_item_id, name,/);
       expect(lines).toContain("WHERE EXISTS (SELECT 1 FROM invoices WHERE id = $");
       expect(lines).toContain("xmin = pg_current_xact_id()::xid)");
-      // 1 line × (id, name, qty, price, cost, total) + org + invoice + (invoice, org) in the gate
-      expect(renderQ(batchStmts()[2]).params).toHaveLength(10);
+      // 1 line × (id, estimate line, name, qty, price, cost, total) + org + invoice + (invoice, org) in the gate
+      expect(renderQ(batchStmts()[2]).params).toHaveLength(11);
+      expect(renderQ(batchStmts()[2]).params).toContain("el-1");
+    });
+
+    it("returns the job's invoice when the field bill already holds the estimate's lines", async () => {
+      mockCreateSeq([[EST], [], [OPT], [LINE], [], [{ invoiceId: "inv-job" }]]);
+      vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }] as never);
+      const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+      expect(r).toEqual({ ok: true, invoiceId: "inv-job", created: false });
     });
 
     it("refuses with request_has_draft when the INSERT returns no row", async () => {

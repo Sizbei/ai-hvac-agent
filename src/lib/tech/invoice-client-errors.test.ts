@@ -32,4 +32,9 @@ describe("classifyWriteError", () => {
   ])("%s", (_name, status, code, details, expected) => {
     expect(classifyWriteError(status, code, details)).toBe(expected);
   });
+
+  it("FROM_ESTIMATE and JOB_CLOSED show their message and refetch (M3c)", () => {
+    expect(classifyWriteError(409, "FROM_ESTIMATE")).toBe("show_message_refetch");
+    expect(classifyWriteError(409, "JOB_CLOSED")).toBe("show_message_refetch");
+  });
 });

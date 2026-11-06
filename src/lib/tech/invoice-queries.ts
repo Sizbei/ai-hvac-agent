@@ -36,12 +36,12 @@ const iso = (v: unknown): string | null => (v === null || v === undefined ? null
 // ---------------------------------------------------------------- reads
 
 /** The request's signature, whether an FP/HCP invoice exists, and a pending tech write on this job. */
-function metaSql(org: string, rid: string, me: string): SQL {
+export function metaSql(org: string, rid: string, me: string): SQL {
   return sql`SELECT r.signature_url, r.signature_name, r.signed_at,
       EXISTS (SELECT 1 FROM invoices i WHERE i.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
         AND (i.fieldpulse_invoice_id IS NOT NULL OR i.hcp_invoice_id IS NOT NULL)) AS external_invoice,
       EXISTS (SELECT 1 FROM idempotency_keys k WHERE k.organization_id = ${org}::uuid AND k.user_id = ${me}::uuid
-        AND k.route LIKE '/api/tech/jobs/' || ${rid}::text || '/%' AND k.state = 'in_progress'
+        AND (k.route LIKE '/api/tech/jobs/' || ${rid}::text || '/invoice%' OR k.route = '/api/tech/jobs/' || ${rid}::text || '/signature') AND k.state = 'in_progress'
         AND k.created_at > now() - interval '2 minutes') AS pending_write
     FROM service_requests r WHERE r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid`;
 }
@@ -79,8 +79,8 @@ function historySql(org: string, rid: string): SQL {
     ORDER BY created_at DESC, id DESC LIMIT 1`;
 }
 
-function linesSql(org: string, inv: string): SQL {
-  return sql`SELECT id, name, quantity, unit_price_cents, line_total_cents
+export function linesSql(org: string, inv: string): SQL {
+  return sql`SELECT id, name, quantity, unit_price_cents, line_total_cents, estimate_line_item_id IS NOT NULL AS from_estimate
     FROM invoice_line_items WHERE invoice_id = ${inv}::uuid AND organization_id = ${org}::uuid
     ORDER BY created_at, id`;
 }
@@ -161,6 +161,7 @@ async function fullInvoice(org: string, rid: string, inv: Row, meta: Row): Promi
   const lines: TechInvoiceLine[] = lineRows.map((l) => ({
     id: String(l.id), name: String(l.name), quantity: num(l.quantity),
     unitPriceCents: num(l.unit_price_cents), lineTotalCents: num(l.line_total_cents),
+    fromEstimate: l.from_estimate === true,
   }));
   const payments: TechInvoicePayment[] = paymentRows.map((p) => ({
     id: String(p.id), method: String(p.method), checkNumber: str(p.check_number),

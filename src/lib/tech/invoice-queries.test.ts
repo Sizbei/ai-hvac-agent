@@ -33,7 +33,7 @@ vi.mock("@/lib/tech/ownership", async (orig) => ({
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: h.getDefaultTaxBps, getPricebookItemById: vi.fn() }));
 vi.mock("@/lib/storage/r2-client", () => ({ getStorageClient: h.getStorageClient }));
 
-import { billedMaterialIds, getTechInvoiceView } from "./invoice-queries";
+import { billedMaterialIds, getTechInvoiceView, linesSql, metaSql } from "./invoice-queries";
 import type { TechInvoice } from "./invoice-view";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -185,7 +185,7 @@ describe("getTechInvoiceView", () => {
     const v = await viewOf();
     expect(hasCostKey(v)).toBe(false);
     expect((v!.invoice as TechInvoice).lines).toEqual([
-      { id: "l1", name: "Capacitor", quantity: 2, unitPriceCents: 5000, lineTotalCents: 10000 },
+      { id: "l1", name: "Capacitor", quantity: 2, unitPriceCents: 5000, lineTotalCents: 10000, fromEstimate: false },
     ]);
     expect(v!.materialsNotOnInvoice).toEqual([{ id: MAT, name: "Filter", quantity: 1, unitPriceCents: 2500 }]);
     for (const q of h.executed) expect(render(q)).not.toMatch(/cost|markup/i);
@@ -299,7 +299,7 @@ describe("getTechInvoiceView", () => {
     const v = (await viewOf());
     expect(v.pendingWrite).toBe(true);
     const meta = stmt(M.meta)!;
-    expect(meta.sql).toMatch(/EXISTS \(SELECT 1 FROM idempotency_keys k WHERE k\.organization_id = \$\d+::uuid AND k\.user_id = \$\d+::uuid AND k\.route LIKE '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/%' AND k\.state = 'in_progress' AND k\.created_at > now\(\) - interval '2 minutes'\)/);
+    expect(meta.sql).toMatch(/EXISTS \(SELECT 1 FROM idempotency_keys k WHERE k\.organization_id = \$\d+::uuid AND k\.user_id = \$\d+::uuid AND \(k\.route LIKE '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/invoice%' OR k\.route = '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/signature'\) AND k\.state = 'in_progress' AND k\.created_at > now\(\) - interval '2 minutes'\)/);
     expect(meta.params).toEqual(expect.arrayContaining([ORG, ME, REQ]));
   });
 
@@ -417,5 +417,18 @@ describe("billedMaterialIds", () => {
     expect(text).toContain("i.fieldpulse_invoice_id IS NULL");
     expect(text).toContain("m.organization_id = $");
     expect(text).not.toMatch(/cost/);
+  });
+});
+
+describe("M3c: the invoice view ignores estimate and equipment keys", () => {
+  it("pendingWrite counts only the invoice and signature routes", () => {
+    const t = render(metaSql(ORG, REQ, ME));
+    expect(t).toContain("'/invoice%' OR k.route = '/api/tech/jobs/' ||");
+    expect(t).not.toContain("'/%'");
+  });
+  it("lines say whether they came from an estimate, never their cost", () => {
+    const t = render(linesSql(ORG, INV));
+    expect(t).toContain("estimate_line_item_id IS NOT NULL AS from_estimate");
+    expect(t).not.toContain("cost");
   });
 });

@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql, sum, type SQL } from "drizzle-orm";
+import { v7 as uuidv7 } from "uuid";
 import { db } from "@/lib/db";
 import {
   communicationJobs,
@@ -34,6 +35,7 @@ import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provide
 import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { businessInfoSchema } from "@/lib/admin/org-config-types";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
+import { billingInvoiceIdSql, eidParam, jobBilledSql } from "@/lib/admin/estimate-billing-sql";
 
 /**
  * Canonical SQL overdue predicate for a single open invoice row.
@@ -122,6 +124,7 @@ export async function createInvoiceFromSoldEstimate(
 
   const lines = await db
     .select({
+      id: estimateLineItems.id,
       name: estimateLineItems.name,
       quantity: estimateLineItems.quantity,
       unitPriceCents: estimateLineItems.unitPriceCents,
@@ -129,13 +132,8 @@ export async function createInvoiceFromSoldEstimate(
       lineTotalCents: estimateLineItems.lineTotalCents,
     })
     .from(estimateLineItems)
-    .where(
-      withTenant(
-        estimateLineItems,
-        organizationId,
-        eq(estimateLineItems.optionId, est.soldOptionId),
-      ),
-    );
+    .where(withTenant(estimateLineItems, organizationId, eq(estimateLineItems.optionId, est.soldOptionId)))
+    .orderBy(asc(estimateLineItems.id));
 
   const invoiceId = randomUUID();
   if (est.serviceRequestId) {
@@ -157,7 +155,7 @@ export async function createInvoiceFromSoldEstimate(
     await db.batch([
       invoiceInsert,
       db.insert(invoiceLineItems).values(
-        lines.map((l) => ({ ...l, organizationId, invoiceId })),
+        lines.map(({ id, ...l }) => ({ ...l, id: uuidv7(), estimateLineItemId: id, organizationId, invoiceId })),
       ),
     ]);
   } else {
@@ -167,13 +165,14 @@ export async function createInvoiceFromSoldEstimate(
   return { ok: true, invoiceId, created: true };
 }
 
-type EstimateLine = { name: string; quantity: number; unitPriceCents: number; costCents: number; lineTotalCents: number };
+type EstimateLine = { id: string; name: string; quantity: number; unitPriceCents: number; costCents: number; lineTotalCents: number };
 
 /**
- * Estimate-born invoice on a request (spec §5.8): ONE batch — L_req, then the
- * INSERT refuses while the request has a NATIVE draft (a field invoice whose
- * seeded materials could duplicate the estimate's lines); the lines land only
- * when this transaction wrote the invoice (xmin gate).
+ * Estimate-born invoice on a request (M3b spec §5.8, M3c spec §5.4): ONE batch
+ * — L_req, then the INSERT refuses while the request has a NATIVE draft or the
+ * job's invoice already holds this estimate's lines (the job half of
+ * billed(eid)); the lines land only when this transaction wrote the invoice
+ * (xmin gate), linked to their estimate line, v7 ids in line order.
  */
 async function createRequestEstimateInvoice(
   org: string,
@@ -193,33 +192,41 @@ async function createRequestEstimateInvoice(
         ${opt.subtotalCents}::int, ${opt.taxCents}::int, ${opt.totalCents}::int, 0
       WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = ${org}::uuid AND service_request_id = ${rid}::uuid
         AND state = 'draft'::invoice_state AND ${P_NATIVE})
+        AND NOT ${jobBilledSql(org, eidParam(est.id))}
       ON CONFLICT DO NOTHING RETURNING id`,
   ];
   if (lines.length > 0) {
     const values = sql.join(
       lines.map(
         (l) =>
-          sql`(${randomUUID()}::uuid, ${l.name}::text, ${l.quantity}::int, ${l.unitPriceCents}::int, ${l.costCents}::int, ${l.lineTotalCents}::int)`,
+          sql`(${uuidv7()}::uuid, ${l.id}::uuid, ${l.name}::text, ${l.quantity}::int, ${l.unitPriceCents}::int, ${l.costCents}::int, ${l.lineTotalCents}::int)`,
       ),
       sql`, `,
     );
-    items.push(sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
-      SELECT v.id, ${org}::uuid, ${inv}::uuid, v.name, v.quantity, v.unit_price_cents, v.cost_cents, v.line_total_cents
-      FROM (VALUES ${values}) AS v(id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+    items.push(sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+      SELECT v.id, ${org}::uuid, ${inv}::uuid, v.eli, v.name, v.quantity, v.unit_price_cents, v.cost_cents, v.line_total_cents
+      FROM (VALUES ${values}) AS v(id, eli, name, quantity, unit_price_cents, cost_cents, line_total_cents)
       WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND xmin = pg_current_xact_id()::xid)`);
   }
   const out = (await db.batch(items.map((q) => db.execute(q)) as never)) as unknown as { rows: unknown[] }[];
   if (out[1]!.rows.length > 0) return { ok: true, invoiceId: inv, created: true };
   // No row: a concurrent create of THIS estimate won the per-estimate unique
-  // index (return it, like the early return), or the request has a draft.
+  // index (return it, like the early return) …
   const [raced] = await db
     .select({ id: invoices.id })
     .from(invoices)
     .where(withTenant(invoices, org, eq(invoices.estimateId, est.id)))
     .limit(1);
-  return raced
-    ? { ok: true, invoiceId: raced.id, created: false }
-    : { ok: false, reason: "request_has_draft" };
+  if (raced) return { ok: true, invoiceId: raced.id, created: false };
+  // … or the job's invoice already holds this estimate's lines: that invoice bills it …
+  const [job] = await db
+    .select({ invoiceId: sql<string | null>`${billingInvoiceIdSql(org, eidParam(est.id))}` })
+    .from(estimates)
+    .where(withTenant(estimates, org, eq(estimates.id, est.id)))
+    .limit(1);
+  if (job?.invoiceId) return { ok: true, invoiceId: job.invoiceId, created: false };
+  // … or the request has a native draft.
+  return { ok: false, reason: "request_has_draft" };
 }
 
 export type TakePaymentResult =

@@ -26,6 +26,8 @@ export interface TechInvoiceLine {
   readonly quantity: number;
   readonly unitPriceCents: number;
   readonly lineTotalCents: number;
+  /** Copied from a sold estimate: the field cannot remove it. */
+  readonly fromEstimate: boolean;
 }
 
 export interface TechInvoicePayment {

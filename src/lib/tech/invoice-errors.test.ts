@@ -33,6 +33,12 @@ describe("fieldError", () => {
   it("covers every reason exactly once", () => {
     expect(new Set(TABLE.map(([r]) => r)).size).toBe(20);
   });
+
+  it("FROM_ESTIMATE: a line from the approved estimate", () => {
+    expect(fieldError("from_estimate")).toEqual({
+      status: 409, code: "FROM_ESTIMATE", message: "This item came from the approved estimate. Ask the office to change it.",
+    });
+  });
 });
 
 describe("reasonResult", () => {

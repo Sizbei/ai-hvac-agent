@@ -29,7 +29,13 @@ vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps, getPricebook
 
 import {
   addInvoiceLine,
+  billLinesSql,
+  billOutcome,
+  billSoldEstimate,
   createInvoiceFromJob,
+  draftOutcome,
+  exceedsInt32,
+  isNumericOverflow,
   finalizeInvoice,
   lockInvoiceSql,
   lockRequestSql,
@@ -292,15 +298,16 @@ describe("removeInvoiceLine", () => {
   it("removes under the draft + unpaid gate, T with amount_paid_cents = 0", async () => {
     batch.mockResolvedValue(res([], [], [{ id: LINE }], [], [{ state: "draft" }], [{ still_lead: true }]));
     expect(await removeInvoiceLine(TECH, INV, LINE)).toEqual({ ok: true, removed: true });
-    expect(params()).toEqual([2, 2, 10, 5, 3, 4]);
+    expect(params()).toEqual([2, 2, 10, 5, 6, 4]);
     const s = stmts();
     expect(s[0]).toMatch(LOCK_REQ);
     expect(s[1]).toMatch(LOCK_INV);
-    expect(s[2]).toMatch(/^DELETE FROM invoice_line_items WHERE id = \$1::uuid AND invoice_id = \$2::uuid AND organization_id = \$3::uuid AND \(EXISTS/);
+    expect(s[2]).toMatch(/^DELETE FROM invoice_line_items WHERE id = \$1::uuid AND invoice_id = \$2::uuid AND organization_id = \$3::uuid AND estimate_line_item_id IS NULL AND \(EXISTS/);
     expect(s[2]).toContain("i.state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL AND i.amount_paid_cents = 0) RETURNING id");
     expect(s[3]).toContain("invoices.amount_paid_cents = 0");
     expect(s[3]).toContain(T_KEEPS_UPDATED_AT);
-    expect(s[4]).toMatch(/^SELECT state, amount_paid_cents FROM invoices/);
+    expect(s[4]).toMatch(/^SELECT state, amount_paid_cents, EXISTS \(/);
+    expect(s[4]).toContain(" AS from_estimate FROM invoices");
   });
 
   it("already gone, locked, not found, not lead", async () => {
@@ -386,5 +393,205 @@ describe("finalizeInvoice", () => {
     expect(await finalizeInvoice(OFFICE, INV)).toEqual({ ok: false, reason: "synced_read_only" });
     expect(render(reads[0])).toContain("(fieldpulse_invoice_id IS NOT NULL OR hcp_invoice_id IS NOT NULL) AS synced");
     expect(batch).not.toHaveBeenCalled();
+  });
+});
+
+describe("removeInvoiceLine refuses an estimate-linked line (spec §5.3)", () => {
+  beforeEach(() => { readQueue.length = 0; batch.mockReset(); getDefaultTaxBps.mockResolvedValue(0); });
+
+  it("the DELETE carries estimate_line_item_id IS NULL and the tail reads from_estimate", async () => {
+    batch.mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] },
+      { rows: [{ state: "draft", amount_paid_cents: 0, from_estimate: true }] }, { rows: [{ still_lead: true }] }]);
+    const r = await removeInvoiceLine({ organizationId: ORG, requestId: REQ, techUserId: ME }, INV, LINE);
+    expect(r).toEqual({ ok: false, reason: "from_estimate" });
+    const s = (batch.mock.calls[0]![0] as unknown[]).map(render);
+    expect(s[2]).toContain("AND estimate_line_item_id IS NULL");
+    expect(s[4]).toContain("estimate_line_item_id IS NOT NULL) AS from_estimate");
+  });
+
+  it("a locked invoice still answers invoice_locked first", async () => {
+    batch.mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] },
+      { rows: [{ state: "open", amount_paid_cents: 0, from_estimate: true }] }, { rows: [{ still_lead: true }] }]);
+    expect(await removeInvoiceLine({ organizationId: ORG, requestId: REQ, techUserId: ME }, INV, LINE))
+      .toEqual({ ok: false, reason: "invoice_locked" });
+  });
+});
+
+describe("draftOutcome (spec §5.3 step 2; integration case (q))", () => {
+  const ok = (state: string) => ({ ok: true, invoiceId: INV, state, created: false }) as never;
+  const no = (reason: string) => ({ ok: false, reason }) as never;
+  it.each([
+    [ok("draft"), false, "continue"],
+    [ok("draft"), true, "invoice_locked"],
+    [ok("open"), false, "invoice_locked"],
+    [ok("paid"), false, "invoice_changed"],
+    [ok("refunded"), false, "invoice_changed"],
+    [no("invoice_voided"), false, "invoice_changed"],
+    [no("stale"), false, "stale"],
+    [no("external_invoice"), false, "managed_externally"],
+    [no("managed_externally"), false, "managed_externally"],
+    [no("not_lead"), false, "not_lead"],
+  ])("%j hasPayment=%s → %s", (r, hasPayment, expected) => {
+    expect(draftOutcome(r, hasPayment)).toBe(expected);
+  });
+});
+
+describe("billOutcome (spec §5.3 step 4)", () => {
+  const base = { inserted: 0, stillLead: true, state: "draft", hasPayment: false, billed: false };
+  it("inserted lines win", () => expect(billOutcome({ ...base, inserted: 2, billed: true })).toBe("added"));
+  it("billed beats everything else (a takeover re-run of our own success)", () =>
+    expect(billOutcome({ ...base, billed: true, stillLead: false, state: "open" })).toBe("already_billed"));
+  it("not lead", () => expect(billOutcome({ ...base, stillLead: false })).toBe("not_lead"));
+  it("a draft with a payment or an open invoice is locked", () => {
+    expect(billOutcome({ ...base, hasPayment: true })).toBe("invoice_locked");
+    expect(billOutcome({ ...base, state: "open" })).toBe("invoice_locked");
+  });
+  it("void or anything else is stale", () => {
+    expect(billOutcome({ ...base, state: "void" })).toBe("stale");
+    expect(billOutcome({ ...base })).toBe("stale");
+    expect(billOutcome({ ...base, state: null })).toBe("stale");
+  });
+});
+
+describe("money guards", () => {
+  it("exceedsInt32 counts the tax", () => {
+    expect(exceedsInt32(2_000_000_000, 0)).toBe(false);
+    expect(exceedsInt32(2_000_000_000, 825)).toBe(true);
+    expect(exceedsInt32(2_147_483_647, 0)).toBe(false);
+    expect(exceedsInt32(2_147_483_648, 0)).toBe(true);
+  });
+  it("isNumericOverflow unwraps the Drizzle cause chain", () => {
+    expect(isNumericOverflow({ code: "22003" })).toBe(true);
+    expect(isNumericOverflow({ message: "x", cause: { cause: { code: "22003" } } })).toBe(true);
+    expect(isNumericOverflow({ code: "23505" })).toBe(false);
+    expect(isNumericOverflow(null)).toBe(false);
+  });
+});
+
+describe("billSoldEstimate", () => {
+  const EST = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const EL1 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const actorT = { organizationId: ORG, requestId: REQ, techUserId: ME };
+  const pre = (over: Record<string, unknown> = {}) =>
+    [{ status: "sold", service_request_id: REQ, synced: false, billed: false, billed_invoice_id: null, ...over }];
+  const createRows = (state: "draft" | "open") => (state === "draft"
+    ? [{ rows: [] }, { rows: [{ id: INV }] }, { rows: [] }, { rows: [{ id: INV, state }] }, { rows: [{ still_lead: true }] }]
+    : [{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [{ id: INV, state }] }, { rows: [{ still_lead: true }] }]);
+  const billRows = (inserted: number, tail: Record<string, unknown>) => [
+    { rows: [] }, { rows: [] }, { rows: Array.from({ length: inserted }, (_, i) => ({ id: `l${i}` })) }, { rows: [] },
+    { rows: [{ state: "draft", amount_paid_cents: 0, billed: inserted > 0, billed_invoice_id: INV, has_materials: false, ...tail }] },
+    { rows: [{ still_lead: true }] },
+  ];
+  const room = (over: Record<string, unknown> = {}) => [{ draft_exists: false, draft_sub: 0, materials_sub: 0, ...over }];
+  /** Reads in order: pre-check, sold lines, the int4 headroom read, then createInvoiceFromJob's request row and materials. */
+  const happyReads = () => readQueue.push(pre(), [{ id: EL1, line_total_cents: 5_000 }], room(),
+    [{ customer_id: CUST, native: true, external_invoice: false }], []);
+
+  beforeEach(() => { readQueue.length = 0; reads.length = 0; batch.mockReset(); getDefaultTaxBps.mockResolvedValue(825); });
+
+  it("404 when the estimate is missing or on another request; nothing else runs", async () => {
+    readQueue.push([]);
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "estimate_not_found" });
+    readQueue.push(pre({ service_request_id: OTHER }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "estimate_not_found" });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("billSoldEstimate accepts an uppercase request id", async () => {
+    const RID_HEX = "abcdef12-3456-4abc-8def-0123456789ab"; // hex letters: upper-casing changes it
+    expect(RID_HEX.toUpperCase()).not.toBe(RID_HEX);
+    readQueue.push(pre({ status: "open", service_request_id: RID_HEX }));
+    // Without the writer's toLowerCase() this answers estimate_not_found.
+    expect(await billSoldEstimate({ ...actorT, requestId: RID_HEX.toUpperCase() }, EST, { invoiceId: INV }))
+      .toEqual({ ok: false, reason: "estimate_not_sold" });
+  });
+
+  it("refuses before any invoice work: not sold, FieldPulse, no lines, already billed", async () => {
+    readQueue.push(pre({ status: "open" }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "estimate_not_sold" });
+    readQueue.push(pre({ synced: true }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "managed_externally" });
+    readQueue.push(pre(), []);
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "no_lines" });
+    readQueue.push(pre({ billed: true, billed_invoice_id: INV }), [{ id: EL1, line_total_cents: 5_000 }]);
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "already_billed", invoiceId: INV });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("too_large before drafting when the draft plus the sale overflows int4", async () => {
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], room({ draft_exists: true, draft_sub: 200_000_000 }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("with no draft yet, the unbilled materials step 2 will seed count toward the int4 check", async () => {
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], room({ materials_sub: 200_000_000 }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], room({ draft_exists: true, draft_sub: 0, materials_sub: 200_000_000 }),
+      [{ customer_id: CUST, native: true, external_invoice: false }], [], [{ amount_paid_cents: 0 }]);
+    getDefaultTaxBps.mockResolvedValue(0);
+    batch.mockResolvedValueOnce(createRows("draft")).mockResolvedValueOnce(billRows(1, {}));
+    expect((await billSoldEstimate(actorT, EST, { invoiceId: INV })).ok).toBe(true); // an existing draft is adopted, not seeded
+  });
+
+  it("a 22003 inside createInvoiceFromJob (seeding materials) is too_large, not a 500", async () => {
+    happyReads();
+    batch.mockRejectedValueOnce({ message: "q", cause: { code: "22003" } });
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
+  });
+
+  it("this key's derived invoice was paid or voided → invoice_changed (stored: the next tap mints a new key and a new invoice id)", async () => {
+    happyReads();
+    readQueue.push([{ state: "paid" }], [{ billed: false, invoice_id: null }]);
+    batch.mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }, { rows: [{ still_lead: true }] }]);
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "invoice_changed" });
+    expect(batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("drafts through createInvoiceFromJob, then inserts the sold lines under L_req → L_inv with NOT billed(eid)", async () => {
+    happyReads();
+    readQueue.push([{ amount_paid_cents: 0 }]);
+    batch.mockResolvedValueOnce(createRows("draft")).mockResolvedValueOnce(billRows(1, {}));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: true, invoiceId: INV, added: 1, hasMaterials: false });
+    const s = (batch.mock.calls[1]![0] as unknown[]).map(render);
+    expect(s[2]).toBe(render(billLinesSql({ org: ORG, rid: REQ, me: ME, inv: INV, estimateId: EST,
+      lines: [{ id: renderQ((batch.mock.calls[1]![0] as unknown[])[2]).params[2] as string, eli: EL1 }] }))); // params: org, inv, then the v7 line id
+    expect(s[0]).toBe(`SELECT 1 FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE`);
+    expect(s[1]).toContain("FROM invoices WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE");
+    expect(s[2]).toMatch(/^INSERT INTO invoice_line_items \(id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents\)/);
+    expect(s[2]).toContain("i.state = 'draft'::invoice_state AND i.amount_paid_cents = 0 AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL");
+    expect(s[2]).toContain("r.status IN ('arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status)");
+    expect(s[2]).toContain("se.status = 'sold'::estimate_status AND se.fieldpulse_estimate_id IS NULL AND se.sold_option_id = el.option_id");
+    expect(s[2]).toContain("AND NOT (EXISTS (SELECT 1 FROM invoices obi");
+    expect(s[2]).toContain("ON CONFLICT (id) DO NOTHING RETURNING id");
+    expect(s[3]).toContain("invoices.state = 'draft'::invoice_state AND invoices.amount_paid_cents = 0");
+    expect(s[4]).toContain("AS has_materials");
+  });
+
+  it("an open job invoice re-checks billed(eid): billed → already_billed, else invoice_locked; no second batch", async () => {
+    happyReads();
+    readQueue.push([{ billed: false, invoice_id: null }]);
+    batch.mockResolvedValueOnce(createRows("open"));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "invoice_locked" });
+    expect(batch).toHaveBeenCalledTimes(1);
+    batch.mockReset();
+    happyReads();
+    readQueue.push([{ billed: true, invoice_id: OTHER }]);
+    batch.mockResolvedValueOnce(createRows("open"));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "already_billed", invoiceId: OTHER });
+  });
+
+  it("a batch that inserted nothing but sees billed(eid) answers already_billed with the invoice", async () => {
+    happyReads();
+    readQueue.push([{ amount_paid_cents: 0 }]);
+    batch.mockResolvedValueOnce(createRows("draft")).mockResolvedValueOnce(billRows(0, { billed: true, billed_invoice_id: OTHER }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "already_billed", invoiceId: OTHER });
+  });
+
+  it("billSoldEstimate maps a 22003 overflow to too_large", async () => {
+    happyReads();
+    readQueue.push([{ amount_paid_cents: 0 }]);
+    batch.mockResolvedValueOnce(createRows("draft")).mockRejectedValueOnce({ message: "q", cause: { code: "22003" } });
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
   });
 });

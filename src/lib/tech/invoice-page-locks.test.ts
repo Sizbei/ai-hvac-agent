@@ -11,7 +11,7 @@ import {
 import type { TechInvoice, TechInvoiceView } from "./invoice-view";
 
 const SIG = { state: "none" as const, signedAt: null, signatureName: null, url: null, fresh: false };
-const LINE = { id: "l1", name: "Filter", quantity: 1, unitPriceCents: 1000, lineTotalCents: 1000 };
+const LINE = { id: "l1", name: "Filter", quantity: 1, unitPriceCents: 1000, lineTotalCents: 1000, fromEstimate: false };
 
 function inv(over: Partial<TechInvoice> = {}): TechInvoice {
   return {

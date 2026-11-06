@@ -30,9 +30,10 @@ export function InvoiceLines({
             <p className={`${MONEY} text-[13px] text-muted-foreground`}>
               {l.quantity} × {formatCentsExact(l.unitPriceCents)}
             </p>
+            {l.fromEstimate && <p className="text-[13px] text-muted-foreground">From the estimate</p>}
           </div>
           <span className={`${MONEY} shrink-0 text-[15px]`}>{formatCentsExact(l.lineTotalCents)}</span>
-          {onRemove && (
+          {onRemove && !l.fromEstimate && (
             <Button
               variant="ghost"
               className="size-11 shrink-0 rounded-xl text-muted-foreground"

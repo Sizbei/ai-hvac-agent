@@ -11,16 +11,19 @@
  * invoice's own request for L_req, and a synced-invoice pre-read.
  */
 import { sql, type SQL } from "drizzle-orm";
+import { v7 as uuidv7 } from "uuid";
 import { db } from "@/lib/db";
 import { getDefaultTaxBps, getPricebookItemById } from "@/lib/admin/pricebook-queries";
 import { materialLineId } from "@/lib/http/idempotency";
 import { isDeadlock } from "@/lib/tech/status-writes";
 import { SIGNABLE_IN } from "@/lib/tech/field-queries";
+import { billedSql, billingInvoiceIdSql, eidParam, statusInSql } from "@/lib/admin/estimate-billing-sql";
+import { BILL_STATUSES } from "@/lib/tech/field-sale-statuses";
 
 export type FieldReason =
   | "managed_externally" | "external_invoice" | "not_lead" | "invoice_not_found" | "invoice_voided"
   | "invoice_locked" | "no_lines" | "already_billed" | "item_not_found" | "invoice_not_chargeable"
-  | "exceeds_balance" | "synced_read_only" | "payment_id_conflict" | "refund_id_conflict" | "stale";
+  | "exceeds_balance" | "synced_read_only" | "payment_id_conflict" | "refund_id_conflict" | "stale" | "from_estimate";
 
 export interface Actor { organizationId: string; requestId: string | null; techUserId: string | null }
 
@@ -269,9 +272,11 @@ export async function removeInvoiceLine(
   const rows = await runBatch([
     ...locks(scope, invoiceId),
     sql`DELETE FROM invoice_line_items WHERE id = ${lineId}::uuid AND invoice_id = ${invoiceId}::uuid AND organization_id = ${org}::uuid
-      AND (${leadOrAdmin(scope)}) AND ${draftInvoiceExists(scope, invoiceId, sql` AND i.amount_paid_cents = 0`)} RETURNING id`,
+      AND estimate_line_item_id IS NULL AND (${leadOrAdmin(scope)}) AND ${draftInvoiceExists(scope, invoiceId, sql` AND i.amount_paid_cents = 0`)} RETURNING id`,
     totalsSql(org, invoiceId, await getDefaultTaxBps(org), LINE_GATE),
-    sql`SELECT state, amount_paid_cents FROM invoices WHERE id = ${invoiceId}::uuid AND organization_id = ${org}::uuid AND ${scope.ridPred("service_request_id")}`,
+    sql`SELECT state, amount_paid_cents,
+        EXISTS (SELECT 1 FROM invoice_line_items WHERE id = ${lineId}::uuid AND invoice_id = ${invoiceId}::uuid AND organization_id = ${org}::uuid AND estimate_line_item_id IS NOT NULL) AS from_estimate
+      FROM invoices WHERE id = ${invoiceId}::uuid AND organization_id = ${org}::uuid AND ${scope.ridPred("service_request_id")}`,
     ...leadTail(scope),
   ]);
   if (!Array.isArray(rows)) return rows;
@@ -281,6 +286,7 @@ export async function removeInvoiceLine(
   const inv = rows[at + 2]![0];
   if (!inv) return fail("invoice_not_found");
   if (inv.state !== "draft" || Number(inv.amount_paid_cents) > 0) return fail("invoice_locked");
+  if (inv.from_estimate === true) return fail("from_estimate");
   return { ok: true, removed: false };
 }
 
@@ -331,4 +337,207 @@ export async function finalizeInvoice(
   if (state === "void") return fail("invoice_locked");
   if (Number(inv.lines) === 0) return fail("no_lines");
   return fail("stale");
+}
+
+// ---------------------------------------------------------------- bill a sold estimate (M3c §5.3)
+
+export type BillReason =
+  | "estimate_not_found" | "estimate_not_sold" | "managed_externally" | "no_lines" | "already_billed"
+  | "invoice_locked" | "invoice_changed" | "not_lead" | "stale" | "too_large";
+export type BillResult =
+  | { ok: true; invoiceId: string; added: number; hasMaterials: boolean }
+  | { ok: false; reason: BillReason; invoiceId?: string };
+
+const INT32_MAX = 2_147_483_647;
+const BILL_IN = statusInSql(BILL_STATUSES);
+
+/** subtotal + its tax would not fit an int4 money column. */
+export function exceedsInt32(subtotalCents: number, taxBps: number): boolean {
+  return subtotalCents + Math.round((subtotalCents * taxBps) / 10000) > INT32_MAX;
+}
+
+/** SQLSTATE 22003 (numeric value out of range) anywhere in the cause chain. */
+export function isNumericOverflow(error: unknown): boolean {
+  let e: unknown = error;
+  for (let depth = 0; e != null && depth < 4; depth++) {
+    if ((e as { code?: unknown }).code === "22003") return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+type DraftResult = Awaited<ReturnType<typeof createInvoiceFromJob>>;
+
+/**
+ * Step 2: what the bill does with createInvoiceFromJob's answer. The caller
+ * re-checks billed(eid) before returning any non-continue reason.
+ * paid / refunded / invoice_voided describe THIS key's derived invoice, which
+ * the same key always derives again: they map to the STORED invoice_changed so
+ * the client mints a new key (plan ruling 11, a spec deviation). A plain stale
+ * (a deadlock included) stays unstored.
+ */
+export function draftOutcome(r: DraftResult, hasPayment: boolean): "continue" | BillReason {
+  if (r.ok) {
+    if (r.state === "draft") return hasPayment ? "invoice_locked" : "continue";
+    if (r.state === "open") return "invoice_locked";
+    return "invoice_changed"; // paid / refunded
+  }
+  if (r.reason === "not_lead") return "not_lead";
+  if (r.reason === "external_invoice" || r.reason === "managed_externally") return "managed_externally";
+  if (r.reason === "invoice_voided") return "invoice_changed";
+  return "stale";
+}
+
+/** Step 4: the batch's answer. */
+export function billOutcome(t: {
+  inserted: number; stillLead: boolean; state: string | null; hasPayment: boolean; billed: boolean;
+}): "added" | BillReason {
+  if (t.inserted > 0) return "added";
+  if (t.billed) return "already_billed";
+  if (!t.stillLead) return "not_lead";
+  if ((t.state === "draft" && t.hasPayment) || t.state === "open") return "invoice_locked";
+  return "stale";
+}
+
+/**
+ * Step 3's guarded INSERT: the sold option's lines onto THIS draft, only while
+ * it is a native unpaid draft of the request, the caller is still lead, the
+ * request may be billed, the estimate is sold and native, and NOT billed(eid).
+ * Exported so the integration suite can prove the in-batch guard on its own.
+ */
+export function billLinesSql(p: {
+  org: string; rid: string; me: string; inv: string; estimateId: string;
+  lines: readonly { readonly id: string; readonly eli: string }[];
+}): SQL {
+  const { org, rid, inv, estimateId } = p;
+  const values = sql.join(p.lines.map((l) => sql`(${l.id}::uuid, ${l.eli}::uuid)`), sql`, `);
+  return sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+    SELECT v.id, ${org}::uuid, ${inv}::uuid, el.id, el.name, el.quantity, el.unit_price_cents, el.cost_cents, el.line_total_cents
+    FROM (VALUES ${values}) AS v(id, eli) JOIN estimate_line_items el ON el.id = v.eli AND el.organization_id = ${org}::uuid
+    WHERE EXISTS (SELECT 1 FROM invoices i WHERE i.id = ${inv}::uuid AND i.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
+        AND i.state = 'draft'::invoice_state AND i.amount_paid_cents = 0 AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL)
+      AND (${stillLeadSql(org, rid, p.me)})
+      AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid AND r.status IN ${BILL_IN})
+      AND EXISTS (SELECT 1 FROM estimates se WHERE se.id = ${estimateId}::uuid AND se.organization_id = ${org}::uuid AND se.service_request_id = ${rid}::uuid
+        AND se.status = 'sold'::estimate_status AND se.fieldpulse_estimate_id IS NULL AND se.sold_option_id = el.option_id)
+      AND NOT ${billedSql(org, eidParam(estimateId))}
+    ON CONFLICT (id) DO NOTHING RETURNING id`;
+}
+
+const alreadyBilled = (invoiceId: unknown): BillResult =>
+  invoiceId ? { ok: false, reason: "already_billed", invoiceId: String(invoiceId) } : { ok: false, reason: "already_billed" };
+
+async function billedNow(org: string, estimateId: string): Promise<{ billed: boolean; invoiceId: unknown }> {
+  const eid = eidParam(estimateId);
+  const [row] = await readRows(sql`SELECT ${billedSql(org, eid)} AS billed, ${billingInvoiceIdSql(org, eid)} AS invoice_id`);
+  return { billed: row?.billed === true, invoiceId: row?.invoice_id ?? null };
+}
+
+/**
+ * Int4 headroom before drafting: an existing native draft is adopted as is;
+ * with none, step 2 creates one seeded with the job's unbilled materials.
+ */
+function headroomSql(org: string, rid: string): SQL {
+  return sql`SELECT
+      EXISTS (SELECT 1 FROM invoices d WHERE d.organization_id = ${org}::uuid AND d.service_request_id = ${rid}::uuid
+        AND d.state = 'draft'::invoice_state AND d.fieldpulse_invoice_id IS NULL AND d.hcp_invoice_id IS NULL) AS draft_exists,
+      (SELECT COALESCE(SUM(l.line_total_cents), 0)::bigint FROM invoice_line_items l JOIN invoices i ON i.id = l.invoice_id
+        WHERE i.organization_id = ${org}::uuid AND l.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
+          AND i.state = 'draft'::invoice_state AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL) AS draft_sub,
+      (SELECT COALESCE(SUM(m.quantity::bigint * m.unit_price_cents), 0)::bigint FROM job_materials m
+        WHERE m.service_request_id = ${rid}::uuid AND m.organization_id = ${org}::uuid
+          AND NOT ${materialBilledSql(org, rid, sql.raw("m.id"))}) AS materials_sub`;
+}
+
+/**
+ * Put a sold estimate's option lines on the job's invoice, exactly once per
+ * estimate (spec §5.3): pre-check → adopt-or-create the draft (M3b) → one
+ * batch L_req → L_inv → billLinesSql (NOT billed(eid)) → totals → tails.
+ */
+export async function billSoldEstimate(
+  actor: Actor & { requestId: string; techUserId: string },
+  estimateId: string,
+  ids: { invoiceId: string },
+): Promise<BillResult> {
+  const { organizationId: org, techUserId: me } = actor;
+  const rid = actor.requestId.toLowerCase();
+  const eid = eidParam(estimateId);
+
+  // 1. Pre-check: no invoice is touched or created on a refusal.
+  const [est] = await readRows(sql`SELECT e.status::text AS status, e.service_request_id,
+      e.fieldpulse_estimate_id IS NOT NULL AS synced,
+      ${billedSql(org, eid)} AS billed, ${billingInvoiceIdSql(org, eid)} AS billed_invoice_id
+    FROM estimates e WHERE e.id = ${estimateId}::uuid AND e.organization_id = ${org}::uuid`);
+  if (!est || String(est.service_request_id) !== rid) return { ok: false, reason: "estimate_not_found" };
+  if (est.status !== "sold") return { ok: false, reason: "estimate_not_sold" };
+  if (est.synced === true) return { ok: false, reason: "managed_externally" };
+  const lines = await readRows(sql`SELECT el.id, el.line_total_cents FROM estimate_line_items el
+      JOIN estimates e ON e.sold_option_id = el.option_id
+    WHERE e.id = ${estimateId}::uuid AND e.organization_id = ${org}::uuid AND el.organization_id = ${org}::uuid
+    ORDER BY el.id`);
+  if (lines.length === 0) return { ok: false, reason: "no_lines" };
+  if (est.billed === true) return alreadyBilled(est.billed_invoice_id);
+
+  const taxBps = await getDefaultTaxBps(org);
+  const [room] = await readRows(headroomSql(org, rid));
+  const existing = room?.draft_exists === true ? Number(room.draft_sub ?? 0) : Number(room?.materials_sub ?? 0);
+  const sale = lines.reduce((s, l) => s + Number(l.line_total_cents), 0);
+  if (exceedsInt32(sale + existing, taxBps)) return { ok: false, reason: "too_large" };
+
+  // 2. Draft: the normal M3b adopt-or-create (seeds the job's unbilled materials).
+  let created: DraftResult;
+  try {
+    created = await createInvoiceFromJob({ ...actor, requestId: rid }, { invoiceId: ids.invoiceId });
+  } catch (error) {
+    if (isNumericOverflow(error)) return { ok: false, reason: "too_large" };
+    throw error;
+  }
+  let hasPayment = false;
+  if (created.ok && created.state === "draft") {
+    const [row] = await readRows(sql`SELECT amount_paid_cents FROM invoices WHERE id = ${created.invoiceId}::uuid AND organization_id = ${org}::uuid`);
+    hasPayment = Number(row?.amount_paid_cents ?? 0) > 0;
+  }
+  const step = draftOutcome(created, hasPayment);
+  if (step !== "continue" || !created.ok) {
+    const again = await billedNow(org, estimateId);
+    if (again.billed) return alreadyBilled(again.invoiceId);
+    return { ok: false, reason: step === "continue" ? "stale" : step };
+  }
+  const inv = created.invoiceId;
+
+  // 3. One batch. Line ids are v7 in the estimate's line order; exactly-once is
+  // NOT billed(eid) under L_req, not the ids.
+  const lead = stillLeadSql(org, rid, me);
+  let rows: Row[][] | Fail;
+  try {
+    rows = await runBatch([
+      lockRequestSql(org, rid),
+      lockInvoiceSql(org, inv),
+      billLinesSql({ org, rid, me, inv, estimateId, lines: lines.map((l) => ({ id: uuidv7(), eli: String(l.id) })) }),
+      totalsSql(org, inv, taxBps, LINE_GATE),
+      sql`SELECT i.state::text AS state, i.amount_paid_cents,
+          ${billedSql(org, eid)} AS billed, ${billingInvoiceIdSql(org, eid)} AS billed_invoice_id,
+          EXISTS (SELECT 1 FROM invoice_line_items m WHERE m.invoice_id = i.id AND m.organization_id = ${org}::uuid AND m.job_material_id IS NOT NULL) AS has_materials
+        FROM invoices i WHERE i.id = ${inv}::uuid AND i.organization_id = ${org}::uuid`,
+      sql`SELECT (${lead}) AS still_lead`,
+    ]);
+  } catch (error) {
+    if (isNumericOverflow(error)) return { ok: false, reason: "too_large" };
+    throw error;
+  }
+  if (!Array.isArray(rows)) return { ok: false, reason: "stale" };
+
+  // 4. Result.
+  const inserted = rows[2]!.length;
+  const tail = rows[4]![0];
+  const outcome = billOutcome({
+    inserted,
+    stillLead: rows[5]![0]?.still_lead === true,
+    state: tail ? String(tail.state) : null,
+    hasPayment: Number(tail?.amount_paid_cents ?? 0) > 0,
+    billed: tail?.billed === true,
+  });
+  if (outcome === "added") return { ok: true, invoiceId: inv, added: inserted, hasMaterials: tail?.has_materials === true };
+  if (outcome === "already_billed") return alreadyBilled(tail?.billed_invoice_id);
+  return { ok: false, reason: outcome };
 }

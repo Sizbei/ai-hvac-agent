@@ -20,8 +20,8 @@ function view(invoice: TechInvoiceView["invoice"], over: Partial<TechInvoiceView
   };
 }
 
-const LINE = { id: "l1", name: "Filter", quantity: 1, unitPriceCents: 1000, lineTotalCents: 1000 };
-const LINE2 = { id: "l2", name: "Capacitor", quantity: 2, unitPriceCents: 500, lineTotalCents: 1000 };
+const LINE = { id: "l1", name: "Filter", quantity: 1, unitPriceCents: 1000, lineTotalCents: 1000, fromEstimate: false };
+const LINE2 = { id: "l2", name: "Capacitor", quantity: 2, unitPriceCents: 500, lineTotalCents: 1000, fromEstimate: false };
 const MAT = { id: "m1", name: "Filter", quantity: 1, unitPriceCents: 1000 };
 const PAY = (id: string, amountCents: number, method = "cash") => ({
   id, method, checkNumber: null, amountCents, status: "succeeded", createdAt: null,

@@ -32,6 +32,7 @@ const MAP: Record<RouteReason, FieldErrorShape> = {
   payment_id_conflict: ID_CONFLICT,
   refund_id_conflict: ID_CONFLICT,
   stale: { status: 409, code: "STALE", message: "This job changed. Refresh and try again." },
+  from_estimate: { status: 409, code: "FROM_ESTIMATE", message: "This item came from the approved estimate. Ask the office to change it." },
 };
 
 export function fieldError(reason: RouteReason): FieldErrorShape {
