@@ -114,7 +114,7 @@ export function SectionCard({
         <summary
           className={cn(
             HEADER_CLASSES,
-            "cursor-pointer list-none outline-none group-not-open/section:border-b-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden",
+            "cursor-pointer list-none outline-none group-not-open/section:border-b-0 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden",
           )}
           style={{ boxShadow: "var(--keyline-top)" }}
         >
