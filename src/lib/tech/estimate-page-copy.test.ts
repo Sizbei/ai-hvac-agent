@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  afterCheck, approveConfirmCopy, approvedLine, CUSTOMER_COPY, customerHeading, footerSummary, initialChoice, previewLines,
-  saleResult, showAllLabel,
+  afterCheck, approveConfirmCopy, approvedLine, CUSTOMER_COPY, customerHeading, initialChoice, optionTaxLabel,
+  previewLines, saleResult, showAllLabel,
 } from "./estimate-page-copy";
 
 describe("customer view copy and rules (spec §7.2)", () => {
@@ -20,8 +20,6 @@ describe("customer view copy and rules (spec §7.2)", () => {
     expect(showAllLabel(5)).toBe("Show all 5 items");
   });
   it("footer and confirm copy", () => {
-    expect(footerSummary(null)).toBe("Choose an option");
-    expect(footerSummary({ name: "Better", totalCents: 481_200 })).toBe("Better · $4,812.00");
     expect(approveConfirmCopy("Better", 481_200)).toBe("Approve Better for $4,812.00?");
   });
   it("sale result: success, check by refetch, or the customer-safe failure", () => {
@@ -48,5 +46,13 @@ describe("customer view copy and rules (spec §7.2)", () => {
   });
   it("technician's approved line in the business timezone", () => {
     expect(approvedLine("2026-11-06T19:05:00Z", "Better")).toBe("Approved · Nov 6, 2:05 PM · Better");
+  });
+  it("each option card names the tax rate when the stored tax matches it", () => {
+    const line = { id: "l", pricebookItemId: null, name: "Capacitor", quantity: 2, unitPriceCents: 12_500, lineTotalCents: 25_000 };
+    const o = { lines: [line], subtotalCents: 25_000, taxCents: 2_063 };
+    expect(optionTaxLabel(o, 825)).toBe("Tax (8.25%)");
+    // The org's rate changed after the estimate was saved: never print a rate the total wasn't taxed at.
+    expect(optionTaxLabel(o, 900)).toBe("Tax");
+    expect(optionTaxLabel({ ...o, taxCents: 0 }, 0)).toBe("Tax (0%)");
   });
 });

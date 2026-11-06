@@ -295,6 +295,16 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   the office to bill this estimate." (Generate refuses while a paid draft exists).
 - **GET contract** adds `requestStatus` and `priorInvoicePaid` to spec §6; the bill success
   adds `hasMaterials`. Never cost, never the typed signature name.
+- **Sold estimate actions (final wave):** `Leave for the office` shows only when the job has
+  no live invoice (`soldBillingView(...).leave`). With a draft and no payment the draft IS the
+  job's invoice, so only `Add to the job's invoice` is offered (spec §7.3 deviation, lead
+  ruling: the office's Generate would answer `request_has_draft`). The estimate page stays
+  locked while a sell is `sent` or `unknown` (`pageLocked`), also after Back closed the layer
+  during "Approving…"; a successful sell refetches before it settles, so the page reads Sold.
+  The layer is portalled to `<body>` with every other body child `inert`, and Tab wraps inside
+  it (`focusTrapTarget`). Option cards read "Tax (8.25%)" only when the org rate reproduces the
+  stored tax (`optionTaxLabel`). The technician's failure note shows only once the layer closes
+  (`techNoteVisible`). Unknown writes on every M3c surface read `MAY_NOT_HAVE_SAVED`.
 - **Customer view:** `#customer` via native pushState/popstate (`layerStep`); Back closes
   onto the estimate page, never further; a reload reopens the layer only while sellable,
   else strips the hash; a reload that reopens it runs replaceState (strip) then

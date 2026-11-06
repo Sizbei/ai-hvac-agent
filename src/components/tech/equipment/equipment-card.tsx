@@ -5,12 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { equipmentTypeLabel } from '@/lib/admin/display-labels';
 import { EQUIPMENT_COPY, unitDetails } from '@/lib/tech/equipment-display';
-import { ESTIMATE_INTENT } from '@/lib/tech/estimate-intents';
+import { ESTIMATE_INTENT, MAY_NOT_HAVE_SAVED } from '@/lib/tech/estimate-intents';
 import type { TechEquipmentUnit, TechEquipmentView } from '@/lib/tech/equipment-input';
 import { recoverEstimateIntents } from '@/components/tech/estimates/recover-intents';
 import { EquipmentSheet } from './equipment-sheet';
-
-const UNRESOLVED_COPY = 'Your last save may not have gone through. Try again.';
 
 async function fetchEquipment(jobId: string): Promise<{ kind: 'ok'; view: TechEquipmentView } | { kind: 'hidden' } | { kind: 'error' }> {
   try {
@@ -86,7 +84,7 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
           <>
             {unresolved > 0 && (
               <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">
-                <span>{UNRESOLVED_COPY}</span>
+                <span>{MAY_NOT_HAVE_SAVED}</span>
                 <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4 text-[15px]" disabled={recovering}
                   onClick={() => { setRecovering(true); void runRecovery(); }}>
                   Try again

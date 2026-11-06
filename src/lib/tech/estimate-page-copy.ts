@@ -3,9 +3,11 @@
  * (M3c spec §7.2–§7.3). The customer view never shows server text: any failure
  * reads CUSTOMER_COPY.failed and the technician sees the reason afterwards.
  */
+import { computeOptionTotals } from "@/lib/admin/money";
 import { formatCentsExact } from "@/lib/admin/money-format";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import type { WriteOutcome } from "./invoice-key-state";
+import { taxLabel } from "./invoice-page-copy";
 import type { TechEstimate, TechEstimateOption } from "./estimate-view";
 
 export const CUSTOMER_COPY = {
@@ -56,8 +58,16 @@ export function showAllLabel(count: number): string | null {
   return count > 3 ? `Show all ${count} items` : null;
 }
 
-export function footerSummary(o: Pick<TechEstimateOption, "name" | "totalCents"> | null): string {
-  return o ? `${o.name} · ${formatCentsExact(o.totalCents)}` : CUSTOMER_COPY.choose;
+/**
+ * "Tax (8.25%)" on an option card. The estimate stores no rate, so the org's
+ * current rate is named only when it reproduces the stored tax; otherwise
+ * plain "Tax" (a rate changed after the estimate was saved).
+ */
+export function optionTaxLabel(
+  o: Pick<TechEstimateOption, "lines" | "subtotalCents" | "taxCents">, taxBps: number,
+): string {
+  const t = computeOptionTotals(o.lines, taxBps);
+  return t.subtotalCents === o.subtotalCents && t.taxCents === o.taxCents ? taxLabel(taxBps) : taxLabel(null);
 }
 
 export function approveConfirmCopy(name: string, totalCents: number): string {

@@ -12,7 +12,7 @@
  */
 import { estimateWriteCopy, type EnvelopeLike } from "./estimate-intents";
 import { saleResult } from "./estimate-page-copy";
-import type { WriteOutcome } from "./invoice-key-state";
+import type { KeyPhase, WriteOutcome } from "./invoice-key-state";
 import type { TechEstimate } from "./estimate-view";
 
 export const CUSTOMER_HASH = "#customer";
@@ -77,4 +77,34 @@ export function saleFailNote(
 /** An open layer whose estimate a refetch removed or made unsellable closes, unless a sale started in it. */
 export function layerStale(p: { readonly open: boolean; readonly saleStarted: boolean; readonly sellable: boolean }): boolean {
   return p.open && !p.saleStarted && !p.sellable;
+}
+
+/**
+ * The estimate page is locked (final review B P1-1): during the mount recovery,
+ * while a stored intent is unanswered, while any write runs, and while a sell is
+ * in flight or unknown, even after Back closed the layer during "Approving…".
+ */
+export function pageLocked(p: {
+  readonly recovering: boolean; readonly unresolved: number; readonly sellPhase: KeyPhase; readonly busy: string | null;
+}): boolean {
+  return p.recovering || p.unresolved > 0 || p.sellPhase === "sent" || p.sellPhase === "unknown" || p.busy !== null;
+}
+
+/**
+ * Tab inside the customer layer (final review B P2-6): the index to move focus
+ * to, or null to let the browser's Tab order run. `index` is the focused
+ * control's place among the layer's tabbable controls, -1 when focus is
+ * elsewhere (behind the layer, or on its heading).
+ */
+export function focusTrapTarget(p: { readonly index: number; readonly count: number; readonly shift: boolean }): number | null {
+  if (p.count === 0) return null;
+  const last = p.count - 1;
+  if (p.index < 0) return p.shift ? last : 0;
+  if (p.shift) return p.index === 0 ? last : null;
+  return p.index === last ? 0 : null;
+}
+
+/** The technician's failure note shows only once the layer is closed, so it is never read out to the customer (Task 9 parked). */
+export function techNoteVisible(p: { readonly note: string | null; readonly layerOpen: boolean; readonly banner: boolean }): boolean {
+  return p.note !== null && !p.layerOpen && !p.banner;
 }

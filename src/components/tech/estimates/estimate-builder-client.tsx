@@ -17,7 +17,7 @@ import {
   type DraftOption,
 } from '@/lib/tech/estimate-builder';
 import { MAX_OPTION_NAME, MAX_OPTIONS, MAX_QUANTITY } from '@/lib/tech/estimate-input';
-import { ESTIMATE_INTENT, estimateWriteCopy } from '@/lib/tech/estimate-intents';
+import { ESTIMATE_INTENT, MAY_NOT_HAVE_SAVED, estimateWriteCopy } from '@/lib/tech/estimate-intents';
 import type { TechEstimatesView } from '@/lib/tech/estimate-view';
 import { fetchEstimates } from './fetch-estimates';
 import { recoverEstimateIntents } from './recover-intents';
@@ -86,7 +86,7 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
       openSaved(saved.data.estimateId);
       return;
     }
-    setMessage(rec.unresolved > 0 ? { text: 'Your last save may not have gone through. Try again.', retry: 'recover' } : null);
+    setMessage(rec.unresolved > 0 ? { text: MAY_NOT_HAVE_SAVED, retry: 'recover' } : null);
     setRecovering(false);
   }, [jobId, openSaved]);
 

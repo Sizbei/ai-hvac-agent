@@ -72,7 +72,8 @@ export function canSell(
 }
 
 export type SoldBillingView =
-  | { readonly kind: "add"; readonly newInvoice: boolean }
+  /** `leave`: "Leave for the office" is offered only with no live job invoice (lead ruling, final review B P1-2). */
+  | { readonly kind: "add"; readonly newInvoice: boolean; readonly leave: boolean }
   | { readonly kind: "locked" }
   | { readonly kind: "job"; readonly invoiceId: string | null }
   | { readonly kind: "office" }
@@ -86,8 +87,9 @@ export function soldBillingView(
   if (e.billing === "office") return { kind: "office" };
   if (statusGate(view.requestStatus, BILL_STATUSES) !== "ok") return { kind: "closed" };
   const inv = view.jobInvoice;
-  if (inv === null) return { kind: "add", newInvoice: view.priorInvoicePaid };
-  if (inv.state === "draft" && !inv.hasPayment) return { kind: "add", newInvoice: false };
+  if (inv === null) return { kind: "add", newInvoice: view.priorInvoicePaid, leave: true };
+  // The draft is the job's invoice; the office would answer request_has_draft, so only Add.
+  if (inv.state === "draft" && !inv.hasPayment) return { kind: "add", newInvoice: false, leave: false };
   return { kind: "locked" };
 }
 

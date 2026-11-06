@@ -53,9 +53,11 @@ describe("estimate display (spec §2, §7.3)", () => {
     const est = (over: Partial<TechEstimate>) => ({ billing: "none", billingInvoiceId: null, ...over }) as TechEstimate;
     expect(soldBillingView(est({ billing: "job", billingInvoiceId: "i1" }), view({}))).toEqual({ kind: "job", invoiceId: "i1" });
     expect(soldBillingView(est({ billing: "office" }), view({}))).toEqual({ kind: "office" });
-    expect(soldBillingView(est({}), view({}))).toEqual({ kind: "add", newInvoice: false });
-    expect(soldBillingView(est({}), view({ priorInvoicePaid: true }))).toEqual({ kind: "add", newInvoice: true });
-    expect(soldBillingView(est({}), view({ jobInvoice: { id: "d", state: "draft", hasPayment: false } }))).toEqual({ kind: "add", newInvoice: false });
+    expect(soldBillingView(est({}), view({}))).toEqual({ kind: "add", newInvoice: false, leave: true });
+    expect(soldBillingView(est({}), view({ priorInvoicePaid: true }))).toEqual({ kind: "add", newInvoice: true, leave: true });
+    // A live draft IS the job's invoice: only Add, never Leave for the office (lead ruling, final review B P1-2;
+    // the office would answer request_has_draft).
+    expect(soldBillingView(est({}), view({ jobInvoice: { id: "d", state: "draft", hasPayment: false } }))).toEqual({ kind: "add", newInvoice: false, leave: false });
     expect(soldBillingView(est({}), view({ jobInvoice: { id: "d", state: "draft", hasPayment: true } }))).toEqual({ kind: "locked" });
     expect(soldBillingView(est({}), view({ jobInvoice: { id: "o", state: "open", hasPayment: false } }))).toEqual({ kind: "locked" });
     expect(soldBillingView(est({}), view({ requestStatus: "cancelled" }))).toEqual({ kind: "closed" });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ESTIMATE_INTENT, ESTIMATE_INTENTS_KEY, estimateWriteCopy, isStoredWrite, recoveryKeeps, storedToRecover, withoutIntent,
+  ESTIMATE_INTENT, ESTIMATE_INTENTS_KEY, MAY_NOT_HAVE_SAVED, estimateWriteCopy, isStoredWrite, recoveryKeeps, storedToRecover, withoutIntent,
 } from "./estimate-intents";
 import { INTENTS_STORAGE_KEY, serializeIntents } from "./invoice-intent-persist";
 
@@ -41,7 +41,9 @@ describe("estimate intents (spec §7)", () => {
     for (const o of ["success_refetch", "show_message_refetch", "spent_new_key", "already_saved_refetch", "refetch_new_key"] as const) expect(recoveryKeeps(o)).toBe(false);
   });
   it("write copy: server copy for definitive refusals, our copy for unknowns", () => {
-    expect(estimateWriteCopy("retry_same_key_after_refetch", null)).toBe("Your last tap may not have saved. Try again.");
+    // One "may not have saved" line for the estimate page, the builder and the equipment card (final review C m5).
+    expect(MAY_NOT_HAVE_SAVED).toBe("Your last change may not have saved. Try again.");
+    expect(estimateWriteCopy("retry_same_key_after_refetch", null)).toBe(MAY_NOT_HAVE_SAVED);
     expect(estimateWriteCopy("wait_then_refetch", null)).toBe("Still saving your last tap…");
     expect(estimateWriteCopy("show_message_refetch", { error: { code: "ALREADY_DECIDED", message: "This estimate was already decided." } })).toBe("This estimate was already decided.");
     expect(estimateWriteCopy("spent_new_key", { error: { code: "IDEMPOTENCY_KEY_REUSED", message: "x" } })).toBe("That tap didn't go through. Try again.");

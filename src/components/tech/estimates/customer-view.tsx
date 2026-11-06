@@ -1,19 +1,53 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { approveBlockedHint } from '@/lib/portal/estimate-decision';
 import { MAX_SIGNATURE, signatureNameOk } from '@/lib/tech/estimate-input';
 import {
-  CUSTOMER_COPY, approveConfirmCopy, customerHeading, initialChoice, previewLines, showAllLabel,
+  CUSTOMER_COPY, approveConfirmCopy, customerHeading, initialChoice, optionTaxLabel, previewLines, showAllLabel,
 } from '@/lib/tech/estimate-page-copy';
+import { focusTrapTarget } from '@/lib/tech/customer-view-state';
 import type { TechEstimate } from '@/lib/tech/estimate-view';
 
 type Screen = 'choose' | 'confirm' | 'sending' | 'checking' | 'success' | 'failed' | 'handback';
 
 const MONEY = 'font-mono tabular-nums';
+const TABBABLE = 'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The layer lives in its own node on <body>; everything else on <body> is
+ * `inert` while it is open (no Tab, no tap, nothing read out: Sign out and
+ * Customer declined behind it are unreachable), and Tab wraps inside it
+ * (final review B P2-6).
+ */
+function useModalLayer(): HTMLDivElement {
+  // The layer only ever mounts on the client (it opens from a tap or a #customer reload).
+  const [el] = useState(() => document.createElement('div'));
+  useEffect(() => {
+    document.body.appendChild(el);
+    const madeInert = Array.from(document.body.children).filter((c): c is HTMLElement => c !== el && c instanceof HTMLElement && !c.inert);
+    for (const c of madeInert) c.inert = true;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const items = Array.from(el.querySelectorAll<HTMLElement>(TABBABLE));
+      const to = focusTrapTarget({ index: items.indexOf(document.activeElement as HTMLElement), count: items.length, shift: e.shiftKey });
+      if (to === null) return;
+      e.preventDefault();
+      items[to]?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      for (const c of madeInert) c.inert = false;
+      el.remove();
+    };
+  }, [el]);
+  return el;
+}
 
 function Total({ label, cents, strong = false }: { readonly label: string; readonly cents: number; readonly strong?: boolean }) {
   return (
@@ -33,12 +67,14 @@ export function CustomerView({
   estimate,
   companyName,
   customerDisplayName,
+  taxBps,
   onApprove,
   onClose,
 }: {
   readonly estimate: TechEstimate;
   readonly companyName: string | null;
   readonly customerDisplayName: string | null;
+  readonly taxBps: number;
   readonly onApprove: (optionId: string, signatureName: string, onChecking: () => void) => Promise<'success' | 'failed'>;
   readonly onClose: () => void;
 }) {
@@ -53,6 +89,7 @@ export function CustomerView({
   const sending = screen === 'sending' || screen === 'checking';
   const choosing = screen === 'choose';
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const host = useModalLayer();
 
   // Opening the layer moves focus to its heading, so a screen reader starts at the customer's estimate.
   useEffect(() => {
@@ -65,10 +102,11 @@ export function CustomerView({
     setScreen(await onApprove(chosen.id, name.trim(), () => setScreen('checking')));
   }
 
-  const layer = (children: ReactNode) => (
+  const layer = (children: ReactNode) => createPortal(
     <div role="dialog" aria-modal="true" aria-label={customerHeading(customerDisplayName)} className="fixed inset-0 z-50 bg-canvas">
       <div className="mx-auto flex h-dvh w-full max-w-md flex-col">{children}</div>
-    </div>
+    </div>,
+    host,
   );
 
   const endScreen = (text: string, action: string) => layer(
@@ -125,7 +163,7 @@ export function CustomerView({
                     </span>
                     <span className="block space-y-0.5 border-t border-border pt-2">
                       <Total label="Subtotal" cents={o.subtotalCents} />
-                      <Total label="Tax" cents={o.taxCents} />
+                      <Total label={optionTaxLabel(o, taxBps)} cents={o.taxCents} />
                       <Total label="Total" cents={o.totalCents} strong />
                     </span>
                   </span>

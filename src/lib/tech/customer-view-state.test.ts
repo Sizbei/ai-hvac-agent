@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  CUSTOMER_HASH, LAYER_CLOSED, LAYER_OPEN, approveFirst, layerStale, layerStep, saleFailNote, sellAdvanced,
+  CUSTOMER_HASH, LAYER_CLOSED, LAYER_OPEN, approveFirst, focusTrapTarget, layerStale, layerStep, pageLocked, saleFailNote,
+  sellAdvanced, techNoteVisible,
 } from "./customer-view-state";
 
 describe("customer layer history (spec §7.2, plan ruling 13)", () => {
@@ -58,12 +59,12 @@ describe("approve never reports a blind success (fix round 1)", () => {
 
 describe("the technician sees why a sale failed (fix round 1)", () => {
   it("nothing sent: a sell is still in flight", () => {
-    expect(saleFailNote({ sent: false })).toBe("Your last tap may not have saved. Try again.");
+    expect(saleFailNote({ sent: false })).toBe("Your last change may not have saved. Try again.");
   });
   it("the server's reason, or the write copy for the outcome", () => {
     expect(saleFailNote({ sent: true, outcome: "show_message_refetch", envelope: { error: { message: "This estimate has expired." } } }))
       .toBe("This estimate has expired.");
-    expect(saleFailNote({ sent: true, outcome: "retry_same_key_after_refetch", envelope: null })).toBe("Your last tap may not have saved. Try again.");
+    expect(saleFailNote({ sent: true, outcome: "retry_same_key_after_refetch", envelope: null })).toBe("Your last change may not have saved. Try again.");
     expect(saleFailNote({ sent: true, outcome: "spent_new_key", envelope: null })).toBe("Couldn't save that. Try again.");
   });
   it("a re-sent older sell that landed: the page's sold state is the reason, no error note", () => {
@@ -79,5 +80,49 @@ describe("an open layer closes when its estimate stops being sellable (fix round
     // After Approve the layer keeps its result screen until the technician takes the phone back.
     expect(layerStale({ open: true, saleStarted: true, sellable: false })).toBe(false);
     expect(layerStale({ open: false, saleStarted: false, sellable: false })).toBe(false);
+  });
+});
+
+describe("estimate page locks while a sale is in flight (final review B P1-1)", () => {
+  const base = { recovering: false, unresolved: 0, sellPhase: "idle", busy: null } as const;
+  it("a sell still in flight locks the page, even after Back closed the layer", () => {
+    expect(pageLocked({ ...base, sellPhase: "sent" })).toBe(true);
+    expect(pageLocked({ ...base, sellPhase: "unknown" })).toBe(true);
+  });
+  it("idle and armed sells leave it unlocked; recovery, stored intents and busy lock it", () => {
+    expect(pageLocked(base)).toBe(false);
+    expect(pageLocked({ ...base, sellPhase: "armed" })).toBe(false);
+    expect(pageLocked({ ...base, recovering: true })).toBe(true);
+    expect(pageLocked({ ...base, unresolved: 1 })).toBe(true);
+    expect(pageLocked({ ...base, busy: "bill" })).toBe(true);
+  });
+});
+
+describe("customer layer focus trap (final review B P2-6)", () => {
+  it("Tab from the last control wraps to the first; Shift+Tab from the first wraps to the last", () => {
+    expect(focusTrapTarget({ index: 2, count: 3, shift: false })).toBe(0);
+    expect(focusTrapTarget({ index: 0, count: 3, shift: true })).toBe(2);
+  });
+  it("focus outside the layer (or on its heading) comes back in", () => {
+    expect(focusTrapTarget({ index: -1, count: 3, shift: false })).toBe(0);
+    expect(focusTrapTarget({ index: -1, count: 3, shift: true })).toBe(2);
+  });
+  it("inside the layer, the browser's own Tab order runs", () => {
+    expect(focusTrapTarget({ index: 1, count: 3, shift: false })).toBeNull();
+    expect(focusTrapTarget({ index: 1, count: 3, shift: true })).toBeNull();
+  });
+  it("nothing focusable: nothing to move to", () => {
+    expect(focusTrapTarget({ index: -1, count: 0, shift: false })).toBeNull();
+  });
+});
+
+describe("the technician's failure note waits for the layer to close (Task 9 parked)", () => {
+  it("hidden while the customer holds the phone, shown once it is handed back", () => {
+    expect(techNoteVisible({ note: "This estimate expired. Build a new one.", layerOpen: true, banner: false })).toBe(false);
+    expect(techNoteVisible({ note: "This estimate expired. Build a new one.", layerOpen: false, banner: false })).toBe(true);
+  });
+  it("the may-not-have-saved banner already says it; no note, no line", () => {
+    expect(techNoteVisible({ note: "x", layerOpen: false, banner: true })).toBe(false);
+    expect(techNoteVisible({ note: null, layerOpen: false, banner: false })).toBe(false);
   });
 });

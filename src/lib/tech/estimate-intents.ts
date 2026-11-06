@@ -60,10 +60,13 @@ export interface EnvelopeLike {
 
 const FALLBACK = "Couldn't save that. Try again.";
 
+/** The one "may not have saved" line for the estimate page, the builder and the equipment card and sheet. */
+export const MAY_NOT_HAVE_SAVED = "Your last change may not have saved. Try again.";
+
 export function estimateWriteCopy(outcome: WriteOutcome, envelope: EnvelopeLike | null): string {
   switch (outcome) {
     case "retry_same_key_after_refetch":
-      return "Your last tap may not have saved. Try again.";
+      return MAY_NOT_HAVE_SAVED;
     case "wait_then_refetch":
       return "Still saving your last tap…";
     case "spent_new_key":

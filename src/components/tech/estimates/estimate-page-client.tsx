@@ -9,12 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import {
-  CUSTOMER_HASH, LAYER_CLOSED, approveFirst, layerStale, layerStep, saleFailNote, sellAdvanced,
+  CUSTOMER_HASH, LAYER_CLOSED, approveFirst, layerStale, layerStep, pageLocked, saleFailNote, sellAdvanced, techNoteVisible,
   type LayerEffect, type LayerEvent, type LayerState,
 } from '@/lib/tech/customer-view-state';
 import { DECLINE_COPY, SOLD_ACTIONS, afterCheck, approvedLine } from '@/lib/tech/estimate-page-copy';
 import { BILLING_LINE, SOLD_COPY, STATUS_CHIP, canSell, soldBillingView, soldOptionOf } from '@/lib/tech/estimate-display';
-import { ESTIMATE_INTENT, estimateWriteCopy } from '@/lib/tech/estimate-intents';
+import { ESTIMATE_INTENT, MAY_NOT_HAVE_SAVED, estimateWriteCopy } from '@/lib/tech/estimate-intents';
 import type { TechEstimate, TechEstimateOption, TechEstimatesView } from '@/lib/tech/estimate-view';
 import { CustomerView } from './customer-view';
 import { fetchEstimates } from './fetch-estimates';
@@ -149,7 +149,9 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
     const r = await sellSend(`/api/tech/jobs/${jobId}/estimates/${eid}/sell`, { optionId, signatureName });
     const first = approveFirst(r);
     if (first === 'success' && r.sent) {
-      sellSettle(r.outcome, false);
+      // Settle only after the refetch: the sell stays 'sent' (page locked) until the page shows the sale,
+      // even when Back closed the layer during Approving… (final review B P1-1).
+      void refetch().finally(() => sellSettle(r.outcome, false));
       return 'success';
     }
     if (first === 'check') {
@@ -259,7 +261,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
   if (!e) return <div className="space-y-4">{back}<p className="text-[15px]">That estimate isn&apos;t on this job.</p></div>;
 
   const sellUnknown = sellPhase === 'unknown';
-  const locked = recovering || unresolved > 0 || sellUnknown || busy !== null;
+  const locked = pageLocked({ recovering, unresolved, sellPhase, busy });
   const sellable = canSell(view, e);
   const sold = e.status === 'sold' ? soldOptionOf(e) : null;
   const billingView = e.status === 'sold' ? soldBillingView(e, view) : null;
@@ -269,7 +271,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
       {back}
       {(unresolved > 0 || sellUnknown) && (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">
-          <span>Your last tap may not have saved. Try again.</span>
+          <span>{MAY_NOT_HAVE_SAVED}</span>
           <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4 text-[15px]" disabled={recovering || busy !== null}
             onClick={() => {
               if (unresolved > 0) {
@@ -297,9 +299,11 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
                   <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked} onClick={() => void addToInvoice()}>
                     {busy === 'bill' ? SOLD_ACTIONS.adding : SOLD_ACTIONS.add}
                   </Button>
-                  <Button variant="outline" className="h-11 w-full rounded-xl text-[15px]" disabled={locked} onClick={() => router.push(`/tech/jobs/${jobId}`)}>
-                    {SOLD_ACTIONS.leave}
-                  </Button>
+                  {billingView.leave && (
+                    <Button variant="outline" className="h-11 w-full rounded-xl text-[15px]" disabled={locked} onClick={() => router.push(`/tech/jobs/${jobId}`)}>
+                      {SOLD_ACTIONS.leave}
+                    </Button>
+                  )}
                 </div>
               )}
               {billingView?.kind === 'locked' && <p className="text-[15px]">{SOLD_COPY.locked}</p>}
@@ -345,7 +349,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
               )}
             </>
           )}
-          {note && !(unresolved > 0 || sellUnknown) && <p role="alert" className="text-[15px] text-danger-strong">{note}</p>}
+          {techNoteVisible({ note, layerOpen: layer.open, banner: unresolved > 0 || sellUnknown }) && <p role="alert" className="text-[15px] text-danger-strong">{note}</p>}
         </CardContent>
       </Card>
 
@@ -354,6 +358,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
           estimate={e}
           companyName={view.companyName}
           customerDisplayName={view.customerDisplayName}
+          taxBps={view.taxBps}
           onApprove={approve}
           onClose={() => dispatchLayer({ type: 'close' })}
         />

@@ -7,11 +7,10 @@ import { TechSheet } from '@/components/tech/invoice/tech-sheet';
 import { EQUIPMENT_TYPE_OPTIONS } from '@/lib/admin/display-labels';
 import { EQUIPMENT_ERROR_COPY, parseEquipmentInput, todayInZone, type TechEquipmentUnit } from '@/lib/tech/equipment-input';
 import { EQUIPMENT_COPY, emptyForm, formBody, formForReplace, replaceHeading, type EquipmentForm } from '@/lib/tech/equipment-display';
-import { ESTIMATE_INTENT, estimateWriteCopy } from '@/lib/tech/estimate-intents';
+import { ESTIMATE_INTENT, MAY_NOT_HAVE_SAVED, estimateWriteCopy } from '@/lib/tech/estimate-intents';
 import { useEstimateWrite, type EstimateSend } from '@/components/tech/estimates/use-estimate-write';
 
 const FIELD = 'h-11 rounded-xl text-[16px]';
-const UNKNOWN_COPY = 'Your last save may not have gone through. Try again.';
 const EARLIER_COPY = 'Your earlier save went through first. Check the equipment list.';
 
 /**
@@ -63,7 +62,7 @@ export function EquipmentSheet({
       onClose();
       return;
     }
-    setError(unknown ? UNKNOWN_COPY : estimateWriteCopy(r.outcome, r.envelope));
+    setError(unknown ? MAY_NOT_HAVE_SAVED : estimateWriteCopy(r.outcome, r.envelope));
   }
 
   // Rehydrated as `unknown` (a reload or a closed sheet left it unanswered):
