@@ -28,7 +28,7 @@
  */
 import "server-only";
 import { after } from "next/server";
-import { eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   organizations,
@@ -132,11 +132,14 @@ export async function anonymizeCustomer(
   if (!existing) return false;
 
   // Pre-read: this customer's session ids (to scrub the sessions + delete their
-  // messages), the R2 keys of their attachments (for after() cleanup), and the
-  // ids of their service requests (request_notes / time-entry notes / custom
-  // field values keyed off those rows must be scrubbed — service_requests rows
-  // are KEPT de-identified, so their child-row cascade never fires).
-  const [sessionRows, attachmentRows, requestRows] = await Promise.all([
+  // messages) and their service requests (request_notes / time-entry notes /
+  // custom field values keyed off those rows must be scrubbed —
+  // service_requests rows are KEPT de-identified, so their child-row cascade
+  // never fires). A session belongs to the customer when it is linked directly
+  // (customer_sessions.customer_id) OR when one of their requests came from it
+  // (service_requests.session_id) — many intake sessions never get the direct
+  // link, yet their metadata/token carry the same name, phone and email.
+  const [sessionRows, requestRows] = await Promise.all([
     db
       .select({ id: customerSessions.id })
       .from(customerSessions)
@@ -148,17 +151,11 @@ export async function anonymizeCustomer(
         ),
       ),
     db
-      .select({ storageKey: attachments.storageKey })
-      .from(attachments)
-      .where(
-        withTenant(
-          attachments,
-          organizationId,
-          eq(attachments.customerId, customerId),
-        ),
-      ),
-    db
-      .select({ id: serviceRequests.id, signatureUrl: serviceRequests.signatureUrl })
+      .select({
+        id: serviceRequests.id,
+        signatureUrl: serviceRequests.signatureUrl,
+        sessionId: serviceRequests.sessionId,
+      })
       .from(serviceRequests)
       .where(
         withTenant(
@@ -169,8 +166,25 @@ export async function anonymizeCustomer(
       ),
   ]);
 
-  const sessionIds = sessionRows.map((r) => r.id);
+  const sessionIds = [
+    ...new Set([
+      ...sessionRows.map((r) => r.id),
+      ...requestRows.map((r) => r.sessionId),
+    ]),
+  ];
   const requestIds = requestRows.map((r) => r.id);
+
+  // Attachments: the customer's own (admin uploads) AND every chat upload in
+  // their sessions — those carry only session_id/message_id, and must go
+  // before the messages they point at (attachments.message_id FK).
+  const attachmentMatch = or(
+    eq(attachments.customerId, customerId),
+    inArray(attachments.sessionId, sessionIds),
+  )!;
+  const attachmentRows = await db
+    .select({ storageKey: attachments.storageKey })
+    .from(attachments)
+    .where(withTenant(attachments, organizationId, attachmentMatch));
 
   // Invoice signature snapshots (M3b): the customer's own invoices OR any
   // invoice on the customer's requests (an estimate-born invoice may carry a
@@ -199,6 +213,11 @@ export async function anonymizeCustomer(
   // scoped. Deletes target the genuinely-personal child rows; everything else
   // is an order-independent UPDATE that nulls/scrubs PII in place.
   await db.batch([
+    // Attachments first: a chat upload's message_id references a message
+    // deleted just below.
+    db
+      .delete(attachments)
+      .where(withTenant(attachments, organizationId, attachmentMatch)),
     // Delete chat transcript for this customer's sessions (PII free-text).
     // inArray over an empty list is a valid no-op (matches nothing).
     db
@@ -217,15 +236,6 @@ export async function anonymizeCustomer(
           customerNotes,
           organizationId,
           eq(customerNotes.customerId, customerId),
-        ),
-      ),
-    db
-      .delete(attachments)
-      .where(
-        withTenant(
-          attachments,
-          organizationId,
-          eq(attachments.customerId, customerId),
         ),
       ),
     // Customer row: scrub PII, NULL the blind indexes (frees the per-org unique
@@ -327,10 +337,25 @@ export async function anonymizeCustomer(
           eq(estimates.customerId, customerId),
         ),
       ),
-    // Detach + scrub the chat sessions (the messages are already deleted above).
+    // Detach + scrub the chat sessions (the messages are already deleted
+    // above). metadata holds the plaintext intake slots (name, phone, email,
+    // address, free-text extras); every reader treats NULL as "nothing
+    // captured", the state a brand-new session starts in. An SMS thread's token
+    // is "sms:<phone>" (or "sms:<phone>:<id>" once retired): rewrite it to a
+    // unique non-PII value, which also stops a later text from that number
+    // reattaching to this transcript. Other tokens (web random, CallSid,
+    // admin-/mvisit-/fp-import- markers) carry no PII and are left alone —
+    // the FieldPulse import dedupes on its marker.
     db
       .update(customerSessions)
-      .set({ customerId: null, summary: null, runningSummary: null })
+      .set({
+        customerId: null,
+        summary: null,
+        runningSummary: null,
+        nextSteps: null,
+        metadata: null,
+        token: sql`CASE WHEN ${customerSessions.token} LIKE 'sms:%' THEN 'erased:' || ${customerSessions.id}::text ELSE ${customerSessions.token} END`,
+      })
       .where(
         withTenant(
           customerSessions,

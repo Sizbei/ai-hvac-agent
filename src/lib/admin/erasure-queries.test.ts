@@ -19,6 +19,8 @@ interface Captured {
   table: string;
   set?: Record<string, unknown>;
   values?: Record<string, unknown>;
+  /** What .where(...) was given (the withTenant mock passes the conditions through). */
+  cond?: unknown;
 }
 
 const {
@@ -47,7 +49,10 @@ const {
 
     const makeUpdate = (t: unknown): Captured & { set: typeof set } => {
       const cap: Captured = { op: "update", table: tableName(t) };
-      const where = () => cap;
+      const where = (cond?: unknown) => {
+        cap.cond = cond;
+        return cap;
+      };
       const set = (payload: Record<string, unknown>) => {
         cap.set = payload;
         return { where };
@@ -57,7 +62,10 @@ const {
 
     const makeDelete = (t: unknown): Captured & { where: () => Captured } => {
       const cap: Captured = { op: "delete", table: tableName(t) };
-      const where = () => cap;
+      const where = (cond?: unknown) => {
+        cap.cond = cond;
+        return cap;
+      };
       return Object.assign(cap, { where }) as never;
     };
 
@@ -153,7 +161,13 @@ vi.mock("drizzle-orm", () => ({
   isNull: (...a: unknown[]) => ({ op: "isNull", args: a }),
   or: (...a: unknown[]) => ({ op: "or", args: a.filter((x) => x !== undefined) }),
   inArray: (...a: unknown[]) => a,
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    op: "sql",
+    text: strings.join("?"),
+    values,
+  }),
 }));
+
 
 vi.mock("@/lib/crypto", () => ({
   encrypt: (s: string) => `ENC(${s})`,
@@ -213,12 +227,14 @@ describe("anonymizeCustomer", () => {
   /** Seed: existing customer, two sessions, two attachments. */
   function seedExisting() {
     selectQueue.push([{ id: CUST }]); // existence check
-    selectQueue.push([{ id: "sess-1" }, { id: "sess-2" }]); // sessions
-    selectQueue.push([{ storageKey: "k1" }, { storageKey: "k2" }]); // attachments
+    selectQueue.push([{ id: "sess-1" }, { id: "sess-2" }]); // sessions linked directly
     selectQueue.push([
-      { id: "req-1", signatureUrl: `${PUB}/signatures/req-1.png` },
-      { id: "req-2", signatureUrl: null },
+      // req-1 came from a directly-linked session; req-2's session (sess-3)
+      // was never linked to the customer — it is reached only via the request.
+      { id: "req-1", signatureUrl: `${PUB}/signatures/req-1.png`, sessionId: "sess-1" },
+      { id: "req-2", signatureUrl: null, sessionId: "sess-3" },
     ]); // service requests
+    selectQueue.push([{ storageKey: "k1" }, { storageKey: "k2" }]); // attachments
     selectQueue.push([
       // The invoice's snapshot copy of req-1's signature (same object).
       { signatureUrl: `${PUB}/signatures/req-1.png` },
@@ -330,6 +346,65 @@ describe("anonymizeCustomer", () => {
     expect(opFor("reviewRequests")?.set).toMatchObject({ feedback: null });
   });
 
+  it("scrubs sessions linked directly AND through the customer's requests", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    const all = ["sess-1", "sess-2", "sess-3"];
+
+    // The direct-link read is by customer_sessions.customer_id.
+    expect(selectWhereCalls[1]).toEqual([
+      { op: "eq", args: ["customerSessions.customerId", CUST] },
+    ]);
+    // The request read returns session_id, which widens the set.
+    const sess = opFor("customerSessions");
+    expect(sess?.cond).toEqual([["customerSessions.id", all]]);
+    // Their transcripts go too (deduped union: sess-1 appears on both paths).
+    expect(opFor("messages")?.cond).toEqual([["messages.sessionId", all]]);
+    const audit = opFor("auditLog");
+    expect(JSON.parse(String(audit?.values?.details))).toMatchObject({ sessions: 3 });
+  });
+
+  it("nulls session metadata + next steps and rewrites only sms: tokens", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    const set = opFor("customerSessions")?.set ?? {};
+    expect(set).toMatchObject({
+      customerId: null,
+      summary: null,
+      runningSummary: null,
+      nextSteps: null,
+      metadata: null,
+    });
+    const token = set.token as { op: string; text: string; values: unknown[] };
+    expect(token.op).toBe("sql");
+    expect(token.text).toContain("LIKE 'sms:%' THEN 'erased:' ||");
+    expect(token.text).toContain("::text ELSE ? END");
+    // CASE <token> ... <id> ... ELSE <token>: other token kinds are kept as is.
+    expect(token.values).toEqual([
+      "customerSessions.token",
+      "customerSessions.id",
+      "customerSessions.token",
+    ]);
+  });
+
+  it("deletes chat uploads in those sessions before the messages they point at", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    const batch = batchCalls.at(-1) ?? [];
+    const att = opFor("attachments");
+    expect(att?.cond).toEqual([
+      {
+        op: "or",
+        args: [
+          { op: "eq", args: ["attachments.customerId", CUST] },
+          ["attachments.sessionId", ["sess-1", "sess-2", "sess-3"]],
+        ],
+      },
+    ]);
+    expect(selectWhereCalls[3]).toEqual(att?.cond);
+    expect(batch.indexOf(att!)).toBeLessThan(batch.indexOf(opFor("messages")!));
+  });
+
   it("deletes messages, customer notes, and attachments", async () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
@@ -403,7 +478,7 @@ describe("anonymizeCustomer", () => {
   it("reads invoice signatures on the customer's invoices OR the customer's requests", async () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
-    // Reads: existence, sessions, attachments, requests, invoices.
+    // Reads: existence, sessions, requests, attachments, invoices.
     const [invoiceMatch] = selectWhereCalls[4] as TaggedCondition[];
     expect(invoiceMatch.op).toBe("or");
     expect(invoiceMatch.args).toHaveLength(2);
