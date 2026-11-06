@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** main at `7567e03` or later (spec v4 FINAL committed; migrations through 0056 applied on dev). Plan v1.
+**Prerequisite:** main at `7567e03` or later (spec v4 FINAL committed; migrations through 0056 applied on dev). Plan v2 after adversarial review round 1 (three reports: code correctness, money/concurrency, spec coverage; scratchpad `m3c/plan-r1-*.md`).
 
 **Goal:** The lead technician builds a one-to-three-option estimate from the pricebook, the customer picks and signs on the lead's phone, the estimate is sold, its lines land on the job's invoice exactly once (or wait in the office's new `Sold, not invoiced` filter), and any technician on the job can add or replace a unit of equipment, the old unit retired and linked.
 
@@ -23,16 +23,28 @@
 8. Case (f) says "both halves true" for an office-first invoice; the job half requires `i.estimate_id IS NULL`, so an office invoice alone never makes it true. Task 11 asserts office-only for (f) and adds a synthetic both-halves row to pin the office → job precedence.
 9. The office customer LIST's equipment count also counts live units only (same number the profile shows).
 10. The materials-overlap warning needs the sold estimates' pricebook ids on the job page; the Estimates card hands its loaded view to the page through `onLoaded`.
+11. **Spec deviation — `INVOICE_CHANGED` (lead ruling 3).** Spec §5.3 step 2 maps `paid` / `refunded` / `invoice_voided` from `createInvoiceFromJob` to unstored `STALE`. But `createInvoiceFromJob` answers for THIS key's derived invoice id, and the same key always derives the same id, so an unstored answer re-arms the same key and every retry hits the same voided or paid invoice: the technician could never bill (review money M1). Those three results map to a NEW STORED code `INVOICE_CHANGED` (409, "The job's invoice changed. Try again."): the client spends the key, the next tap mints a new key and so a new derived invoice id. A plain `stale` (a deadlock included) stays unstored `STALE`.
+12. **Spec deviation — `INVOICE_LOCKED` copy (lead ruling 6).** Spec copy "…The office will bill this estimate." is untrue for a draft with a payment: office Generate refuses while a native draft exists (`request_has_draft`). Copy everywhere: "The job's invoice is already finalized. Ask the office to bill this estimate."
+13. **Spec deviation — customer-layer reload (lead ruling 2).** Spec §7.2 lets a reload-opened layer close with `replaceState`, which leaves no history entry, so a Back gesture would leave the estimate page (contradicting "never further"). On a reload that reopens the layer the page runs `history.replaceState` (strip the hash) and then `history.pushState('#customer')`; every close is a single `history.back()`. If the reload happened on an already-pushed entry the stack holds one extra estimate-page entry; one more Back stays on the page (accepted).
+14. **Equipment keys rehydrate (lead ruling 5).** Equipment intents follow the M3b rule like the estimate intents: the card re-sends stored intents before it unlocks and stays locked with "Your last save may not have gone through. Try again." while any is unanswered; the sheet rehydrates its intent from storage and re-sends the OLD body with the OLD key before Save unlocks (an unknown add can never mint a second key and insert a second unit).
+15. `replaceOutcome`: when the old unit is visible, live and native but nothing was written (the request changed under the batch), the answer is `STALE`, not the spec's catch-all 404 (review money minor 2); 404 stays for an invisible unit.
+16. `createFieldEstimate` with the request gone (unreachable behind the preamble) answers `STALE`, not the estimate 404 copy.
+
+**Rejected review items** (one line each):
+- Spec m1, equipment preamble "checks only `r.status`": `findTechAssignments` already filters `isNull(appointments.cancelledAt)` (`src/lib/tech/ownership.ts`, `findTechAssignments`), so a row on a cancelled visit is never returned and never counts.
+- Spec m7, native `<select>` in the equipment sheet: the tech app's existing material picker uses a native select (`tech-job-detail-client.tsx`) and a native picker is the better phone control; `src/components/ui/select.tsx` (Base UI) stays office-side.
+- Spec m9, Undo restores the pre-removal snapshot and drops edits made in the next 5 seconds: Undo means "put it back as it was"; merging later edits into a restored option would rename options under the technician's thumb.
+- Code minor, step 2 can leave a seeded draft behind when step 3 refuses: accepted by spec §5.3 step 2 ("the created draft stays with the job's materials; it is the job's invoice anyway").
 
 ## Global Constraints
 
 - Gates before every commit: `npx tsc --noEmit` → 0; `npx eslint <changed files>` → 0 errors; `npx vitest run` never below the live baseline. **Capture the baseline before Task 1** (`npx vitest run 2>&1 | tail -5`, note files / passed / skipped in the task report); tests rewritten together with the code they pin are reported as a delta. No jsdom/RTL: component logic is extracted into pure helpers and tested in node. `node scripts/agent/verify-skills.mjs` → 0 missing when skills change (Task 11). After Task 1: `npx drizzle-kit generate` → "No schema changes".
 - `.env.local` is the DEV Neon branch. NEVER point it at prod (`ep-withered-hill`). The integration suite refuses that host.
 - neon-http: `db.transaction()` throws at runtime; every writer is ONE `db.batch` (`runBatch` from `invoice-field-writes.ts`), lock-first `L_req` → `L_inv` → row lock; deadlock `40P01` → `stale`.
-- SQL rules (M3b, kept): every enum literal cast (`'open'::estimate_status`, `'void'::invoice_state`, `'arrived'::request_status`, `…::equipment_type`); every fragment holding `OR` wrapped in its own parentheses and pinned by a `PgDialect` render test; `organization_id = $org` on EVERY table reference, subqueries and EXISTS bodies included; render tests assert parameter counts.
+- SQL rules (M3b, kept): every enum literal cast (`'sold'::estimate_status`, `'open'::estimate_status`, `'void'::invoice_state`, `'arrived'::request_status`, `…::equipment_type`); every fragment holding `OR` wrapped in its own parentheses and pinned by a `PgDialect` render test; `organization_id = $org` on EVERY table reference, subqueries and EXISTS bodies included; render tests assert parameter counts.
 - Money is integer cents; tax = `Math.round(subtotal × bps / 10000)` client and server (`computeOptionTotals`, `src/lib/admin/money.ts`), `ROUND(sub * bps / 10000.0)::int` in `totalsSql`. Every write that sums money checks `INT32_MAX` (2 147 483 647) first → 400 `INVALID_INPUT` "That total is too large."; a 22003 inside the bill batch maps to the same answer. Tech GETs never select a cost column (tests assert no key containing `cost`).
 - Tenancy and envelopes: tech routes `getTechSession()`, office routes `getAdminSession()`; `successResponse` / `errorResponse` (`@/lib/api-response`); `isUuid` (`@/lib/validation/uuid`); `slidingWindow(key, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs)` for writes, `adminRead` for GETs; `isSameOriginRequest` on every tech write; audit through `auditWrite` (`@/lib/tech/invoice-write-route`) with ids and enums ONLY, written only when the write created or changed something and never on a replay; logs carry codes and ids only (`errorCode` from `@/lib/logger`), never `err.message` in a response.
-- Idempotency (M3b §4, unchanged): header `Idempotency-Key`; hash = `canonicalHash(parsed body)`; route = `request.nextUrl.pathname`; derived ids `ids.id("estimate" | "invoice" | "equipment")`. New stored codes: `ALREADY_DECIDED`, `ESTIMATE_EXPIRED`, `INVALID_OPTION`, `EQUIPMENT_RETIRED` (plus the existing `ALREADY_BILLED`, `NO_LINES`, `INVOICE_LOCKED`, `INVALID_INPUT`). Never stored: `NO_CUSTOMER`, `STALE`, `NOT_LEAD`, `NOT_ON_SITE`, `JOB_CLOSED`, `ESTIMATE_NOT_SOLD`, `MANAGED_EXTERNALLY`, `NOT_FOUND`, `NOT_ASSIGNED`.
+- Idempotency (M3b §4, unchanged): header `Idempotency-Key`; hash = `canonicalHash(parsed body)`; route = `request.nextUrl.pathname`; derived ids `ids.id("estimate" | "invoice" | "equipment")`. New stored codes: `ALREADY_DECIDED`, `ESTIMATE_EXPIRED`, `INVALID_OPTION`, `EQUIPMENT_RETIRED`, `INVOICE_CHANGED` (ruling 11) (plus the existing `ALREADY_BILLED`, `NO_LINES`, `INVOICE_LOCKED`, `INVALID_INPUT`). Never stored: `NO_CUSTOMER`, `STALE`, `NOT_LEAD`, `NOT_ON_SITE`, `JOB_CLOSED`, `ESTIMATE_NOT_SOLD`, `MANAGED_EXTERNALLY`, `NOT_FOUND`, `NOT_ASSIGNED`.
 - Copy canon: sentence case; technician copy says "job", office copy says "request"; "technician", "sign in", "cancelled", Unicode `…`; no exclamation marks; human error copy only. Every user-facing string in this plan is EXACT; do not reword.
 - Tech UI: base primitives only (`Card`, `Button`, `Input`, `Sheet side="bottom"`, `Skeleton`), `h-11` / `min-h-11` targets (`h-12` for primary money actions), `font-mono tabular-nums` money via `formatCentsExact` (`@/lib/admin/money-format`), inline `role="alert"` errors, `max-w-md` layout. Read `~/.claude/design-principles.md`, `.claude/skills/page-tech/SKILL.md` before Tasks 8–10; `page-estimates` + `admin-pages` before Task 7; `page-customers` before Task 10. Screenshots at 390 px with `node scripts/agent/screenshot-page.mjs <path> 390 <out> --tech` and LOOK at them.
 - Hand-authored migration recipe (AGENTS.md): edit `schema.ts`; `npx drizzle-kit generate --name m3c_sell_on_site` writes `drizzle/0057_m3c_sell_on_site.sql`, `drizzle/meta/0057_snapshot.json` (new `id`, `prevId` = `5920bbd3-d4b7-469e-a765-f0489c727a87`, the 0056 snapshot id) and the `_journal.json` entry (`idx` 57, `version` "7", a fresh `when` > 1793927152374, `tag` "0057_m3c_sell_on_site", `breakpoints` true); overwrite the generated SQL with the idempotent hand-authored version (names identical to the generated ones; `--> statement-breakpoint` between statements); `npx drizzle-kit generate` → "No schema changes"; `npm run db:migrate` on dev right after, twice. Re-check `_journal.json` for the next free number before generating: if another workstream took 57, use the next number and rename the file and tag everywhere in this plan.
@@ -41,14 +53,14 @@
 - Git: `git add` ONLY the task's files by path (never `git add -A` / `git add .`), never `--amend`, never force-push; other agents commit concurrently (retry once on `index.lock`). Every commit message ends with exactly these two lines:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
   `Claude-Session: https://claude.ai/code/session_01GuWoF63tQU1i7ELqyYU3A6`
-- Order and parallelism (max three implementers at once, disjoint files only): Task 1 → (Task 2 ∥ Task 3 ∥ Task 4) → (Task 5 ∥ Task 7) → (Task 6 ∥ Task 8) → (Task 9 ∥ Task 10) → Task 11. Interface dependencies are listed in each task's **Interfaces → Consumes** line.
+- Order (lead ruling 1): execution is SEQUENTIAL — Task 1, 2, 3, … 11, one at a time, each committed before the next starts. Every task's commit gate is the full `npx tsc --noEmit` → 0, `npx vitest run` → baseline or better, and `npx eslint <the task's changed files>` → 0 errors. A task whose change breaks an existing test owns updating it; that test file is listed in the task's **Files** and in the file map. Interfaces are listed in each task's **Interfaces → Consumes** line.
 
 ## Review Focus
 
-1. **Ids in another case.** A path or body uuid in upper case (a hand-typed URL, a client that uppercases): a sell replay with `OPTION-ID` in upper case must still be a replay, not `ALREADY_DECIDED`; a bill on `/jobs/<UPPER RID>/…` must still find its estimate. Pinned by `sellOutcome treats an uppercase optionId and technician id as the same sale` (Task 3) and `billSoldEstimate accepts an uppercase request id` (Task 2).
+1. **Ids in another case.** A path or body uuid in upper case (a hand-typed URL, a client that uppercases): a sell replay with the option id in upper case must still be a replay, not `ALREADY_DECIDED`; a bill on `/jobs/<UPPER RID>/…` must still find its estimate. Pinned by `sellOutcome treats an uppercase optionId and technician id as the same sale` (Task 3) and `billSoldEstimate accepts an uppercase request id` (Task 2); both use uuids with hex letters (`abcdef…`) and first assert `id.toUpperCase() !== id`, so deleting a `.toLowerCase()` makes them fail.
 2. **Pricebook drift between building and saving.** An item deactivated after it was added to the draft, or the same item added twice to one option: the save refuses with "One of these items is no longer in the pricebook." and two lines of one item are kept as two lines. Pinned by `buildFieldEstimate refuses a deactivated item and keeps two lines of the same item` (Task 3).
 3. **Money at the int4 edge.** 999 × an expensive item, or a sale billed onto a draft already near the limit: a 400 "That total is too large.", never a 500 and never a partial insert. Pinned by `buildFieldEstimate refuses an option total over INT32_MAX` (Task 3) and `billSoldEstimate maps a 22003 overflow to too_large` (Task 2).
-4. **Reload and Back on the customer layer.** A reload with `#customer` after the estimate was sold (or the job closed) must land on the estimate page with the hash stripped; closing a layer that a reload opened must strip the hash, never navigate back off the page. Pinned by `layerStep strips the hash on a reload of an estimate that can no longer be sold` and `layerStep closes a reload-opened layer with a strip, not a back` (Task 9).
+4. **Reload and Back on the customer layer.** A reload with `#customer` after the estimate was sold (or the job closed) must land on the estimate page with the hash stripped; a reload that reopens the layer must re-own a history entry so Back closes it onto the estimate page, never further (ruling 13). Pinned by `layerStep strips the hash on a reload of an estimate that can no longer be sold` and `layerStep re-pushes #customer on a sellable reload so close is one back` (Task 9), and by the Task 9 walk's reload → Back step.
 5. **The business-timezone day for install dates.** At 23:30 Eastern the UTC date is already tomorrow; "today" must still be accepted and "tomorrow" refused, and the stored instant is noon Eastern on that date across a DST change. Pinned by `parseEquipmentInput accepts today in the business timezone at 23:30 Eastern` and `noonInZone is noon Eastern on both sides of the DST change` (Task 4).
 
 ---
@@ -58,12 +70,12 @@
 | task | creates | modifies |
 | --- | --- | --- |
 | 1 | `drizzle/0057_m3c_sell_on_site.sql`, `drizzle/meta/0057_snapshot.json`, `src/lib/tech/field-sale-statuses.ts`, `src/lib/admin/estimate-billing-sql.ts` (+test) | `drizzle/meta/_journal.json`, `src/lib/db/schema.ts` |
-| 2 | — | `src/lib/admin/invoice-field-writes.ts` (+test), `src/lib/tech/invoice-errors.ts` (+test), `src/lib/admin/invoice-queries.ts`, `src/lib/admin/invoice-queries.test.ts`, `src/lib/tech/invoice-queries.ts` (+test), `src/lib/tech/invoice-view.ts`, `src/lib/tech/invoice-view-diff.test.ts`, `src/lib/tech/invoice-page-locks.test.ts`, `src/components/tech/invoice/invoice-lines.tsx`, `src/lib/tech/invoice-client-errors.ts` (+test) |
+| 2 | — | `src/lib/admin/invoice-field-writes.ts` (+test), `src/lib/tech/invoice-errors.ts` (+test), `src/lib/admin/invoice-queries.ts`, `src/lib/admin/invoice-queries.test.ts`, `src/lib/tech/invoice-queries.ts`, `src/lib/tech/invoice-queries.test.ts` (existing "cost" and "pendingWrite" cases updated), `src/lib/tech/invoice-view.ts`, `src/lib/tech/invoice-view-diff.test.ts`, `src/lib/tech/invoice-page-locks.test.ts`, `src/components/tech/invoice/invoice-lines.tsx`, `src/lib/tech/invoice-client-errors.ts` (+test) |
 | 3 | `src/lib/tech/estimate-input.ts` (+test), `src/lib/tech/estimate-writes.ts` (+test), `src/lib/tech/estimate-errors.ts` (+test) | `src/lib/http/idempotency-codes.ts`, `src/lib/http/idempotency.test.ts` |
-| 4 | `src/lib/tech/equipment-input.ts` (+test), `src/lib/tech/equipment-writes.ts` (+test), `src/lib/tech/equipment-errors.ts` (+test), `src/lib/tech/equipment-queries.ts` (+test), `src/lib/admin/crm-equipment-records.ts` (+test) | `src/lib/admin/crm-equipment-queries.ts` (+test), `src/lib/admin/crm-queries.ts`, `src/lib/admin/crm-types.ts` |
+| 4 | `src/lib/tech/equipment-input.ts` (+test), `src/lib/tech/equipment-writes.ts` (+test), `src/lib/tech/equipment-errors.ts` (+test), `src/lib/tech/equipment-queries.ts` (+test), `src/lib/admin/crm-equipment-records.ts` (+test; also holds `replacedOnLabel` for the office page) | `src/lib/admin/crm-equipment-queries.ts` (+test), `src/lib/admin/crm-queries.ts`, `src/lib/admin/crm-types.ts` |
 | 5 | `src/lib/tech/estimate-view.ts`, `src/lib/tech/estimate-display.ts` (+test), `src/lib/tech/estimate-queries.ts` (+test) | — |
 | 6 | `src/app/api/tech/jobs/[id]/estimates/route.ts` (+test), `…/estimates/[eid]/sell/route.ts` (+test), `…/estimates/[eid]/bill/route.ts` (+test), `…/estimates/[eid]/decline/route.ts` (+test), `src/app/api/tech/jobs/[id]/equipment/route.ts` (+test) | `src/lib/tech/invoice-route-guards.ts` (+test) |
-| 7 | `src/lib/admin/estimate-approval-copy.ts` (+test) | `src/lib/admin/estimate-queries.ts`, `src/lib/admin/estimate-queries.test.ts`, `src/lib/admin/estimate-list-pagination.test.ts`, `src/app/api/admin/estimates/route.ts` (+test), `src/app/api/admin/estimates/[id]/route.ts`, `src/hooks/use-estimates.ts`, `src/app/admin/(dashboard)/estimates/page.tsx`, `src/app/admin/(dashboard)/estimates/[id]/page.tsx` |
+| 7 | `src/lib/admin/estimate-approval-copy.ts` (+test) | `src/lib/admin/estimate-queries.ts`, `src/lib/admin/estimate-queries.test.ts`, `src/lib/admin/estimate-detail.test.ts`, `src/lib/admin/estimate-list-pagination.test.ts`, `src/app/api/admin/estimates/route.ts` (+test), `src/app/api/admin/estimates/[id]/route.ts`, `src/hooks/use-estimates.ts`, `src/app/admin/(dashboard)/estimates/page.tsx`, `src/app/admin/(dashboard)/estimates/[id]/page.tsx` |
 | 8 | `src/lib/tech/estimate-intents.ts` (+test), `src/lib/tech/add-item-done.ts` (+test), `src/lib/tech/estimate-builder.ts` (+test), `src/components/tech/estimates/{fetch-estimates,recover-intents,use-estimate-write}.ts`, `src/components/tech/estimates/{estimates-card,estimate-builder-client}.tsx`, `src/app/tech/jobs/[id]/estimates/new/page.tsx` | `src/hooks/use-idempotency-key.ts`, `src/components/tech/invoice/add-item-sheet.tsx` |
 | 9 | `src/lib/tech/customer-view-state.ts` (+test), `src/lib/tech/estimate-page-copy.ts` (+test), `src/components/tech/estimates/{estimate-page-client,customer-view}.tsx`, `src/app/tech/jobs/[id]/estimates/[eid]/page.tsx` | — |
 | 10 | `src/lib/tech/material-overlap.ts` (+test), `src/lib/tech/equipment-display.ts` (+test), `src/components/tech/equipment/{equipment-card,equipment-sheet}.tsx` | `src/components/tech/tech-job-detail-client.tsx`, `src/app/admin/(dashboard)/customers/[id]/page.tsx` |
@@ -359,18 +371,18 @@ EOF
 ### Task 2: Field bill writer, linked-line protection, office Generate guard, tech invoice view
 
 **Files:**
-- Modify: `src/lib/admin/invoice-field-writes.ts` (+ `invoice-field-writes.test.ts`), `src/lib/tech/invoice-errors.ts` (+ `invoice-errors.test.ts`), `src/lib/admin/invoice-queries.ts` (`createInvoiceFromSoldEstimate` ~68–163, `createRequestEstimateInvoice` ~178–223), `src/lib/admin/invoice-queries.test.ts` (~366–498), `src/lib/tech/invoice-queries.ts` (`metaSql`, `linesSql`, `fullInvoice`) (+ `invoice-queries.test.ts`), `src/lib/tech/invoice-view.ts`, `src/lib/tech/invoice-view-diff.test.ts`, `src/lib/tech/invoice-page-locks.test.ts`, `src/components/tech/invoice/invoice-lines.tsx`, `src/lib/tech/invoice-client-errors.ts` (+ `invoice-client-errors.test.ts`)
+- Modify: `src/lib/admin/invoice-field-writes.ts` (+ `invoice-field-writes.test.ts`), `src/lib/tech/invoice-errors.ts` (+ `invoice-errors.test.ts`), `src/lib/admin/invoice-queries.ts` (`createInvoiceFromSoldEstimate` ~68–163, `createRequestEstimateInvoice` ~178–223), `src/lib/admin/invoice-queries.test.ts` (~366–498; the existing literal at ~468 is replaced), `src/lib/tech/invoice-queries.ts` (`metaSql`, `linesSql`, `fullInvoice`) (+ `invoice-queries.test.ts`: the existing "lead view never carries a key containing 'cost'" (~183) and "pendingWrite" (~297) cases are updated), `src/lib/tech/invoice-view.ts`, `src/lib/tech/invoice-view-diff.test.ts`, `src/lib/tech/invoice-page-locks.test.ts`, `src/components/tech/invoice/invoice-lines.tsx`, `src/lib/tech/invoice-client-errors.ts` (+ `invoice-client-errors.test.ts`)
 
 **Interfaces:**
 - Consumes (Task 1): `billedSql`, `billingInvoiceIdSql`, `eidParam`, `jobBilledSql`, `statusInSql` from `@/lib/admin/estimate-billing-sql`; `BILL_STATUSES` from `@/lib/tech/field-sale-statuses`; column `invoice_line_items.estimate_line_item_id`.
 - Produces:
-  - `invoice-field-writes.ts`: `FieldReason` gains `"from_estimate"`; `type BillReason = "estimate_not_found" | "estimate_not_sold" | "managed_externally" | "no_lines" | "already_billed" | "invoice_locked" | "not_lead" | "stale" | "too_large"`; `type BillResult = { ok: true; invoiceId: string; added: number; hasMaterials: boolean } | { ok: false; reason: BillReason; invoiceId?: string }`; `billSoldEstimate(actor: Actor & { requestId: string; techUserId: string }, estimateId: string, ids: { invoiceId: string }): Promise<BillResult>`; pure `draftOutcome(r, hasPayment): "continue" | BillReason`, `billOutcome(t): "added" | BillReason`, `exceedsInt32(subtotalCents: number, taxBps: number): boolean`, `isNumericOverflow(error: unknown): boolean`.
+  - `invoice-field-writes.ts`: `FieldReason` gains `"from_estimate"`; `type BillReason = "estimate_not_found" | "estimate_not_sold" | "managed_externally" | "no_lines" | "already_billed" | "invoice_locked" | "invoice_changed" | "not_lead" | "stale" | "too_large"`; `billLinesSql(p: { org; rid; me; inv; estimateId; lines: readonly { id: string; eli: string }[] }): SQL` (the step-3 INSERT, exported so the integration suite can run it twice — ruling of review money M2); `type BillResult = { ok: true; invoiceId: string; added: number; hasMaterials: boolean } | { ok: false; reason: BillReason; invoiceId?: string }`; `billSoldEstimate(actor: Actor & { requestId: string; techUserId: string }, estimateId: string, ids: { invoiceId: string }): Promise<BillResult>`; pure `draftOutcome(r, hasPayment): "continue" | BillReason`, `billOutcome(t): "added" | BillReason`, `exceedsInt32(subtotalCents: number, taxBps: number): boolean`, `isNumericOverflow(error: unknown): boolean`.
   - `invoice-errors.ts`: `RouteReason` covers `"from_estimate"` → 409 `FROM_ESTIMATE` "This item came from the approved estimate. Ask the office to change it."
   - `invoice-view.ts`: `TechInvoiceLine.fromEstimate: boolean`.
   - `src/lib/tech/invoice-queries.ts`: exported `metaSql(org, rid, me)`, `linesSql(org, inv)`; `pendingWrite` counts only `/api/tech/jobs/<rid>/invoice%` and `/api/tech/jobs/<rid>/signature`.
   - `createInvoiceFromSoldEstimate`: unchanged signature; also returns `{ ok: true, invoiceId: <job invoice>, created: false }` when the field bill already holds the estimate's lines.
 
-- [ ] **Step 1: Write the failing writer tests.** Append to `src/lib/admin/invoice-field-writes.test.ts` (reuse its hoisted `readQueue` / `batch` / `getDefaultTaxBps` mocks and its `render` / `renderQ` helpers; add `billSoldEstimate, billOutcome, draftOutcome, exceedsInt32, isNumericOverflow` to the import from `./invoice-field-writes`):
+- [ ] **Step 1: Write the failing writer tests.** Append to `src/lib/admin/invoice-field-writes.test.ts` (reuse its hoisted `readQueue` / `batch` / `getDefaultTaxBps` mocks and its `render` / `renderQ` helpers; add `billLinesSql, billSoldEstimate, billOutcome, draftOutcome, exceedsInt32, isNumericOverflow` to the import from `./invoice-field-writes`):
 
 ```ts
 describe("removeInvoiceLine refuses an estimate-linked line (spec §5.3)", () => {
@@ -401,9 +413,9 @@ describe("draftOutcome (spec §5.3 step 2; integration case (q))", () => {
     [ok("draft"), false, "continue"],
     [ok("draft"), true, "invoice_locked"],
     [ok("open"), false, "invoice_locked"],
-    [ok("paid"), false, "stale"],
-    [ok("refunded"), false, "stale"],
-    [no("invoice_voided"), false, "stale"],
+    [ok("paid"), false, "invoice_changed"],
+    [ok("refunded"), false, "invoice_changed"],
+    [no("invoice_voided"), false, "invoice_changed"],
     [no("stale"), false, "stale"],
     [no("external_invoice"), false, "managed_externally"],
     [no("managed_externally"), false, "managed_externally"],
@@ -459,8 +471,9 @@ describe("billSoldEstimate", () => {
     { rows: [{ state: "draft", amount_paid_cents: 0, billed: inserted > 0, billed_invoice_id: INV, has_materials: false, ...tail }] },
     { rows: [{ still_lead: true }] },
   ];
-  /** Reads in order: pre-check, sold lines, draft subtotal, then createInvoiceFromJob's request row and materials. */
-  const happyReads = () => readQueue.push(pre(), [{ id: EL1, line_total_cents: 5_000 }], [{ sub: 0 }],
+  const room = (over: Record<string, unknown> = {}) => [{ draft_exists: false, draft_sub: 0, materials_sub: 0, ...over }];
+  /** Reads in order: pre-check, sold lines, the int4 headroom read, then createInvoiceFromJob's request row and materials. */
+  const happyReads = () => readQueue.push(pre(), [{ id: EL1, line_total_cents: 5_000 }], room(),
     [{ customer_id: CUST, native: true, external_invoice: false }], []);
 
   beforeEach(() => { readQueue.length = 0; reads.length = 0; batch.mockReset(); getDefaultTaxBps.mockResolvedValue(825); });
@@ -474,8 +487,11 @@ describe("billSoldEstimate", () => {
   });
 
   it("billSoldEstimate accepts an uppercase request id", async () => {
-    readQueue.push(pre({ status: "open" }));
-    expect(await billSoldEstimate({ ...actorT, requestId: REQ.toUpperCase() }, EST, { invoiceId: INV }))
+    const RID_HEX = "abcdef12-3456-4abc-8def-0123456789ab"; // hex letters: upper-casing changes it
+    expect(RID_HEX.toUpperCase()).not.toBe(RID_HEX);
+    readQueue.push(pre({ status: "open", service_request_id: RID_HEX }));
+    // Without the writer's toLowerCase() this answers estimate_not_found.
+    expect(await billSoldEstimate({ ...actorT, requestId: RID_HEX.toUpperCase() }, EST, { invoiceId: INV }))
       .toEqual({ ok: false, reason: "estimate_not_sold" });
   });
 
@@ -492,9 +508,33 @@ describe("billSoldEstimate", () => {
   });
 
   it("too_large before drafting when the draft plus the sale overflows int4", async () => {
-    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], [{ sub: 200_000_000 }]);
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], room({ draft_exists: true, draft_sub: 200_000_000 }));
     expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
     expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("with no draft yet, the unbilled materials step 2 will seed count toward the int4 check", async () => {
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], room({ materials_sub: 200_000_000 }));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 2_000_000_000 }], room({ draft_exists: true, draft_sub: 0, materials_sub: 200_000_000 }),
+      [{ customer_id: CUST, native: true, external_invoice: false }], [], [{ amount_paid_cents: 0 }]);
+    getDefaultTaxBps.mockResolvedValue(0);
+    batch.mockResolvedValueOnce(createRows("draft")).mockResolvedValueOnce(billRows(1, {}));
+    expect((await billSoldEstimate(actorT, EST, { invoiceId: INV })).ok).toBe(true); // an existing draft is adopted, not seeded
+  });
+
+  it("a 22003 inside createInvoiceFromJob (seeding materials) is too_large, not a 500", async () => {
+    happyReads();
+    batch.mockRejectedValueOnce({ message: "q", cause: { code: "22003" } });
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "too_large" });
+  });
+
+  it("this key's derived invoice was paid or voided → invoice_changed (stored: the next tap mints a new key and a new invoice id)", async () => {
+    happyReads();
+    readQueue.push([{ state: "paid" }], [{ billed: false, invoice_id: null }]);
+    batch.mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }, { rows: [{ still_lead: true }] }]);
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "invoice_changed" });
+    expect(batch).toHaveBeenCalledTimes(1);
   });
 
   it("drafts through createInvoiceFromJob, then inserts the sold lines under L_req → L_inv with NOT billed(eid)", async () => {
@@ -503,6 +543,8 @@ describe("billSoldEstimate", () => {
     batch.mockResolvedValueOnce(createRows("draft")).mockResolvedValueOnce(billRows(1, {}));
     expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: true, invoiceId: INV, added: 1, hasMaterials: false });
     const s = (batch.mock.calls[1]![0] as unknown[]).map(render);
+    expect(s[2]).toBe(render(billLinesSql({ org: ORG, rid: REQ, me: ME, inv: INV, estimateId: EST,
+      lines: [{ id: renderQ((batch.mock.calls[1]![0] as unknown[])[2]).params[2] as string, eli: EL1 }] }))); // params: org, inv, then the v7 line id
     expect(s[0]).toBe(`SELECT 1 FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE`);
     expect(s[1]).toContain("FROM invoices WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE");
     expect(s[2]).toMatch(/^INSERT INTO invoice_line_items \(id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents\)/);
@@ -578,7 +620,7 @@ Expected: FAIL — `billSoldEstimate` / `draftOutcome` not exported; `from_estim
 
 export type BillReason =
   | "estimate_not_found" | "estimate_not_sold" | "managed_externally" | "no_lines" | "already_billed"
-  | "invoice_locked" | "not_lead" | "stale" | "too_large";
+  | "invoice_locked" | "invoice_changed" | "not_lead" | "stale" | "too_large";
 export type BillResult =
   | { ok: true; invoiceId: string; added: number; hasMaterials: boolean }
   | { ok: false; reason: BillReason; invoiceId?: string };
@@ -603,17 +645,24 @@ export function isNumericOverflow(error: unknown): boolean {
 
 type DraftResult = Awaited<ReturnType<typeof createInvoiceFromJob>>;
 
-/** Step 2: what the bill does with createInvoiceFromJob's answer. The caller
- * re-checks billed(eid) before returning any non-continue reason. */
+/**
+ * Step 2: what the bill does with createInvoiceFromJob's answer. The caller
+ * re-checks billed(eid) before returning any non-continue reason.
+ * paid / refunded / invoice_voided describe THIS key's derived invoice, which
+ * the same key always derives again: they map to the STORED invoice_changed so
+ * the client mints a new key (plan ruling 11, a spec deviation). A plain stale
+ * (a deadlock included) stays unstored.
+ */
 export function draftOutcome(r: DraftResult, hasPayment: boolean): "continue" | BillReason {
   if (r.ok) {
     if (r.state === "draft") return hasPayment ? "invoice_locked" : "continue";
     if (r.state === "open") return "invoice_locked";
-    return "stale"; // paid / refunded: the derived-id invoice is history
+    return "invoice_changed"; // paid / refunded
   }
   if (r.reason === "not_lead") return "not_lead";
   if (r.reason === "external_invoice" || r.reason === "managed_externally") return "managed_externally";
-  return "stale"; // invoice_voided, stale (a deadlock included)
+  if (r.reason === "invoice_voided") return "invoice_changed";
+  return "stale";
 }
 
 /** Step 4: the batch's answer. */
@@ -627,6 +676,31 @@ export function billOutcome(t: {
   return "stale";
 }
 
+/**
+ * Step 3's guarded INSERT: the sold option's lines onto THIS draft, only while
+ * it is a native unpaid draft of the request, the caller is still lead, the
+ * request may be billed, the estimate is sold and native, and NOT billed(eid).
+ * Exported so the integration suite can prove the in-batch guard on its own.
+ */
+export function billLinesSql(p: {
+  org: string; rid: string; me: string; inv: string; estimateId: string;
+  lines: readonly { readonly id: string; readonly eli: string }[];
+}): SQL {
+  const { org, rid, inv, estimateId } = p;
+  const values = sql.join(p.lines.map((l) => sql`(${l.id}::uuid, ${l.eli}::uuid)`), sql`, `);
+  return sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+    SELECT v.id, ${org}::uuid, ${inv}::uuid, el.id, el.name, el.quantity, el.unit_price_cents, el.cost_cents, el.line_total_cents
+    FROM (VALUES ${values}) AS v(id, eli) JOIN estimate_line_items el ON el.id = v.eli AND el.organization_id = ${org}::uuid
+    WHERE EXISTS (SELECT 1 FROM invoices i WHERE i.id = ${inv}::uuid AND i.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
+        AND i.state = 'draft'::invoice_state AND i.amount_paid_cents = 0 AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL)
+      AND (${stillLeadSql(org, rid, p.me)})
+      AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid AND r.status IN ${BILL_IN})
+      AND EXISTS (SELECT 1 FROM estimates se WHERE se.id = ${estimateId}::uuid AND se.organization_id = ${org}::uuid AND se.service_request_id = ${rid}::uuid
+        AND se.status = 'sold'::estimate_status AND se.fieldpulse_estimate_id IS NULL AND se.sold_option_id = el.option_id)
+      AND NOT ${billedSql(org, eidParam(estimateId))}
+    ON CONFLICT (id) DO NOTHING RETURNING id`;
+}
+
 const alreadyBilled = (invoiceId: unknown): BillResult =>
   invoiceId ? { ok: false, reason: "already_billed", invoiceId: String(invoiceId) } : { ok: false, reason: "already_billed" };
 
@@ -637,9 +711,25 @@ async function billedNow(org: string, estimateId: string): Promise<{ billed: boo
 }
 
 /**
+ * Int4 headroom before drafting: an existing native draft is adopted as is;
+ * with none, step 2 creates one seeded with the job's unbilled materials.
+ */
+function headroomSql(org: string, rid: string): SQL {
+  return sql`SELECT
+      EXISTS (SELECT 1 FROM invoices d WHERE d.organization_id = ${org}::uuid AND d.service_request_id = ${rid}::uuid
+        AND d.state = 'draft'::invoice_state AND d.fieldpulse_invoice_id IS NULL AND d.hcp_invoice_id IS NULL) AS draft_exists,
+      (SELECT COALESCE(SUM(l.line_total_cents), 0)::bigint FROM invoice_line_items l JOIN invoices i ON i.id = l.invoice_id
+        WHERE i.organization_id = ${org}::uuid AND l.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
+          AND i.state = 'draft'::invoice_state AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL) AS draft_sub,
+      (SELECT COALESCE(SUM(m.quantity::bigint * m.unit_price_cents), 0)::bigint FROM job_materials m
+        WHERE m.service_request_id = ${rid}::uuid AND m.organization_id = ${org}::uuid
+          AND NOT ${materialBilledSql(org, rid, sql.raw("m.id"))}) AS materials_sub`;
+}
+
+/**
  * Put a sold estimate's option lines on the job's invoice, exactly once per
  * estimate (spec §5.3): pre-check → adopt-or-create the draft (M3b) → one
- * batch L_req → L_inv → INSERT … WHERE NOT billed(eid) → totals → tails.
+ * batch L_req → L_inv → billLinesSql (NOT billed(eid)) → totals → tails.
  */
 export async function billSoldEstimate(
   actor: Actor & { requestId: string; techUserId: string },
@@ -666,15 +756,19 @@ export async function billSoldEstimate(
   if (est.billed === true) return alreadyBilled(est.billed_invoice_id);
 
   const taxBps = await getDefaultTaxBps(org);
-  const [draft] = await readRows(sql`SELECT COALESCE(SUM(l.line_total_cents), 0)::bigint AS sub
-    FROM invoice_line_items l JOIN invoices i ON i.id = l.invoice_id
-    WHERE i.organization_id = ${org}::uuid AND l.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
-      AND i.state = 'draft'::invoice_state AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL`);
+  const [room] = await readRows(headroomSql(org, rid));
+  const existing = room?.draft_exists === true ? Number(room.draft_sub ?? 0) : Number(room?.materials_sub ?? 0);
   const sale = lines.reduce((s, l) => s + Number(l.line_total_cents), 0);
-  if (exceedsInt32(sale + Number(draft?.sub ?? 0), taxBps)) return { ok: false, reason: "too_large" };
+  if (exceedsInt32(sale + existing, taxBps)) return { ok: false, reason: "too_large" };
 
   // 2. Draft: the normal M3b adopt-or-create (seeds the job's unbilled materials).
-  const created = await createInvoiceFromJob({ ...actor, requestId: rid }, { invoiceId: ids.invoiceId });
+  let created: DraftResult;
+  try {
+    created = await createInvoiceFromJob({ ...actor, requestId: rid }, { invoiceId: ids.invoiceId });
+  } catch (error) {
+    if (isNumericOverflow(error)) return { ok: false, reason: "too_large" };
+    throw error;
+  }
   let hasPayment = false;
   if (created.ok && created.state === "draft") {
     const [row] = await readRows(sql`SELECT amount_paid_cents FROM invoices WHERE id = ${created.invoiceId}::uuid AND organization_id = ${org}::uuid`);
@@ -690,24 +784,13 @@ export async function billSoldEstimate(
 
   // 3. One batch. Line ids are v7 in the estimate's line order; exactly-once is
   // NOT billed(eid) under L_req, not the ids.
-  const values = sql.join(lines.map((l) => sql`(${uuidv7()}::uuid, ${String(l.id)}::uuid)`), sql`, `);
   const lead = stillLeadSql(org, rid, me);
   let rows: Row[][] | Fail;
   try {
     rows = await runBatch([
       lockRequestSql(org, rid),
       lockInvoiceSql(org, inv),
-      sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
-        SELECT v.id, ${org}::uuid, ${inv}::uuid, el.id, el.name, el.quantity, el.unit_price_cents, el.cost_cents, el.line_total_cents
-        FROM (VALUES ${values}) AS v(id, eli) JOIN estimate_line_items el ON el.id = v.eli AND el.organization_id = ${org}::uuid
-        WHERE EXISTS (SELECT 1 FROM invoices i WHERE i.id = ${inv}::uuid AND i.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
-            AND i.state = 'draft'::invoice_state AND i.amount_paid_cents = 0 AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL)
-          AND (${lead})
-          AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid AND r.status IN ${BILL_IN})
-          AND EXISTS (SELECT 1 FROM estimates se WHERE se.id = ${estimateId}::uuid AND se.organization_id = ${org}::uuid AND se.service_request_id = ${rid}::uuid
-            AND se.status = 'sold'::estimate_status AND se.fieldpulse_estimate_id IS NULL AND se.sold_option_id = el.option_id)
-          AND NOT ${billedSql(org, eid)}
-        ON CONFLICT (id) DO NOTHING RETURNING id`,
+      billLinesSql({ org, rid, me, inv, estimateId, lines: lines.map((l) => ({ id: uuidv7(), eli: String(l.id) })) }),
       totalsSql(org, inv, taxBps, LINE_GATE),
       sql`SELECT i.state::text AS state, i.amount_paid_cents,
           ${billedSql(org, eid)} AS billed, ${billingInvoiceIdSql(org, eid)} AS billed_invoice_id,
@@ -746,15 +829,69 @@ export async function billSoldEstimate(
 - [ ] **Step 4: Run them to verify they pass**
 
 Run: `npx vitest run src/lib/admin/invoice-field-writes.test.ts src/lib/tech/invoice-errors.test.ts`
-Expected: PASS. Existing `removeInvoiceLine` render assertions that pin the exact DELETE / SELECT text now fail on the two additions; update those literal expectations to include `AND estimate_line_item_id IS NULL` and the `from_estimate` column (same file), re-run → PASS.
+Expected: PASS except the existing case "removes under the draft + unpaid gate, T with amount_paid_cents = 0", whose parameter array pins the old state SELECT. Change its `expect(params()).toEqual([2, 2, 10, 5, 3, 4]);` to `expect(params()).toEqual([2, 2, 10, 5, 6, 4]);` (the state SELECT now also binds lineId, invoiceId and org for `from_estimate`); its `s[2]` text assertion still matches (the new `AND estimate_line_item_id IS NULL` sits before the gate it pins). Re-run → PASS.
 
-- [ ] **Step 5: Failing office-guard tests** in `src/lib/admin/invoice-queries.test.ts`:
-  - `mockCreateSeq`'s `where()` result gains `orderBy: () => Promise.resolve(r)` next to `limit`.
-  - Every line fixture `LINE` / inline line object gains `id: "el-1"`.
-  - In "locks the request, then inserts only when no native draft exists…": the INSERT's parameter count becomes 15 and it must contain `AND NOT EXISTS (SELECT 1 FROM invoice_line_items jbx`; the lines INSERT starts `INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name,` and its parameter count becomes 11.
-  - New case:
+- [ ] **Step 5: Failing office-guard tests** in `src/lib/admin/invoice-queries.test.ts` (this task owns the file; its existing cases change as shown).
+  - `mockCreateSeq` becomes (adds `orderBy` for the lines read):
 
 ```ts
+function mockCreateSeq(results: unknown[][]): void {
+  let i = 0;
+  vi.mocked(db.select).mockImplementation(
+    () =>
+      ({
+        from: () => ({
+          where: () => {
+            const r = results[i++] ?? [];
+            const p = Promise.resolve(r);
+            return Object.assign(p, { limit: () => Promise.resolve(r), orderBy: () => Promise.resolve(r) });
+          },
+        }),
+      }) as never,
+  );
+}
+```
+
+  - In "creates an invoice (state 'open') from the sold option's snapshot on first call (no request)" the line fixture gains `id: "el-1"`; the case starts with
+
+```ts
+    const valuesSpy = vi.fn((v: unknown) => v);
+    vi.mocked(db.insert).mockReturnValue({ values: valuesSpy } as never);
+```
+
+    and ends with
+
+```ts
+    const lineRows = valuesSpy.mock.calls.map((c) => c[0]).find(Array.isArray) as { id: string; estimateLineItemId: string }[];
+    expect(lineRows[0]!.estimateLineItemId).toBe("el-1");
+    expect(lineRows[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/); // v7
+```
+  - In `describe("with a service request (spec §5.8)")`: `const LINE = { id: "el-1", name: "Repair", quantity: 1, unitPriceCents: 9000, costCents: 4000, lineTotalCents: 9000 };` and the case "locks the request, then inserts only when no native draft exists, lines gated on the invoice xmin" becomes:
+
+```ts
+    it("locks the request, then inserts only when no native draft exists and the job's invoice does not hold the lines; lines linked and xmin-gated", async () => {
+      mockCreateSeq([[EST], [], [OPT], [LINE]]);
+      vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [{ id: "x" }] }, { rows: [] }] as never);
+      const r = await createInvoiceFromSoldEstimate(ORG, "est-1");
+      expect(r.ok).toBe(true);
+      const [lock, insert, lines] = batchStmts().map(render);
+      expect(batchStmts()).toHaveLength(3);
+      expect(lock).toContain("FROM service_requests WHERE id = $1::uuid AND organization_id = $2::uuid FOR NO KEY UPDATE");
+      expect(insert).toMatch(/^INSERT INTO invoices .* SELECT .*'open'::invoice_state/);
+      expect(insert).toContain(
+        "WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = $9::uuid AND service_request_id = $10::uuid AND state = 'draft'::invoice_state AND fieldpulse_invoice_id IS NULL AND hcp_invoice_id IS NULL) AND NOT EXISTS (SELECT 1 FROM invoice_line_items jbx",
+      );
+      expect(insert).toContain("jbi.estimate_id IS NULL");
+      expect(insert.endsWith("ON CONFLICT DO NOTHING RETURNING id")).toBe(true);
+      expect(renderQ(batchStmts()[1]).params).toHaveLength(15);
+      expect(lines).toMatch(/^INSERT INTO invoice_line_items \(id, organization_id, invoice_id, estimate_line_item_id, name,/);
+      expect(lines).toContain("WHERE EXISTS (SELECT 1 FROM invoices WHERE id = $");
+      expect(lines).toContain("xmin = pg_current_xact_id()::xid)");
+      // 1 line × (id, estimate line, name, qty, price, cost, total) + org + invoice + (invoice, org) in the gate
+      expect(renderQ(batchStmts()[2]).params).toHaveLength(11);
+      expect(renderQ(batchStmts()[2]).params).toContain("el-1");
+    });
+
     it("returns the job's invoice when the field bill already holds the estimate's lines", async () => {
       mockCreateSeq([[EST], [], [OPT], [LINE], [], [{ invoiceId: "inv-job" }]]);
       vi.mocked(db.batch).mockResolvedValueOnce([{ rows: [] }, { rows: [] }, { rows: [] }] as never);
@@ -763,33 +900,102 @@ Expected: PASS. Existing `removeInvoiceLine` render assertions that pin the exac
     });
 ```
 
-  - In "creates an invoice (state 'open') from the sold option's snapshot on first call (no request)": capture the line insert values (`vi.mocked(db.insert).mockReturnValue({ values: valuesSpy })` with `const valuesSpy = vi.fn(() => ({}))`) and assert the second call's rows carry `estimateLineItemId: "el-1"` and an `id` matching `/^[0-9a-f]{8}-[0-9a-f]{4}-7/` (v7).
+    The two other cases in that describe ("refuses with request_has_draft…", "returns the estimate's invoice when a concurrent create won…") stay as they are: their select sequences end before the new job-invoice read, which then resolves `[]`.
 
-  Run: `npx vitest run src/lib/admin/invoice-queries.test.ts` → FAIL.
+  Run: `npx vitest run src/lib/admin/invoice-queries.test.ts` → FAIL (no link column, no job-half guard, no job-invoice read).
 
-- [ ] **Step 6: Implement the office guard** in `src/lib/admin/invoice-queries.ts` (spec §5.4):
-  - Imports: `import { v7 as uuidv7 } from "uuid";` and `import { billingInvoiceIdSql, eidParam, jobBilledSql } from "@/lib/admin/estimate-billing-sql";` (dependency-free, safe on this widely-imported module).
-  - The lines read selects `id: estimateLineItems.id` first and ends with `.orderBy(asc(estimateLineItems.id))`.
-  - `type EstimateLine = { id: string; name: string; quantity: number; unitPriceCents: number; costCents: number; lineTotalCents: number };`
-  - No-request path insert: `db.insert(invoiceLineItems).values(lines.map(({ id, ...l }) => ({ ...l, id: uuidv7(), estimateLineItemId: id, organizationId, invoiceId })))`.
-  - `createRequestEstimateInvoice`: the invoice INSERT's `WHERE` becomes
+- [ ] **Step 6: Implement the office guard** in `src/lib/admin/invoice-queries.ts` (spec §5.4).
+  - Imports: add `import { v7 as uuidv7 } from "uuid";` and `import { billingInvoiceIdSql, eidParam, jobBilledSql } from "@/lib/admin/estimate-billing-sql";` (dependency-free, safe on this widely imported module).
+  - In `createInvoiceFromSoldEstimate`, the lines read becomes:
 
 ```ts
+  const lines = await db
+    .select({
+      id: estimateLineItems.id,
+      name: estimateLineItems.name,
+      quantity: estimateLineItems.quantity,
+      unitPriceCents: estimateLineItems.unitPriceCents,
+      costCents: estimateLineItems.costCents,
+      lineTotalCents: estimateLineItems.lineTotalCents,
+    })
+    .from(estimateLineItems)
+    .where(withTenant(estimateLineItems, organizationId, eq(estimateLineItems.optionId, est.soldOptionId)))
+    .orderBy(asc(estimateLineItems.id));
+```
+
+    and the no-request path's line insert becomes:
+
+```ts
+      db.insert(invoiceLineItems).values(
+        lines.map(({ id, ...l }) => ({ ...l, id: uuidv7(), estimateLineItemId: id, organizationId, invoiceId })),
+      ),
+```
+
+  - `type EstimateLine = { id: string; name: string; quantity: number; unitPriceCents: number; costCents: number; lineTotalCents: number };`
+  - `createRequestEstimateInvoice` in full:
+
+```ts
+/**
+ * Estimate-born invoice on a request (M3b spec §5.8, M3c spec §5.4): ONE batch
+ * — L_req, then the INSERT refuses while the request has a NATIVE draft or the
+ * job's invoice already holds this estimate's lines (the job half of
+ * billed(eid)); the lines land only when this transaction wrote the invoice
+ * (xmin gate), linked to their estimate line, v7 ids in line order.
+ */
+async function createRequestEstimateInvoice(
+  org: string,
+  rid: string,
+  inv: string,
+  est: { id: string; customerId: string | null },
+  opt: { subtotalCents: number; taxCents: number; totalCents: number },
+  lines: readonly EstimateLine[],
+): Promise<CreateInvoiceResult> {
+  // Lazy: the M3b writer module's import graph (tech field queries, inventory,
+  // status writes) stays off this widely-imported module's load path.
+  const { lockRequestSql, P_NATIVE } = await import("./invoice-field-writes");
+  const items: SQL[] = [
+    lockRequestSql(org, rid),
+    sql`INSERT INTO invoices (id, organization_id, service_request_id, customer_id, estimate_id, state, subtotal_cents, tax_cents, total_cents, amount_paid_cents)
+      SELECT ${inv}::uuid, ${org}::uuid, ${rid}::uuid, ${est.customerId}::uuid, ${est.id}::uuid, 'open'::invoice_state,
+        ${opt.subtotalCents}::int, ${opt.taxCents}::int, ${opt.totalCents}::int, 0
       WHERE NOT EXISTS (SELECT 1 FROM invoices WHERE organization_id = ${org}::uuid AND service_request_id = ${rid}::uuid
         AND state = 'draft'::invoice_state AND ${P_NATIVE})
         AND NOT ${jobBilledSql(org, eidParam(est.id))}
-```
-
-    the line VALUES become `(${uuidv7()}::uuid, ${l.id}::uuid, ${l.name}::text, ${l.quantity}::int, ${l.unitPriceCents}::int, ${l.costCents}::int, ${l.lineTotalCents}::int)` with `INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents) SELECT v.id, ${org}::uuid, ${inv}::uuid, v.eli, v.name, v.quantity, v.unit_price_cents, v.cost_cents, v.line_total_cents FROM (VALUES ${values}) AS v(id, eli, name, quantity, unit_price_cents, cost_cents, line_total_cents) WHERE EXISTS (… xmin gate unchanged …)`; and after the `raced` read, before `request_has_draft`:
-
-```ts
-  // The field bill already holds this estimate's lines: that invoice bills it.
+      ON CONFLICT DO NOTHING RETURNING id`,
+  ];
+  if (lines.length > 0) {
+    const values = sql.join(
+      lines.map(
+        (l) =>
+          sql`(${uuidv7()}::uuid, ${l.id}::uuid, ${l.name}::text, ${l.quantity}::int, ${l.unitPriceCents}::int, ${l.costCents}::int, ${l.lineTotalCents}::int)`,
+      ),
+      sql`, `,
+    );
+    items.push(sql`INSERT INTO invoice_line_items (id, organization_id, invoice_id, estimate_line_item_id, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+      SELECT v.id, ${org}::uuid, ${inv}::uuid, v.eli, v.name, v.quantity, v.unit_price_cents, v.cost_cents, v.line_total_cents
+      FROM (VALUES ${values}) AS v(id, eli, name, quantity, unit_price_cents, cost_cents, line_total_cents)
+      WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ${inv}::uuid AND organization_id = ${org}::uuid AND xmin = pg_current_xact_id()::xid)`);
+  }
+  const out = (await db.batch(items.map((q) => db.execute(q)) as never)) as unknown as { rows: unknown[] }[];
+  if (out[1]!.rows.length > 0) return { ok: true, invoiceId: inv, created: true };
+  // No row: a concurrent create of THIS estimate won the per-estimate unique
+  // index (return it, like the early return) …
+  const [raced] = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(withTenant(invoices, org, eq(invoices.estimateId, est.id)))
+    .limit(1);
+  if (raced) return { ok: true, invoiceId: raced.id, created: false };
+  // … or the job's invoice already holds this estimate's lines: that invoice bills it …
   const [job] = await db
     .select({ invoiceId: sql<string | null>`${billingInvoiceIdSql(org, eidParam(est.id))}` })
     .from(estimates)
     .where(withTenant(estimates, org, eq(estimates.id, est.id)))
     .limit(1);
   if (job?.invoiceId) return { ok: true, invoiceId: job.invoiceId, created: false };
+  // … or the request has a native draft.
+  return { ok: false, reason: "request_has_draft" };
+}
 ```
 
   Run: `npx vitest run src/lib/admin/invoice-queries.test.ts src/lib/admin/estimate-synced-guards.test.ts` → PASS.
@@ -798,13 +1004,21 @@ Expected: PASS. Existing `removeInvoiceLine` render assertions that pin the exac
   - `src/lib/tech/invoice-view.ts`: `TechInvoiceLine` gains `/** Copied from a sold estimate: the field cannot remove it. */ readonly fromEstimate: boolean;`.
   - `src/lib/tech/invoice-queries.ts`: export `metaSql` and `linesSql`; in `metaSql` replace `AND k.route LIKE '/api/tech/jobs/' || ${rid}::text || '/%'` with `AND (k.route LIKE '/api/tech/jobs/' || ${rid}::text || '/invoice%' OR k.route = '/api/tech/jobs/' || ${rid}::text || '/signature')`; `linesSql` selects `estimate_line_item_id IS NOT NULL AS from_estimate`; `fullInvoice` maps `fromEstimate: l.from_estimate === true`.
   - Every object literal with `lineTotalCents` in `src/lib/tech/invoice-view-diff.test.ts` and `src/lib/tech/invoice-page-locks.test.ts` gains `fromEstimate: false`.
-  - Add to `src/lib/tech/invoice-queries.test.ts` (it already has a `PgDialect` render helper or add `const render = (s: SQL) => new PgDialect().sqlToQuery(s).sql.replace(/\s+/g, " ")`):
+  - `src/lib/tech/invoice-queries.test.ts` (this task owns it; it already declares `REQ`, `ME`, `INV`, `ORG` and `render` — do NOT redeclare them):
+    - In "lead view never carries a key containing 'cost' although the rows do" the expected line becomes `{ id: "l1", name: "Capacitor", quantity: 2, unitPriceCents: 5000, lineTotalCents: 10000, fromEstimate: false }`.
+    - In "pendingWrite: in-progress key for (org, user) on this job's routes younger than 2 minutes" the regex becomes:
+
+```ts
+    expect(meta.sql).toMatch(/EXISTS \(SELECT 1 FROM idempotency_keys k WHERE k\.organization_id = \$\d+::uuid AND k\.user_id = \$\d+::uuid AND \(k\.route LIKE '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/invoice%' OR k\.route = '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/signature'\) AND k\.state = 'in_progress' AND k\.created_at > now\(\) - interval '2 minutes'\)/);
+```
+
+    - Add (import `metaSql`, `linesSql` next to `getTechInvoiceView`):
 
 ```ts
 describe("M3c: the invoice view ignores estimate and equipment keys", () => {
   it("pendingWrite counts only the invoice and signature routes", () => {
-    const t = render(metaSql(ORG, RID, ME));
-    expect(t).toMatch(/\(k\.route LIKE '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/invoice%' OR k\.route = '\/api\/tech\/jobs\/' \|\| \$\d+::text \|\| '\/signature'\)/);
+    const t = render(metaSql(ORG, REQ, ME));
+    expect(t).toContain("'/invoice%' OR k.route = '/api/tech/jobs/' ||");
     expect(t).not.toContain("'/%'");
   });
   it("lines say whether they came from an estimate, never their cost", () => {
@@ -815,11 +1029,19 @@ describe("M3c: the invoice view ignores estimate and equipment keys", () => {
 });
 ```
 
-  (Use the file's existing org / request / user / invoice constants; declare them if absent.)
   - `src/components/tech/invoice/invoice-lines.tsx`, in `InvoiceLines`: under the qty line add `{l.fromEstimate && <p className="text-[13px] text-muted-foreground">From the estimate</p>}` and change the remove guard to `{onRemove && !l.fromEstimate && (`.
-  - `src/lib/tech/invoice-client-errors.ts`: `MESSAGE_CONFLICTS` gains `"FROM_ESTIMATE"`. Test in `invoice-client-errors.test.ts`: `expect(classifyWriteError(409, "FROM_ESTIMATE")).toBe("show_message_refetch");`.
+  - `src/lib/tech/invoice-client-errors.ts`: `MESSAGE_CONFLICTS` gains `"FROM_ESTIMATE"` and `"JOB_CLOSED"` (the invoice routes now answer a cancelled job with `JOB_CLOSED`; the invoice client shows the server copy "Arrive at the job before invoicing." and refetches). Tests in `invoice-client-errors.test.ts`:
 
-  Run: `npx vitest run src/lib/tech` → PASS.
+```ts
+it("FROM_ESTIMATE and JOB_CLOSED show their message and refetch (M3c)", () => {
+  expect(classifyWriteError(409, "FROM_ESTIMATE")).toBe("show_message_refetch");
+  expect(classifyWriteError(409, "JOB_CLOSED")).toBe("show_message_refetch");
+});
+```
+
+    and in `src/lib/tech/invoice-page-copy.test.ts` is NOT touched; `writeErrorCopy("show_message_refetch", { error: { code: "JOB_CLOSED", message: "Arrive at the job before invoicing." } }, false)` already returns the server message (its default branch).
+
+  Run: `npx vitest run src/lib/tech src/lib/admin` → PASS.
 
 - [ ] **Step 8: Gates and commit**
 
@@ -848,7 +1070,7 @@ EOF
 - Produces:
   - `estimate-input.ts` (pure, client-safe; no imports): `MAX_OPTIONS = 3`, `MAX_LINES_PER_OPTION = 40`, `MAX_QUANTITY = 999`, `MAX_OPTION_NAME = 40`, `MIN_SIGNATURE = 2`, `MAX_SIGNATURE = 200`, `OFFICE_SIGNATURE = "(admin)"`, `INT32_MAX`, types `CreateLineInput { pricebookItemId: string; quantity: number }`, `CreateOptionInput { name: string; lines: readonly CreateLineInput[] }`, `CreateEstimateInput { options: readonly CreateOptionInput[] }`, `PricedItem`, `BuiltOption`, `BuiltLine`; `hasDuplicateNames(names: readonly string[]): boolean`, `signatureNameOk(raw: string): boolean`, `buildFieldEstimate(input, items: ReadonlyMap<string, PricedItem>, taxBps: number, mintId: () => string): { ok: true; options: BuiltOption[]; lines: BuiltLine[]; totalCents: number } | { ok: false; reason: "item_inactive" | "too_large" }`.
   - `estimate-writes.ts`: `EstimateActor { organizationId; requestId; techUserId }`, `EstimateWriteReason = "estimate_not_found" | "no_customer" | "not_lead" | "not_on_site" | "job_closed" | "stale" | "already_decided" | "estimate_expired" | "invalid_option" | "item_inactive" | "too_large" | "managed_externally"`, `EstimateWriteResult = { ok: true; estimateId: string; created: boolean } | { ok: false; reason: EstimateWriteReason }`; `createFieldEstimate(actor, ids: { estimateId: string }, input: CreateEstimateInput)`, `sellFieldEstimate(actor, input: { estimateId: string; optionId: string; signatureName: string })`, `declineFieldEstimate(actor, estimateId: string)` — all `Promise<EstimateWriteResult>`; pure `createOutcome`, `sellOutcome`, `declineOutcome`.
-  - `estimate-errors.ts`: `EstimateRouteReason` (= `EstimateWriteReason` ∪ Task 2's `BillReason` names, spelled out locally so Tasks 2 and 3 stay parallel), `estimateError(reason): { status; code; message }`, `estimateReasonResult(reason, details?: Record<string, unknown>): RunResult`.
+  - `estimate-errors.ts`: `EstimateRouteReason` (= `EstimateWriteReason` ∪ Task 2's `BillReason` names, spelled out locally so this module has no runtime dependency on the writers), `estimateError(reason): { status; code; message }`, `estimateReasonResult(reason, details?: Record<string, unknown>): RunResult`.
 
 - [ ] **Step 1: Failing pure tests** — `src/lib/tech/estimate-input.test.ts`:
 
@@ -945,7 +1167,8 @@ describe("estimate route reasons (spec §4–§5)", () => {
     ["estimate_not_sold", 409, "ESTIMATE_NOT_SOLD", "Approve the estimate first."],
     ["no_lines", 409, "NO_LINES", "This estimate has no items."],
     ["already_billed", 409, "ALREADY_BILLED", "This estimate is already on an invoice."],
-    ["invoice_locked", 409, "INVOICE_LOCKED", "The job's invoice is already finalized. The office will bill this estimate."],
+    ["invoice_locked", 409, "INVOICE_LOCKED", "The job's invoice is already finalized. Ask the office to bill this estimate."],
+    ["invoice_changed", 409, "INVOICE_CHANGED", "The job's invoice changed. Try again."],
   ] as const)("%s → %i %s", (reason, status, code, message) => {
     expect(estimateError(reason)).toEqual({ status, code, message });
   });
@@ -962,7 +1185,7 @@ describe("estimate route reasons (spec §4–§5)", () => {
       const x = estimateReasonResult(r);
       return isStorable(x.status, x.envelope);
     };
-    for (const r of ["already_decided", "estimate_expired", "invalid_option", "already_billed", "no_lines", "invoice_locked", "item_inactive", "too_large"] as const) {
+    for (const r of ["already_decided", "estimate_expired", "invalid_option", "already_billed", "no_lines", "invoice_locked", "invoice_changed", "item_inactive", "too_large"] as const) {
       expect(stored(r)).toBe(true);
     }
     for (const r of ["no_customer", "stale", "not_lead", "not_on_site", "job_closed", "estimate_not_sold", "managed_externally", "estimate_not_found"] as const) {
@@ -975,7 +1198,7 @@ describe("estimate route reasons (spec §4–§5)", () => {
   In `src/lib/http/idempotency.test.ts` change the expected `STORED_CODES` list to:
 
 ```ts
-      ["ALREADY_BILLED", "ALREADY_DECIDED", "EQUIPMENT_RETIRED", "ESTIMATE_EXPIRED", "INVALID_INPUT", "INVALID_OPTION", "INVOICE_LOCKED", "INVOICE_VOIDED", "ITEM_NOT_FOUND", "NO_LINES", "SEND_FAILED", "VALIDATION_ERROR"],
+      ["ALREADY_BILLED", "ALREADY_DECIDED", "EQUIPMENT_RETIRED", "ESTIMATE_EXPIRED", "INVALID_INPUT", "INVALID_OPTION", "INVOICE_CHANGED", "INVOICE_LOCKED", "INVOICE_VOIDED", "ITEM_NOT_FOUND", "NO_LINES", "SEND_FAILED", "VALIDATION_ERROR"],
 ```
 
 - [ ] **Step 2: Failing writer tests** — `src/lib/tech/estimate-writes.test.ts` (harness copied from `invoice-field-writes.test.ts`):
@@ -1108,10 +1331,17 @@ describe("sellOutcome", () => {
   it("our own field sale of this option is a replay, whatever name was typed", () =>
     expect(sellOutcome(est({ status: "sold", sold_option_id: OPT, sold_via: "field", sold_by: ME }), tail, ctx))
       .toEqual({ ok: true, estimateId: EST, created: false }));
-  it("sellOutcome treats an uppercase optionId and technician id as the same sale", () =>
-    expect(sellOutcome(est({ status: "sold", sold_option_id: OPT, sold_via: "field", sold_by: ME }), tail,
-      { ...ctx, opt: OPT.toUpperCase(), me: ME.toUpperCase(), rid: REQ.toUpperCase() }))
-      .toEqual({ ok: true, estimateId: EST, created: false }));
+  it("sellOutcome treats an uppercase optionId and technician id as the same sale", () => {
+    // hex letters, so upper-casing really changes the strings; Postgres returns lower case
+    const OPT_HEX = "abcdef01-2345-4abc-8def-abcdefabcdef";
+    const ME_HEX = "fedcba98-7654-4fed-8cba-fedcbafedcba";
+    const REQ_HEX = "abc12345-def6-4abc-8def-123456abcdef";
+    for (const id of [OPT_HEX, ME_HEX, REQ_HEX]) expect(id.toUpperCase()).not.toBe(id);
+    const row = est({ status: "sold", sold_option_id: OPT_HEX, sold_via: "field", sold_by: ME_HEX, service_request_id: REQ_HEX });
+    // Without the toLowerCase() calls this is estimate_not_found / already_decided.
+    expect(sellOutcome(row, tail, { eid: EST, opt: OPT_HEX.toUpperCase(), me: ME_HEX.toUpperCase(), rid: REQ_HEX.toUpperCase() }))
+      .toEqual({ ok: true, estimateId: EST, created: false });
+  });
   it("expired (stored or past expires_at) → estimate_expired", () => {
     expect(sellOutcome(est({ status: "expired" }), tail, ctx)).toEqual({ ok: false, reason: "estimate_expired" });
     expect(sellOutcome(est({ past_expiry: true }), tail, ctx)).toEqual({ ok: false, reason: "estimate_expired" });
@@ -1299,7 +1529,7 @@ export async function createFieldEstimate(
   const { organizationId: org, requestId: rid, techUserId: me } = actor;
   const eid = ids.estimateId;
   const [req] = await readRows(sql`SELECT customer_id FROM service_requests WHERE id = ${rid}::uuid AND organization_id = ${org}::uuid`);
-  if (!req) return fail("estimate_not_found");
+  if (!req) return fail("stale"); // unreachable behind the preamble; never the estimate 404 copy (plan ruling 16)
   const cust = (req.customer_id as string | null) ?? null;
   if (cust === null) return fail("no_customer");
 
@@ -1431,7 +1661,7 @@ import type { RunResult } from "@/lib/http/idempotency";
 export type EstimateRouteReason =
   | "estimate_not_found" | "no_customer" | "not_lead" | "not_on_site" | "job_closed" | "stale"
   | "already_decided" | "estimate_expired" | "invalid_option" | "item_inactive" | "too_large"
-  | "managed_externally" | "estimate_not_sold" | "no_lines" | "already_billed" | "invoice_locked";
+  | "managed_externally" | "estimate_not_sold" | "no_lines" | "already_billed" | "invoice_locked" | "invoice_changed";
 
 type Shape = { status: number; code: string; message: string };
 
@@ -1453,7 +1683,9 @@ const MAP: Record<EstimateRouteReason, Shape> = {
   estimate_not_sold: { status: 409, code: "ESTIMATE_NOT_SOLD", message: "Approve the estimate first." },
   no_lines: { status: 409, code: "NO_LINES", message: "This estimate has no items." },
   already_billed: { status: 409, code: "ALREADY_BILLED", message: "This estimate is already on an invoice." },
-  invoice_locked: { status: 409, code: "INVOICE_LOCKED", message: "The job's invoice is already finalized. The office will bill this estimate." },
+  invoice_locked: { status: 409, code: "INVOICE_LOCKED", message: "The job's invoice is already finalized. Ask the office to bill this estimate." },
+  // Stored (plan ruling 11): this key's derived invoice was paid or voided; a new key derives a new invoice.
+  invoice_changed: { status: 409, code: "INVOICE_CHANGED", message: "The job's invoice changed. Try again." },
 };
 
 export function estimateError(reason: EstimateRouteReason): Shape {
@@ -1466,7 +1698,7 @@ export function estimateReasonResult(reason: EstimateRouteReason, details?: Reco
 }
 ```
 
-`src/lib/http/idempotency-codes.ts`: add `"ALREADY_DECIDED"`, `"ESTIMATE_EXPIRED"`, `"INVALID_OPTION"`, `"EQUIPMENT_RETIRED"` to `STORED_CODES` and extend its doc comment: "M3c adds the estimate and equipment terminal codes (spec §4)."
+`src/lib/http/idempotency-codes.ts`: add `"ALREADY_DECIDED"`, `"ESTIMATE_EXPIRED"`, `"INVALID_OPTION"`, `"EQUIPMENT_RETIRED"`, `"INVOICE_CHANGED"` to `STORED_CODES` and extend its doc comment: "M3c adds the estimate and equipment terminal codes (spec §4) and INVOICE_CHANGED (plan ruling 11: the bill's derived invoice was paid or voided, so the next try needs a new key)."
 
 - [ ] **Step 5: Run to verify they pass**
 
@@ -1502,7 +1734,7 @@ EOF
   - `equipment-writes.ts`: `EquipmentReason = "no_customer" | "not_found" | "equipment_retired" | "managed_externally" | "stale"`, `EquipmentWriteResult = { ok: true; equipmentId: string; created: boolean; replaced: boolean } | { ok: false; reason: EquipmentReason }`, `locationRuleSql(unit: string, req: string): SQL`, `onJobSql(org, rid, me): SQL`, `addFieldEquipment(actor: { organizationId; requestId; techUserId }, ids: { equipmentId: string }, input: EquipmentInput): Promise<EquipmentWriteResult>`, pure `replaceOutcome(old: Row | undefined, newId: string): EquipmentWriteResult`.
   - `equipment-errors.ts`: `equipmentError(reason)`, `equipmentReasonResult(reason): RunResult`.
   - `equipment-queries.ts`: `unitsSql(org, rid)`, `canWriteSql(org, rid, me)`, `toUnit(row): TechEquipmentUnit`, `canWriteFrom(row): boolean`, `getTechEquipmentView(org, me, rid): Promise<{ kind: "not_found" } | { kind: "external" } | { kind: "ok"; view: TechEquipmentView }>`.
-  - `crm-equipment-records.ts`: `equipmentRecords(rows)`, `liveEquipmentCount(rows)`; `EquipmentRecord` gains `retiredAt: string | null`, `replacedByEquipmentId: string | null` (null when the replacement row no longer exists).
+  - `crm-equipment-records.ts`: `equipmentRecords(rows)`, `liveEquipmentCount(rows)`, `replacedOnLabel(iso): string` ("Replaced Nov 6, 2026", business timezone; the office page imports it from here, never from a tech module); `EquipmentRecord` gains `retiredAt: string | null`, `replacedByEquipmentId: string | null` (null when the replacement row no longer exists).
 
 - [ ] **Step 1: Failing input tests** — `src/lib/tech/equipment-input.test.ts`:
 
@@ -1644,7 +1876,8 @@ describe("addFieldEquipment (spec §5.6)", () => {
     const s = stmts();
     expect(s).toHaveLength(5);
     expect(s[1]).toContain("FOR NO KEY UPDATE OF ce");
-    expect(s[1]).toContain("ce.fieldpulse_asset_id IS NULL");
+    expect(s[1]).toContain("ce.fieldpulse_asset_id IS NULL AND r.customer_id = $");
+    expect(s[1]).toContain("a.status <> 'cancelled'::request_status");
     expect(s[1]).toContain("(r.location_id IS NULL OR ce.location_id IS NULL OR ce.location_id = r.location_id)");
     expect(s[2]).toContain("AND EXISTS (SELECT 1 FROM customer_equipment ce WHERE ce.id = $");
     expect(s[2]).toContain("ce.retired_at IS NULL AND ce.fieldpulse_asset_id IS NULL");
@@ -1661,11 +1894,11 @@ describe("addFieldEquipment (spec §5.6)", () => {
 });
 
 describe("replaceOutcome", () => {
-  it("replay first, then retired, then FieldPulse, else not found", () => {
+  it("replay first, then retired, then FieldPulse; an invisible unit is not found; a visible live one that was not written is stale", () => {
     expect(replaceOutcome({ retired: true, replaced_by_equipment_id: NEW, synced: false }, NEW)).toEqual({ ok: true, equipmentId: NEW, created: false, replaced: true });
     expect(replaceOutcome({ retired: true, replaced_by_equipment_id: OLD, synced: false }, NEW)).toEqual({ ok: false, reason: "equipment_retired" });
     expect(replaceOutcome({ retired: false, replaced_by_equipment_id: null, synced: true }, NEW)).toEqual({ ok: false, reason: "managed_externally" });
-    expect(replaceOutcome({ retired: false, replaced_by_equipment_id: null, synced: false }, NEW)).toEqual({ ok: false, reason: "not_found" });
+    expect(replaceOutcome({ retired: false, replaced_by_equipment_id: null, synced: false }, NEW)).toEqual({ ok: false, reason: "stale" });
     expect(replaceOutcome(undefined, NEW)).toEqual({ ok: false, reason: "not_found" });
   });
 });
@@ -1695,7 +1928,7 @@ describe("equipment reasons", () => {
 });
 ```
 
-  (`isStorable` reads `STORED_CODES`; `EQUIPMENT_RETIRED` lands there in Task 3. If Task 3 has not merged yet when this runs, that one expectation fails; run it again after Task 3 lands — both are in the same wave.)
+  (`isStorable` reads `STORED_CODES`; `EQUIPMENT_RETIRED` was added there in Task 3, which is committed before this task starts.)
 
 `src/lib/tech/equipment-queries.test.ts`:
 
@@ -1742,7 +1975,7 @@ describe("tech equipment GET (spec §6)", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { equipmentRecords, liveEquipmentCount, type EquipmentRowLike } from "./crm-equipment-records";
+import { equipmentRecords, liveEquipmentCount, replacedOnLabel, type EquipmentRowLike } from "./crm-equipment-records";
 
 const row = (id: string, over: Partial<EquipmentRowLike> = {}): EquipmentRowLike => ({
   id, equipmentType: "ac", make: null, model: null, serialNumber: null, installDate: null, warrantyExpiration: null,
@@ -1763,6 +1996,10 @@ describe("office equipment list (spec §2)", () => {
     expect(out[2]).toMatchObject({ retiredAt: "2026-11-06T17:00:00.000Z", replacedByEquipmentId: "new" });
     expect(out[3]!.replacedByEquipmentId).toBeNull();
     expect(liveEquipmentCount(rows)).toBe(2);
+  });
+  it("office retired label in the business timezone", () => {
+    expect(replacedOnLabel("2026-11-06T17:00:00.000Z")).toBe("Replaced Nov 6, 2026");
+    expect(replacedOnLabel("2026-11-07T03:00:00.000Z")).toBe("Replaced Nov 6, 2026"); // 22:00 Eastern
   });
 });
 ```
@@ -1962,7 +2199,9 @@ export function replaceOutcome(old: Row | undefined, newId: string): EquipmentWr
   }
   if (old.retired === true) return fail("equipment_retired");
   if (old.synced === true) return fail("managed_externally");
-  return fail("not_found");
+  // Visible, live and native, yet nothing was written: the request changed under
+  // the batch (status, assignment, customer). Plan ruling 15: STALE, not 404.
+  return fail("stale");
 }
 
 export async function addFieldEquipment(
@@ -2002,7 +2241,7 @@ export async function addFieldEquipment(
   const rows = await runBatch([
     lockRequestSql(org, rid),
     sql`SELECT 1 FROM customer_equipment ce JOIN service_requests r ON r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid
-      WHERE ${oldVisible} AND ce.fieldpulse_asset_id IS NULL FOR NO KEY UPDATE OF ce`,
+      WHERE ${oldVisible} AND ce.fieldpulse_asset_id IS NULL AND r.customer_id = ${cust}::uuid AND (${onJob}) FOR NO KEY UPDATE OF ce`,
     insertNew(sql` AND EXISTS (SELECT 1 FROM customer_equipment ce WHERE ${oldVisible} AND ce.retired_at IS NULL AND ce.fieldpulse_asset_id IS NULL)`),
     sql`UPDATE customer_equipment ce SET retired_at = now(), replaced_by_equipment_id = ${neu}::uuid, updated_at = now()
       FROM service_requests r
@@ -2152,7 +2391,13 @@ export function equipmentRecords(rows: readonly EquipmentRowLike[]): EquipmentRe
 export function liveEquipmentCount(rows: readonly { readonly retiredAt?: Date | null }[]): number {
   return rows.filter((r) => !r.retiredAt).length;
 }
+
+export function replacedOnLabel(iso: string, timeZone: string = BUSINESS_BASE_LOCATION.timezone): string {
+  return `Replaced ${new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" }).format(new Date(iso))}`;
+}
 ```
+
+  (`crm-equipment-records.ts` imports `BUSINESS_BASE_LOCATION` from `@/lib/config/business-location` next to the `EquipmentRecord` type import.)
 
   Office edits:
   - `crm-types.ts` `EquipmentRecord`: add `/** M3c: set when a newer unit replaced this one (listed last, muted). */ readonly retiredAt: string | null;` and `/** The replacing unit, only while it still exists. */ readonly replacedByEquipmentId: string | null;`.
@@ -2256,7 +2501,7 @@ describe("estimate display (spec §2, §7.3)", () => {
     expect(soldBillingView(est({}), view({ jobInvoice: { id: "d", state: "draft", hasPayment: true } }))).toEqual({ kind: "locked" });
     expect(soldBillingView(est({}), view({ jobInvoice: { id: "o", state: "open", hasPayment: false } }))).toEqual({ kind: "locked" });
     expect(soldBillingView(est({}), view({ requestStatus: "cancelled" }))).toEqual({ kind: "closed" });
-    expect(SOLD_COPY.locked).toBe("The job's invoice is already finalized. The office will bill this estimate.");
+    expect(SOLD_COPY.locked).toBe("The job's invoice is already finalized. Ask the office to bill this estimate."); // ruling 12
   });
   it("the card shows from arrival on, or whenever estimates exist", () => {
     expect(estimatesCardVisible({ requestStatus: "en_route", estimates: [] })).toBe(false);
@@ -2502,7 +2747,7 @@ export function soldBillingView(
 }
 
 export const SOLD_COPY = {
-  locked: "The job's invoice is already finalized. The office will bill this estimate.",
+  locked: "The job's invoice is already finalized. Ask the office to bill this estimate.", // plan ruling 12 (spec deviation)
   newInvoice: "This goes on a new invoice.",
   added: "Added. Get the customer's signature on the invoice before finalizing.",
   overlap: "Check the invoice for parts that are also on the estimate.",
@@ -2877,7 +3122,7 @@ export async function techEquipmentPreamble(request: NextRequest, id: string): P
 
   Run: `npx vitest run src/lib/tech/invoice-route-guards.test.ts src/app/api/tech/jobs/\[id\]/invoice` → PASS (invoice routes call `techWritePreamble(request, id)` unchanged).
 
-- [ ] **Step 3: Failing route tests.** Shared harness (copy into each route test; it mirrors `invoice/finalize/route.test.ts`):
+- [ ] **Step 3: Failing route tests** (five files, each self-contained; the harness mirrors `invoice/finalize/route.test.ts`):
 
 `src/app/api/tech/jobs/[id]/estimates/route.test.ts`:
 
@@ -3027,83 +3272,260 @@ describe("POST /api/tech/jobs/[id]/estimates", () => {
 });
 ```
 
-`src/app/api/tech/jobs/[id]/estimates/[eid]/sell/route.test.ts` — same harness (mock `@/lib/tech/estimate-writes` → `{ sellFieldEstimate: h.sell }`, drop the GET pieces, `ctx = { params: Promise.resolve({ id: RID, eid: EST }) }`, `PATH = /api/tech/jobs/${RID}/estimates/${EST}/sell`), cases:
+`src/app/api/tech/jobs/[id]/estimates/[eid]/sell/route.test.ts`:
 
 ```ts
-  const OPT = "55555555-5555-4555-8555-555555555555";
-  it("uses the estimate preamble", async () => {
-    await post({ optionId: OPT, signatureName: "Pat Probe" });
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest, NextResponse } from "next/server";
+
+const h = vi.hoisted(() => ({
+  preamble: vi.fn(),
+  withIdempotency: vi.fn(),
+  replay: { current: null as null | { status: number; envelope: unknown } },
+  sell: vi.fn(),
+  logAudit: vi.fn(),
+}));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/lib/tech/invoice-route-guards", async (orig) => ({
+  ...(await orig<typeof import("@/lib/tech/invoice-route-guards")>()),
+  techWritePreamble: h.preamble,
+}));
+vi.mock("@/lib/http/idempotency", async (orig) => ({
+  ...(await orig<typeof import("@/lib/http/idempotency")>()),
+  withIdempotency: h.withIdempotency,
+}));
+vi.mock("@/lib/tech/estimate-writes", () => ({ sellFieldEstimate: h.sell }));
+vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
+vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() }, errorCode: () => "x" }));
+
+import { POST } from "./route";
+import { ESTIMATE_PREAMBLE } from "@/lib/tech/invoice-route-guards";
+
+const ORG = "00000000-0000-4000-8000-0000000000aa";
+const U = "00000000-0000-4000-8000-0000000000bb";
+const RID = "11111111-1111-4111-8111-111111111111";
+const EST = "44444444-4444-4444-8444-444444444444";
+const OPT = "55555555-5555-4555-8555-555555555555";
+const PATH = `/api/tech/jobs/${RID}/estimates/${EST}/sell`;
+const ctx = { params: Promise.resolve({ id: RID, eid: EST }) };
+const json = async (res: Response) => (await res.json()) as { success: boolean; data?: Record<string, unknown>; error?: { code: string; message: string } };
+const post = (body: unknown, key: string | null = "k-1") => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (key !== null) headers["idempotency-key"] = key;
+  return POST(new NextRequest(`http://localhost${PATH}`, { method: "POST", headers, body: JSON.stringify(body) }), ctx);
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.replay.current = null;
+  h.preamble.mockResolvedValue({ ok: true, session: { userId: U, organizationId: ORG }, job: {}, requestId: RID });
+  h.withIdempotency.mockImplementation(async (_s: unknown, _h: string, run: (ids: { id: (n: string) => string }) => Promise<unknown>) =>
+    h.replay.current ? { ...h.replay.current, replayed: true } : { ...(await run({ id: (n) => `derived-${n}` }) as object), replayed: false });
+  h.sell.mockResolvedValue({ ok: true, estimateId: EST, created: true });
+});
+
+describe("POST /api/tech/jobs/[id]/estimates/[eid]/sell", () => {
+  it("uses the estimate preamble and returns its refusal untouched", async () => {
+    h.preamble.mockResolvedValueOnce({ ok: false, response: NextResponse.json({ success: false, error: { code: "NOT_LEAD", message: "x" } }, { status: 403 }) });
+    expect((await post({ optionId: OPT, signatureName: "Pat Probe" })).status).toBe(403);
     expect(h.preamble).toHaveBeenCalledWith(expect.anything(), RID, ESTIMATE_PREAMBLE);
+    expect(h.withIdempotency).not.toHaveBeenCalled();
   });
   it("404 for a non-uuid estimate id", async () => {
-    const res = await POST(new NextRequest(`http://localhost/x`, { method: "POST", headers: { "idempotency-key": "k" }, body: "{}" }), { params: Promise.resolve({ id: RID, eid: "nope" }) });
-    expect(res.status).toBe(404);
+    const res = await POST(new NextRequest("http://localhost/x", { method: "POST", headers: { "idempotency-key": "k" }, body: "{}" }),
+      { params: Promise.resolve({ id: RID, eid: "nope" }) });
+    expect([res.status, (await json(res)).error?.code]).toEqual([404, "NOT_FOUND"]);
   });
-  it("400 'Type your full name to approve.' for a 1-letter name or the office marker", async () => {
+  it("400 INVALID_INPUT for a bad body; 400 'Type your full name to approve.' for a 1-letter name or the office marker", async () => {
+    for (const body of [{ optionId: "nope", signatureName: "Pat" }, { optionId: OPT }, { optionId: OPT, signatureName: "Pat", x: 1 }]) {
+      expect((await json(await post(body))).error?.code).toBe("INVALID_INPUT");
+    }
     for (const signatureName of ["P", "  ", "(admin)"]) {
-      const res = await post({ optionId: OPT, signatureName });
-      expect((await json(res)).error).toEqual({ code: "INVALID_INPUT", message: "Type your full name to approve." });
+      expect((await json(await post({ optionId: OPT, signatureName }))).error).toEqual({ code: "INVALID_INPUT", message: "Type your full name to approve." });
     }
     expect(h.withIdempotency).not.toHaveBeenCalled();
   });
+  it("400 IDEMPOTENCY_KEY_REQUIRED without a key", async () => {
+    expect((await json(await post({ optionId: OPT, signatureName: "Pat" }, null))).error?.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+  });
   it("200 { estimateId, status: 'sold', created } and an estimate_sold audit on a fresh sale", async () => {
-    h.sell.mockResolvedValue({ ok: true, estimateId: EST, created: true });
     const res = await post({ optionId: OPT, signatureName: " Pat Probe " });
     expect(res.status).toBe(200);
     expect((await json(res)).data).toEqual({ estimateId: EST, status: "sold", created: true });
     expect(h.sell).toHaveBeenCalledWith({ organizationId: ORG, requestId: RID, techUserId: U }, { estimateId: EST, optionId: OPT, signatureName: " Pat Probe " });
-    expect(h.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "estimate_sold", details: `estimateId:${EST} optionId:${OPT} via:field` }));
+    expect(h.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "estimate_sold", entity: "estimate", entityId: EST, details: `estimateId:${EST} optionId:${OPT} via:field` }));
   });
-  it("a writer replay (created:false) is 200 without an audit", async () => {
-    h.sell.mockResolvedValue({ ok: true, estimateId: EST, created: false });
+  it("a writer replay (created:false) is 200 without an audit; a key replay writes none either", async () => {
+    h.sell.mockResolvedValueOnce({ ok: true, estimateId: EST, created: false });
     expect((await post({ optionId: OPT, signatureName: "Pat" })).status).toBe(200);
+    h.replay.current = { status: 200, envelope: { success: true, data: { estimateId: EST, status: "sold", created: true } } };
+    expect((await json(await post({ optionId: OPT, signatureName: "Pat" }))).data).toEqual({ estimateId: EST, status: "sold", created: true, replayed: true });
     expect(h.logAudit).not.toHaveBeenCalled();
   });
   it("maps refusals", async () => {
-    for (const [reason, status, code] of [["already_decided", 409, "ALREADY_DECIDED"], ["estimate_expired", 409, "ESTIMATE_EXPIRED"], ["invalid_option", 400, "INVALID_OPTION"], ["estimate_not_found", 404, "NOT_FOUND"], ["not_lead", 403, "NOT_LEAD"]] as const) {
+    for (const [reason, status, code] of [["already_decided", 409, "ALREADY_DECIDED"], ["estimate_expired", 409, "ESTIMATE_EXPIRED"], ["invalid_option", 400, "INVALID_OPTION"], ["estimate_not_found", 404, "NOT_FOUND"], ["not_lead", 403, "NOT_LEAD"], ["job_closed", 409, "JOB_CLOSED"], ["stale", 409, "STALE"]] as const) {
       h.sell.mockResolvedValueOnce({ ok: false, reason });
       const res = await post({ optionId: OPT, signatureName: "Pat" });
       expect([res.status, (await json(res)).error?.code]).toEqual([status, code]);
     }
+    expect(h.logAudit).not.toHaveBeenCalled();
   });
+});
 ```
 
-`…/bill/route.test.ts` (mock `@/lib/admin/invoice-field-writes` → `{ billSoldEstimate: h.bill }`; `PATH …/bill`):
+`src/app/api/tech/jobs/[id]/estimates/[eid]/bill/route.test.ts`:
 
 ```ts
-  it("uses the invoicing statuses with the estimate copy", async () => {
-    h.bill.mockResolvedValue({ ok: true, invoiceId: "inv-1", added: 2, hasMaterials: true });
-    await post({});
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest, NextResponse } from "next/server";
+
+const h = vi.hoisted(() => ({
+  preamble: vi.fn(),
+  withIdempotency: vi.fn(),
+  replay: { current: null as null | { status: number; envelope: unknown } },
+  bill: vi.fn(),
+  logAudit: vi.fn(),
+}));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/lib/tech/invoice-route-guards", async (orig) => ({
+  ...(await orig<typeof import("@/lib/tech/invoice-route-guards")>()),
+  techWritePreamble: h.preamble,
+}));
+vi.mock("@/lib/http/idempotency", async (orig) => ({
+  ...(await orig<typeof import("@/lib/http/idempotency")>()),
+  withIdempotency: h.withIdempotency,
+}));
+vi.mock("@/lib/admin/invoice-field-writes", async (orig) => ({
+  ...(await orig<typeof import("@/lib/admin/invoice-field-writes")>()),
+  billSoldEstimate: h.bill,
+}));
+vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
+vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() }, errorCode: () => "x" }));
+
+import { POST } from "./route";
+import { BILL_PREAMBLE } from "@/lib/tech/invoice-route-guards";
+
+const ORG = "00000000-0000-4000-8000-0000000000aa";
+const U = "00000000-0000-4000-8000-0000000000bb";
+const RID = "11111111-1111-4111-8111-111111111111";
+const EST = "44444444-4444-4444-8444-444444444444";
+const PATH = `/api/tech/jobs/${RID}/estimates/${EST}/bill`;
+const ctx = { params: Promise.resolve({ id: RID, eid: EST }) };
+const json = async (res: Response) => (await res.json()) as { success: boolean; data?: Record<string, unknown>; error?: { code: string; message: string; details?: unknown } };
+const post = (body: unknown, key: string | null = "k-1", raw?: string) => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (key !== null) headers["idempotency-key"] = key;
+  return POST(new NextRequest(`http://localhost${PATH}`, { method: "POST", headers, body: raw ?? JSON.stringify(body) }), ctx);
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.replay.current = null;
+  h.preamble.mockResolvedValue({ ok: true, session: { userId: U, organizationId: ORG }, job: {}, requestId: RID });
+  h.withIdempotency.mockImplementation(async (_s: unknown, _h: string, run: (ids: { id: (n: string) => string }) => Promise<unknown>) =>
+    h.replay.current ? { ...h.replay.current, replayed: true } : { ...(await run({ id: (n) => `derived-${n}` }) as object), replayed: false });
+  h.bill.mockResolvedValue({ ok: true, invoiceId: "inv-1", added: 2, hasMaterials: true });
+});
+
+describe("POST /api/tech/jobs/[id]/estimates/[eid]/bill", () => {
+  it("uses the invoicing statuses with the estimate copy; a refusal is returned untouched", async () => {
+    h.preamble.mockResolvedValueOnce({ ok: false, response: NextResponse.json({ success: false, error: { code: "JOB_CLOSED", message: "x" } }, { status: 409 }) });
+    expect((await post({})).status).toBe(409);
     expect(h.preamble).toHaveBeenCalledWith(expect.anything(), RID, BILL_PREAMBLE);
+    expect(h.bill).not.toHaveBeenCalled();
   });
-  it("an absent body reads as {}; extra keys are 400", async () => {
-    h.bill.mockResolvedValue({ ok: true, invoiceId: "inv-1", added: 2, hasMaterials: false });
+  it("an absent body reads as {}; extra keys are 400; no key is 400", async () => {
     expect((await post(null, "k", "")).status).toBe(200);
-    expect((await post({ x: 1 })).status).toBe(400);
+    expect((await json(await post({ x: 1 }))).error?.code).toBe("INVALID_INPUT");
+    expect((await json(await post({}, null))).error?.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
   });
   it("200 { invoiceId, added, hasMaterials } with the derived invoice id; estimate_billed audit", async () => {
-    h.bill.mockResolvedValue({ ok: true, invoiceId: "inv-1", added: 2, hasMaterials: true });
     const res = await post({});
     expect((await json(res)).data).toEqual({ invoiceId: "inv-1", added: 2, hasMaterials: true });
     expect(h.bill).toHaveBeenCalledWith({ organizationId: ORG, requestId: RID, techUserId: U }, EST, { invoiceId: "derived-invoice" });
     expect(h.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "estimate_billed", entity: "estimate", entityId: EST, details: `estimateId:${EST} invoiceId:inv-1 added:2` }));
   });
-  it("ALREADY_BILLED carries details.invoiceId; INVOICE_LOCKED / NO_LINES / ESTIMATE_NOT_SOLD / STALE / too large map", async () => {
+  it("a key replay returns the stored 200 without an audit", async () => {
+    h.replay.current = { status: 200, envelope: { success: true, data: { invoiceId: "inv-1", added: 2, hasMaterials: false } } };
+    expect((await post({})).status).toBe(200);
+    expect(h.bill).not.toHaveBeenCalled();
+    expect(h.logAudit).not.toHaveBeenCalled();
+  });
+  it("ALREADY_BILLED carries details.invoiceId; the other refusals map with their copy", async () => {
     h.bill.mockResolvedValueOnce({ ok: false, reason: "already_billed", invoiceId: "inv-9" });
-    const billed = await json(await post({}));
-    expect(billed.error).toEqual({ code: "ALREADY_BILLED", message: "This estimate is already on an invoice.", details: { invoiceId: "inv-9" } });
-    for (const [reason, status, code] of [["invoice_locked", 409, "INVOICE_LOCKED"], ["no_lines", 409, "NO_LINES"], ["estimate_not_sold", 409, "ESTIMATE_NOT_SOLD"], ["stale", 409, "STALE"], ["too_large", 400, "INVALID_INPUT"], ["managed_externally", 409, "MANAGED_EXTERNALLY"]] as const) {
+    expect((await json(await post({}))).error).toEqual({ code: "ALREADY_BILLED", message: "This estimate is already on an invoice.", details: { invoiceId: "inv-9" } });
+    h.bill.mockResolvedValueOnce({ ok: false, reason: "invoice_locked" });
+    expect((await json(await post({}))).error).toEqual({ code: "INVOICE_LOCKED", message: "The job's invoice is already finalized. Ask the office to bill this estimate." });
+    h.bill.mockResolvedValueOnce({ ok: false, reason: "invoice_changed" });
+    expect((await json(await post({}))).error).toEqual({ code: "INVOICE_CHANGED", message: "The job's invoice changed. Try again." });
+    for (const [reason, status, code] of [["no_lines", 409, "NO_LINES"], ["estimate_not_sold", 409, "ESTIMATE_NOT_SOLD"], ["stale", 409, "STALE"], ["too_large", 400, "INVALID_INPUT"], ["managed_externally", 409, "MANAGED_EXTERNALLY"], ["estimate_not_found", 404, "NOT_FOUND"], ["not_lead", 403, "NOT_LEAD"]] as const) {
       h.bill.mockResolvedValueOnce({ ok: false, reason });
       const res = await post({});
       expect([res.status, (await json(res)).error?.code]).toEqual([status, code]);
     }
     expect(h.logAudit).not.toHaveBeenCalled();
   });
+});
 ```
 
-`…/decline/route.test.ts` (mock `estimate-writes` → `{ declineFieldEstimate: h.decline }`):
+`src/app/api/tech/jobs/[id]/estimates/[eid]/decline/route.test.ts`:
 
 ```ts
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
+
+const h = vi.hoisted(() => ({
+  preamble: vi.fn(),
+  withIdempotency: vi.fn(),
+  decline: vi.fn(),
+  logAudit: vi.fn(),
+}));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/lib/tech/invoice-route-guards", async (orig) => ({
+  ...(await orig<typeof import("@/lib/tech/invoice-route-guards")>()),
+  techWritePreamble: h.preamble,
+}));
+vi.mock("@/lib/http/idempotency", async (orig) => ({
+  ...(await orig<typeof import("@/lib/http/idempotency")>()),
+  withIdempotency: h.withIdempotency,
+}));
+vi.mock("@/lib/tech/estimate-writes", () => ({ declineFieldEstimate: h.decline }));
+vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
+vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() }, errorCode: () => "x" }));
+
+import { POST } from "./route";
+import { ESTIMATE_PREAMBLE } from "@/lib/tech/invoice-route-guards";
+
+const ORG = "00000000-0000-4000-8000-0000000000aa";
+const U = "00000000-0000-4000-8000-0000000000bb";
+const RID = "11111111-1111-4111-8111-111111111111";
+const EST = "44444444-4444-4444-8444-444444444444";
+const PATH = `/api/tech/jobs/${RID}/estimates/${EST}/decline`;
+const ctx = { params: Promise.resolve({ id: RID, eid: EST }) };
+const json = async (res: Response) => (await res.json()) as { success: boolean; data?: Record<string, unknown>; error?: { code: string; message: string } };
+const post = (body: unknown, key: string | null = "k-1") => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (key !== null) headers["idempotency-key"] = key;
+  return POST(new NextRequest(`http://localhost${PATH}`, { method: "POST", headers, body: JSON.stringify(body) }), ctx);
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.preamble.mockResolvedValue({ ok: true, session: { userId: U, organizationId: ORG }, job: {}, requestId: RID });
+  h.withIdempotency.mockImplementation(async (_s: unknown, _h: string, run: (ids: { id: (n: string) => string }) => Promise<unknown>) =>
+    ({ ...(await run({ id: (n) => `derived-${n}` }) as object), replayed: false }));
+});
+
+describe("POST /api/tech/jobs/[id]/estimates/[eid]/decline", () => {
+  it("uses the estimate preamble", async () => {
+    h.decline.mockResolvedValueOnce({ ok: true, estimateId: EST, created: true });
+    await post({});
+    expect(h.preamble).toHaveBeenCalledWith(expect.anything(), RID, ESTIMATE_PREAMBLE);
+    expect(h.decline).toHaveBeenCalledWith({ organizationId: ORG, requestId: RID, techUserId: U }, EST);
+  });
   it("200 { estimateId, status: 'dismissed', created } with an estimate_declined audit only when it changed", async () => {
     h.decline.mockResolvedValueOnce({ ok: true, estimateId: EST, created: true });
     expect((await json(await post({}))).data).toEqual({ estimateId: EST, status: "dismissed", created: true });
@@ -3113,55 +3535,134 @@ describe("POST /api/tech/jobs/[id]/estimates", () => {
     expect((await post({})).status).toBe(200);
     expect(h.logAudit).not.toHaveBeenCalled();
   });
-  it("ALREADY_DECIDED / NOT_FOUND / NOT_LEAD", async () => {
+  it("ALREADY_DECIDED / NOT_FOUND / NOT_LEAD; extra keys 400", async () => {
     for (const [reason, status, code] of [["already_decided", 409, "ALREADY_DECIDED"], ["estimate_not_found", 404, "NOT_FOUND"], ["not_lead", 403, "NOT_LEAD"]] as const) {
       h.decline.mockResolvedValueOnce({ ok: false, reason });
       const res = await post({});
       expect([res.status, (await json(res)).error?.code]).toEqual([status, code]);
     }
+    expect((await post({ x: 1 })).status).toBe(400);
   });
+});
 ```
 
-`src/app/api/tech/jobs/[id]/equipment/route.test.ts` (mock the guards module with `techEquipmentPreamble: h.preamble`; `@/lib/tech/equipment-queries` → `{ getTechEquipmentView: h.getView }`; `@/lib/tech/equipment-writes` → `{ addFieldEquipment: h.add }`):
+`src/app/api/tech/jobs/[id]/equipment/route.test.ts`:
 
 ```ts
-  const OLD = "66666666-6666-4666-8666-666666666666";
-  it("GET: 404 / 409 / 200 like the estimates GET", async () => {
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest, NextResponse } from "next/server";
+
+const h = vi.hoisted(() => ({
+  preamble: vi.fn(),
+  getTechSession: vi.fn(),
+  slidingWindow: vi.fn(),
+  getView: vi.fn(),
+  withIdempotency: vi.fn(),
+  replay: { current: null as null | { status: number; envelope: unknown } },
+  add: vi.fn(),
+  logAudit: vi.fn(),
+}));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: h.getTechSession }));
+vi.mock("@/lib/rate-limit", async (orig) => ({ ...(await orig<typeof import("@/lib/rate-limit")>()), slidingWindow: h.slidingWindow }));
+vi.mock("@/lib/tech/invoice-route-guards", async (orig) => ({
+  ...(await orig<typeof import("@/lib/tech/invoice-route-guards")>()),
+  techEquipmentPreamble: h.preamble,
+}));
+vi.mock("@/lib/http/idempotency", async (orig) => ({
+  ...(await orig<typeof import("@/lib/http/idempotency")>()),
+  withIdempotency: h.withIdempotency,
+}));
+vi.mock("@/lib/tech/equipment-queries", () => ({ getTechEquipmentView: h.getView }));
+vi.mock("@/lib/tech/equipment-writes", () => ({ addFieldEquipment: h.add }));
+vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
+vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() }, errorCode: () => "x" }));
+
+import { GET, POST } from "./route";
+
+const ORG = "00000000-0000-4000-8000-0000000000aa";
+const U = "00000000-0000-4000-8000-0000000000bb";
+const RID = "11111111-1111-4111-8111-111111111111";
+const OLD = "66666666-6666-4666-8666-666666666666";
+const PATH = `/api/tech/jobs/${RID}/equipment`;
+const ctx = { params: Promise.resolve({ id: RID }) };
+const json = async (res: Response) => (await res.json()) as { success: boolean; data?: Record<string, unknown>; error?: { code: string; message: string } };
+const post = (body: unknown, key: string | null = "k-1") => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (key !== null) headers["idempotency-key"] = key;
+  return POST(new NextRequest(`http://localhost${PATH}`, { method: "POST", headers, body: JSON.stringify(body) }), ctx);
+};
+const get = () => GET(new NextRequest(`http://localhost${PATH}`), ctx);
+const parsed = (over: Record<string, unknown> = {}) => ({
+  equipmentType: "ac", make: null, model: null, serialNumber: null, locationInHome: null, notes: null, installDate: null, replacesId: null, ...over,
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.replay.current = null;
+  h.getTechSession.mockResolvedValue({ userId: U, organizationId: ORG });
+  h.slidingWindow.mockReturnValue({ allowed: true, remaining: 1, resetMs: 1 });
+  h.preamble.mockResolvedValue({ ok: true, session: { userId: U, organizationId: ORG }, job: {}, requestId: RID });
+  h.withIdempotency.mockImplementation(async (_s: unknown, _h: string, run: (ids: { id: (n: string) => string }) => Promise<unknown>) =>
+    h.replay.current ? { ...h.replay.current, replayed: true } : { ...(await run({ id: (n) => `derived-${n}` }) as object), replayed: false });
+});
+
+describe("GET /api/tech/jobs/[id]/equipment", () => {
+  it("401 / 400 / 429 / 404 / 409 / 200", async () => {
+    h.getTechSession.mockResolvedValueOnce(null);
+    expect((await get()).status).toBe(401);
+    expect((await GET(new NextRequest("http://localhost/x"), { params: Promise.resolve({ id: "nope" }) })).status).toBe(400);
+    h.slidingWindow.mockReturnValueOnce({ allowed: false, remaining: 0, resetMs: 1 });
+    expect((await get()).status).toBe(429);
     h.getView.mockResolvedValueOnce({ kind: "not_found" });
     expect((await get()).status).toBe(404);
     h.getView.mockResolvedValueOnce({ kind: "external" });
     expect((await get()).status).toBe(409);
     h.getView.mockResolvedValueOnce({ kind: "ok", view: { units: [], canWrite: true } });
     expect((await json(await get())).data).toEqual({ units: [], canWrite: true });
+    expect(h.getView).toHaveBeenLastCalledWith(ORG, U, RID);
   });
-  it("POST: semantic validation copy (Other needs a description, future date)", async () => {
-    expect((await json(await post({ equipmentType: "other" }))).error).toEqual({ code: "INVALID_INPUT", message: "Describe the equipment." });
-    expect((await json(await post({ equipmentType: "ac", installDate: "2999-01-01" }))).error).toEqual({ code: "INVALID_INPUT", message: "The install date can't be in the future." });
+});
+
+describe("POST /api/tech/jobs/[id]/equipment", () => {
+  it("returns the equipment preamble's refusal untouched", async () => {
+    h.preamble.mockResolvedValueOnce({ ok: false, response: NextResponse.json({ success: false, error: { code: "NOT_ASSIGNED", message: "x" } }, { status: 403 }) });
+    expect((await post({ equipmentType: "ac" })).status).toBe(403);
     expect(h.withIdempotency).not.toHaveBeenCalled();
   });
-  it("POST: 201 add with equipment_added; 201 replace with equipment_replaced; 200 replay without an audit", async () => {
+  it("semantic validation copy (Other needs a description, future date, unknown type, bad replaces id)", async () => {
+    expect((await json(await post({ equipmentType: "other" }))).error).toEqual({ code: "INVALID_INPUT", message: "Describe the equipment." });
+    expect((await json(await post({ equipmentType: "ac", installDate: "2999-01-01" }))).error).toEqual({ code: "INVALID_INPUT", message: "The install date can't be in the future." });
+    expect((await json(await post({ equipmentType: "jacuzzi" }))).error).toEqual({ code: "INVALID_INPUT", message: "Choose the type of equipment." });
+    expect((await json(await post({ equipmentType: "ac", replacesId: "nope" }))).error?.code).toBe("INVALID_INPUT");
+    expect(h.withIdempotency).not.toHaveBeenCalled();
+  });
+  it("201 add with equipment_added; 201 replace with equipment_replaced; 200 replay without an audit", async () => {
     h.add.mockResolvedValueOnce({ ok: true, equipmentId: "eq-1", created: true, replaced: false });
     const a = await post({ equipmentType: "ac", make: "Carrier" });
     expect(a.status).toBe(201);
     expect((await json(a)).data).toEqual({ equipmentId: "eq-1", created: true });
-    expect(h.add).toHaveBeenCalledWith({ organizationId: ORG, requestId: RID, techUserId: U }, { equipmentId: "derived-equipment" },
-      { equipmentType: "ac", make: "Carrier", model: null, serialNumber: null, locationInHome: null, notes: null, installDate: null, replacesId: null });
-    expect(h.logAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "equipment_added", details: "equipmentId:eq-1" }));
+    expect(h.add).toHaveBeenCalledWith({ organizationId: ORG, requestId: RID, techUserId: U }, { equipmentId: "derived-equipment" }, parsed({ make: "Carrier" }));
+    expect(h.logAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "equipment_added", entity: "equipment", details: "equipmentId:eq-1" }));
     h.add.mockResolvedValueOnce({ ok: true, equipmentId: "eq-2", created: true, replaced: true });
     expect((await post({ equipmentType: "ac", replacesId: OLD })).status).toBe(201);
     expect(h.logAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "equipment_replaced", details: `equipmentId:eq-2 replacesId:${OLD}` }));
     h.logAudit.mockClear();
     h.add.mockResolvedValueOnce({ ok: true, equipmentId: "eq-2", created: false, replaced: true });
     expect((await post({ equipmentType: "ac", replacesId: OLD })).status).toBe(200);
+    h.replay.current = { status: 201, envelope: { success: true, data: { equipmentId: "eq-2", created: true } } };
+    expect((await post({ equipmentType: "ac", replacesId: OLD })).status).toBe(201);
     expect(h.logAudit).not.toHaveBeenCalled();
   });
-  it("POST: EQUIPMENT_RETIRED / MANAGED_EXTERNALLY / NOT_FOUND / NO_CUSTOMER", async () => {
-    for (const [reason, status, code] of [["equipment_retired", 409, "EQUIPMENT_RETIRED"], ["managed_externally", 409, "MANAGED_EXTERNALLY"], ["not_found", 404, "NOT_FOUND"], ["no_customer", 409, "NO_CUSTOMER"]] as const) {
+  it("EQUIPMENT_RETIRED / MANAGED_EXTERNALLY / NOT_FOUND / NO_CUSTOMER / STALE", async () => {
+    for (const [reason, status, code] of [["equipment_retired", 409, "EQUIPMENT_RETIRED"], ["managed_externally", 409, "MANAGED_EXTERNALLY"], ["not_found", 404, "NOT_FOUND"], ["no_customer", 409, "NO_CUSTOMER"], ["stale", 409, "STALE"]] as const) {
       h.add.mockResolvedValueOnce({ ok: false, reason });
       const res = await post({ equipmentType: "ac", replacesId: OLD });
       expect([res.status, (await json(res)).error?.code]).toEqual([status, code]);
     }
   });
+});
 ```
 
   Run: `npx vitest run "src/app/api/tech/jobs/[id]/estimates" "src/app/api/tech/jobs/[id]/equipment"` → FAIL (routes missing).
@@ -3554,11 +4055,11 @@ EOF
 
 **Files:**
 - Create: `src/lib/admin/estimate-approval-copy.ts` (+ `estimate-approval-copy.test.ts`)
-- Modify: `src/lib/admin/estimate-queries.ts` (`approveEstimate` ~158–220, `listEstimates` ~444–560, `EstimateDetailView` + `getEstimateDetailById` ~600–760, `markEstimateSold` ~803–850), `src/lib/admin/estimate-queries.test.ts`, `src/lib/admin/estimate-list-pagination.test.ts`, `src/app/api/admin/estimates/route.ts` (bucket whitelist) + `route.test.ts`, `src/app/api/admin/estimates/[id]/route.ts` (PATCH passes the admin id), `src/hooks/use-estimates.ts` (bucket type), `src/app/admin/(dashboard)/estimates/page.tsx` (tab), `src/app/admin/(dashboard)/estimates/[id]/page.tsx` (approval card)
+- Modify: `src/lib/admin/estimate-queries.ts` (`approveEstimate` ~158–220, `listEstimates` ~444–560, `EstimateDetailView` + `getEstimateDetailById` ~600–760, `markEstimateSold` ~803–850), `src/lib/admin/estimate-queries.test.ts`, `src/lib/admin/estimate-detail.test.ts` (new cases; its existing fixtures keep passing because the legacy check is `soldVia == null`), `src/lib/admin/estimate-list-pagination.test.ts`, `src/app/api/admin/estimates/route.ts` (bucket whitelist) + `route.test.ts`, `src/app/api/admin/estimates/[id]/route.ts` (PATCH passes the admin id), `src/hooks/use-estimates.ts` (bucket type), `src/app/admin/(dashboard)/estimates/page.tsx` (tab), `src/app/admin/(dashboard)/estimates/[id]/page.tsx` (approval card)
 
 **Interfaces:**
 - Consumes (Task 1): `jobBilledSql`; columns `estimates.sold_via` / `sold_by`.
-- Produces: `markEstimateSold(organizationId, id, optionId, soldBy: string | null = null, now = new Date())`; `listEstimates(org, { bucket: 'not_invoiced' })`; `EstimateDetailView` gains `soldVia: string | null`, `soldByName: string | null`; `approvalLines(input, formatWhen, formatDay): string[]` in `estimate-approval-copy.ts`.
+- Produces: `markEstimateSold(organizationId, id, optionId, soldBy: string | null = null, now = new Date())`; `listEstimates(org, { bucket: 'not_invoiced' })`; `EstimateDetailView` gains `soldVia: string | null`, `soldByName: string | null`; `approvalLines(input, formatWhen, formatDay): ApprovalSegment[][]` in `estimate-approval-copy.ts` (`ApprovalSegment = { text: string; strong?: true }`; strong segments render as today's `font-medium text-foreground` names).
 
 - [ ] **Step 1: Failing tests.**
 
@@ -3566,40 +4067,45 @@ EOF
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { approvalLines } from "./estimate-approval-copy";
+import { approvalLines, type ApprovalSegment } from "./estimate-approval-copy";
 
 const when = () => "Nov 6, 2:05 PM";
 const day = () => "Nov 6, 2026";
+const plain = (lines: ApprovalSegment[][]) => lines.map((l) => l.map((s) => s.text).join(""));
+const strong = (lines: ApprovalSegment[][]) => lines.flat().filter((s) => s.strong).map((s) => s.text);
+const base = { signatureName: null, soldByName: null, markedSoldBy: null, signedAt: "x" };
 
 describe("office approval line (spec §2)", () => {
-  it("field: who typed the name, then the technician and time", () => {
-    expect(approvalLines({ soldVia: "field", signatureName: "Pat Probe", soldByName: "Sam Tech", markedSoldBy: null, signedAt: "x" }, when, day))
-      .toEqual(["Signed by Pat Probe.", "Signed on site with Sam Tech · Nov 6, 2:05 PM"]);
+  it("field: who typed the name, then 'Signed on site with <technician> · <time>'", () => {
+    const l = approvalLines({ ...base, soldVia: "field", signatureName: "Pat Probe", soldByName: "Sam Tech" }, when, day);
+    expect(plain(l)).toEqual(["Signed by Pat Probe.", "Signed on site with Sam Tech · Nov 6, 2:05 PM"]);
+    expect(strong(l)).toEqual(["Pat Probe", "Sam Tech"]);
   });
   it("field with a deleted technician", () => {
-    expect(approvalLines({ soldVia: "field", signatureName: "Pat", soldByName: null, markedSoldBy: null, signedAt: "x" }, when, day)[1])
+    expect(plain(approvalLines({ ...base, soldVia: "field", signatureName: "Pat" }, when, day))[1])
       .toBe("Signed on site with a technician · Nov 6, 2:05 PM");
   });
-  it("office: Marked sold by <admin name>", () => {
-    expect(approvalLines({ soldVia: "office", signatureName: "(admin)", soldByName: "Raymond", markedSoldBy: null, signedAt: "x" }, when, day))
-      .toEqual(["Marked sold by Raymond · Nov 6, 2:05 PM"]);
+  it("office: 'Marked sold by <admin name>' and no time", () => {
+    const l = approvalLines({ ...base, soldVia: "office", signatureName: "(admin)", soldByName: "Raymond" }, when, day);
+    expect(plain(l)).toEqual(["Marked sold by Raymond"]);
+    expect(strong(l)).toEqual(["Raymond"]);
   });
-  it("old office rows keep today's wording from the audit log", () => {
-    expect(approvalLines({ soldVia: null, signatureName: "(admin)", soldByName: null, markedSoldBy: "Ann", signedAt: "x" }, when, day))
-      .toEqual(["Marked sold in the office by Ann on Nov 6, 2026."]);
-    expect(approvalLines({ soldVia: null, signatureName: "(admin)", soldByName: null, markedSoldBy: null, signedAt: "x" }, when, day))
-      .toEqual(["Marked sold in the office on Nov 6, 2026."]);
+  it("old office rows keep today's wording, name in bold", () => {
+    const l = approvalLines({ ...base, soldVia: null, signatureName: "(admin)", markedSoldBy: "Ann" }, when, day);
+    expect(plain(l)).toEqual(["Marked sold in the office by Ann on Nov 6, 2026."]);
+    expect(strong(l)).toEqual(["Ann"]);
+    expect(plain(approvalLines({ ...base, soldVia: null, signatureName: "(admin)" }, when, day))).toEqual(["Marked sold in the office on Nov 6, 2026."]);
   });
   it("portal and old customer rows as today", () => {
-    expect(approvalLines({ soldVia: "portal", signatureName: "Pat", soldByName: null, markedSoldBy: null, signedAt: "x" }, when, day))
-      .toEqual(["Signed by Pat on Nov 6, 2026."]);
-    expect(approvalLines({ soldVia: null, signatureName: null, soldByName: null, markedSoldBy: null, signedAt: "x" }, when, day))
-      .toEqual(["Signed by customer on Nov 6, 2026."]);
+    const l = approvalLines({ ...base, soldVia: "portal", signatureName: "Pat" }, when, day);
+    expect(plain(l)).toEqual(["Signed by Pat on Nov 6, 2026."]);
+    expect(strong(l)).toEqual(["Pat"]);
+    expect(plain(approvalLines({ ...base, soldVia: null }, when, day))).toEqual(["Signed by customer on Nov 6, 2026."]);
   });
 });
 ```
 
-  `src/lib/admin/estimate-queries.test.ts` — add:
+  `src/lib/admin/estimate-queries.test.ts` — import `approveEstimate` next to `markEstimateSold` and add:
 
 ```ts
 describe("sold_via / sold_by (M3c spec §3)", () => {
@@ -3610,10 +4116,36 @@ describe("sold_via / sold_by (M3c spec §3)", () => {
     expect(await markEstimateSold(ORG, "est-1", "opt-1", "admin-1")).toEqual({ ok: true, estimateId: "est-1" });
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "sold", soldVia: "office", soldBy: "admin-1", signatureName: "(admin)" }));
   });
+
+  it("approveEstimate (portal) writes sold_via='portal' and no seller", async () => {
+    mockSelectSeq([[{ id: "est-1", organizationId: ORG, status: "open", expiresAt: null }], [{ id: "opt-1" }]]);
+    const set = vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: "est-1" }]) })) }));
+    vi.mocked(db.update).mockReturnValueOnce({ set } as never);
+    expect(await approveEstimate({ token: "t", optionId: "opt-1", signatureName: "Pat", signatureIp: "1.2.3.4" }))
+      .toEqual({ ok: true, estimateId: "est-1" });
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "sold", soldVia: "portal", soldBy: null, signatureName: "Pat", signatureIp: "1.2.3.4" }));
+  });
 });
 ```
 
-  and the same shape for `approveEstimate` (import it): `mockSelectSeq([[{ id: "est-1", organizationId: ORG, status: "open", expiresAt: null }], [{ id: "opt-1" }]])`, then `approveEstimate({ token: "t", optionId: "opt-1", signatureName: "Pat", signatureIp: "1.2.3.4" })` → `set` called with `expect.objectContaining({ soldVia: "portal", soldBy: null })`.
+  `src/lib/admin/estimate-detail.test.ts` — add:
+
+```ts
+describe("getEstimateDetailById — who sold it (M3c)", () => {
+  it("a field sale carries sold_via and the technician's name, and skips the audit lookup", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "Pat Probe", soldVia: "field", soldByName: "Sam Tech" }], []]);
+    const d = await getEstimateDetailById("org-1", "est-1");
+    expect(d).toMatchObject({ soldVia: "field", soldByName: "Sam Tech", markedSoldBy: null });
+    expect(db.select).toHaveBeenCalledTimes(2); // header + options only
+  });
+  it("an office sale since M3c names the admin from sold_by, not the audit log", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "(admin)", soldVia: "office", soldByName: "Raymond" }], []]);
+    const d = await getEstimateDetailById("org-1", "est-1");
+    expect(d).toMatchObject({ soldVia: "office", soldByName: "Raymond", markedSoldBy: null });
+    expect(db.select).toHaveBeenCalledTimes(2);
+  });
+});
+```
 
   `src/lib/admin/estimate-list-pagination.test.ts` — add next to the other bucket cases:
 
@@ -3624,11 +4156,11 @@ describe("sold_via / sold_by (M3c spec §3)", () => {
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ""));
     expect(wheres.some((w) => w.includes("NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id ="))).toBe(true);
     expect(wheres.some((w) => w.includes("jbx.estimate_line_item_id IN"))).toBe(true);
-    expect(wheres.some((w) => w.includes("'sold'"))).toBe(true);
+    expect(wheres.some((w) => w.includes("'sold'::estimate_status"))).toBe(true);
   });
 ```
 
-  `src/app/api/admin/estimates/route.test.ts` — import `GET` too and add:
+  `src/app/api/admin/estimates/route.test.ts` — change the route import to `import { GET, POST } from "./route";` and add:
 
 ```ts
 describe("GET /api/admin/estimates — Sold, not invoiced (M3c)", () => {
@@ -3642,7 +4174,7 @@ describe("GET /api/admin/estimates — Sold, not invoiced (M3c)", () => {
 });
 ```
 
-  Run: `npx vitest run src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-list-pagination.test.ts src/app/api/admin/estimates/route.test.ts` → FAIL.
+  Run: `npx vitest run src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-list-pagination.test.ts src/app/api/admin/estimates/route.test.ts` → FAIL.
 
 - [ ] **Step 2: Implement.**
 
@@ -3651,10 +4183,17 @@ describe("GET /api/admin/estimates — Sold, not invoiced (M3c)", () => {
 ```ts
 /**
  * The office estimate detail's "Approval" lines (M3c spec §2): a field sale
- * names the technician (weaker evidence than the portal's remote e-sign: no
- * IP), an office sale names the admin, portal and pre-M3c rows read as before.
+ * names who typed the name and the technician ("Signed on site with …", weaker
+ * evidence than the portal's remote e-sign: no IP); an office sale since M3c
+ * reads "Marked sold by <admin name>"; portal and pre-M3c rows read as today.
+ * Names are `strong` segments (today's bold names). Pure.
  */
 const OFFICE_SIGNATURE = "(admin)";
+
+export interface ApprovalSegment {
+  readonly text: string;
+  readonly strong?: true;
+}
 
 export interface ApprovalInput {
   readonly soldVia: string | null;
@@ -3665,31 +4204,42 @@ export interface ApprovalInput {
   readonly signedAt: string;
 }
 
+const name = (text: string): ApprovalSegment => ({ text, strong: true });
+const t = (text: string): ApprovalSegment => ({ text });
+
 export function approvalLines(
   e: ApprovalInput, formatWhen: (iso: string) => string, formatDay: (iso: string) => string,
-): string[] {
+): ApprovalSegment[][] {
   if (e.soldVia === "field") {
-    return [`Signed by ${e.signatureName ?? "the customer"}.`, `Signed on site with ${e.soldByName ?? "a technician"} · ${formatWhen(e.signedAt)}`];
+    return [
+      [t("Signed by "), name(e.signatureName ?? "the customer"), t(".")],
+      [t("Signed on site with "), e.soldByName ? name(e.soldByName) : t("a technician"), t(` · ${formatWhen(e.signedAt)}`)],
+    ];
   }
-  if (e.soldVia === "office") return [`Marked sold by ${e.soldByName ?? e.markedSoldBy ?? "the office"} · ${formatWhen(e.signedAt)}`];
+  if (e.soldVia === "office") {
+    const who = e.soldByName ?? e.markedSoldBy;
+    return [who ? [t("Marked sold by "), name(who)] : [t("Marked sold in the office")]];
+  }
   if (e.signatureName === OFFICE_SIGNATURE) {
-    return [`Marked sold in the office${e.markedSoldBy ? ` by ${e.markedSoldBy}` : ""} on ${formatDay(e.signedAt)}.`];
+    return [e.markedSoldBy
+      ? [t("Marked sold in the office by "), name(e.markedSoldBy), t(` on ${formatDay(e.signedAt)}.`)]
+      : [t(`Marked sold in the office on ${formatDay(e.signedAt)}.`)]];
   }
-  return [`Signed by ${e.signatureName ?? "customer"} on ${formatDay(e.signedAt)}.`];
+  return [[t("Signed by "), name(e.signatureName ?? "customer"), t(` on ${formatDay(e.signedAt)}.`)]];
 }
 ```
 
   `src/lib/admin/estimate-queries.ts`:
   - `approveEstimate`'s `.set({...})` gains `soldVia: "portal", soldBy: null,`.
-  - `markEstimateSold(organizationId, id, optionId, soldBy: string | null = null, now: Date = new Date())`; its `.set({...})` gains `soldVia: "office", soldBy,`.
-  - `listEstimates` opts `bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced'`; the bucket push becomes:
+  - `markEstimateSold(organizationId: string, id: string, optionId: string, soldBy: string | null = null, now: Date = new Date())`; its `.set({...})` gains `soldVia: "office", soldBy,`.
+  - `listEstimates` opts `bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced'`; import `jobBilledSql` from `./estimate-billing-sql`; the bucket push becomes:
 
 ```ts
   if (opts.bucket === 'not_invoiced') {
     // Sold, not invoiced (M3c spec §2): native sold, no invoice of ANY state born
     // from it (a voided office invoice means the office handled it, like
     // Generate), and not on the job's invoice.
-    extraConditions.push(sql`(${estimates.status} = 'sold' AND ${estimates.fieldpulseEstimateId} IS NULL
+    extraConditions.push(sql`(${estimates.status} = 'sold'::estimate_status AND ${estimates.fieldpulseEstimateId} IS NULL
       AND NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id = ${organizationId}::uuid AND ni.estimate_id = ${estimates.id})
       AND NOT ${jobBilledSql(organizationId, sql`${estimates.id}`)})`);
   } else if (opts.bucket) {
@@ -3697,18 +4247,150 @@ export function approvalLines(
   }
 ```
 
-    (import `jobBilledSql` from `./estimate-billing-sql`).
-  - `EstimateDetailView` gains `/** 'portal' | 'office' | 'field'; null on rows sold before M3c. */ readonly soldVia: string | null;` and `/** Name of the selling technician (field) or admin (office). */ readonly soldByName: string | null;`. In `getEstimateDetailById`, select `soldVia: estimates.soldVia, soldByName: users.name`, add `.leftJoin(users, and(eq(users.id, estimates.soldBy), eq(users.organizationId, organizationId)))` after the invoices join, and compute `markedSoldBy` only for legacy rows: `est.signatureName === ADMIN_SIGNATURE && est.soldVia === null ? await findMarkedSoldBy(...) : null`. Return `soldVia: est.soldVia ?? null, soldByName: est.soldByName ?? null` (destructure `soldByName` out of `header` like the other joined columns).
+  - `EstimateDetailView` gains:
+
+```ts
+  /** 'portal' | 'office' | 'field'; null on rows sold before M3c. */
+  readonly soldVia: string | null;
+  /** The selling technician (field) or admin (office); null when unknown or deleted. */
+  readonly soldByName: string | null;
+```
+
+  - `getEstimateDetailById` in full:
+
+```ts
+export async function getEstimateDetailById(
+  organizationId: string,
+  id: string,
+): Promise<EstimateDetailView | null> {
+  const [est] = await db
+    .select({
+      id: estimates.id,
+      status: estimates.status,
+      totalCents: estimates.totalCents,
+      customerId: estimates.customerId,
+      serviceRequestId: estimates.serviceRequestId,
+      soldOptionId: estimates.soldOptionId,
+      signedAt: estimates.signedAt,
+      signatureName: estimates.signatureName,
+      expiresAt: estimates.expiresAt,
+      createdAt: estimates.createdAt,
+      dueDate: estimates.dueDate,
+      fieldpulseEstimateId: estimates.fieldpulseEstimateId,
+      fieldpulseStatusName: estimates.fieldpulseStatusName,
+      title: estimates.title,
+      fieldpulseData: estimates.fieldpulseData,
+      soldVia: estimates.soldVia,
+      soldByName: users.name,
+      nameEncrypted: customers.nameEncrypted,
+      invoiceId: invoices.id,
+    })
+    .from(estimates)
+    // Org-scope the joins too (defense in depth).
+    .leftJoin(customers, and(eq(customers.id, estimates.customerId), eq(customers.organizationId, organizationId)))
+    // At most one invoice per estimate (invoices_estimate_unique), so the
+    // detail can show "View invoice" instead of a second Generate.
+    .leftJoin(invoices, and(eq(invoices.estimateId, estimates.id), eq(invoices.organizationId, organizationId)))
+    // M3c: who sold it (technician for field, admin for office).
+    .leftJoin(users, and(eq(users.id, estimates.soldBy), eq(users.organizationId, organizationId)))
+    .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
+    .limit(1);
+
+  if (!est) return null;
+
+  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, soldVia, soldByName, ...header } = est;
+  // Only pre-M3c office rows need the audit log; since M3c sold_by names the admin.
+  const markedSoldBy =
+    est.signatureName === ADMIN_SIGNATURE && soldVia == null ? await findMarkedSoldBy(organizationId, est.id) : null;
+  // Admin detail: include snapshotted cost so the UI can show margin.
+  const options = await loadOptionsWithLineItems(organizationId, est.id, true);
+  return {
+    ...header,
+    customerName: safeDecryptName(nameEncrypted ?? null),
+    markedSoldBy,
+    soldVia: soldVia ?? null,
+    soldByName: soldByName ?? null,
+    options,
+    syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
+    fieldpulseStatusName: fieldpulseStatusName ?? null,
+    fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
+    invoiceId: invoiceId ?? null,
+  };
+}
+```
+
   - `src/app/api/admin/estimates/[id]/route.ts` PATCH: `markEstimateSold(session.organizationId, id, parsed.data.optionId, session.userId)`.
-  - `src/app/api/admin/estimates/route.ts` GET: `VALID_BUCKETS` and `ValidBucket` gain `'not_invoiced'`.
-  - `src/hooks/use-estimates.ts`: `bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced'`.
+  - `src/app/api/admin/estimates/route.ts` GET:
+
+```ts
+    const VALID_BUCKETS = new Set(['open', 'won', 'lost', 'draft', 'not_invoiced'] as const);
+    type ValidBucket = 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
+```
+
+  - `src/hooks/use-estimates.ts`: `readonly bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';`.
   - `src/app/admin/(dashboard)/estimates/page.tsx`:
-    - `type Bucket = 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';`
-    - `TABS` gains `{ value: 'not_invoiced', label: 'Sold, not invoiced' }` after `draft`, before `All`.
-    - `tabCount` / `tabCents`: `if (bucket === 'not_invoiced') return undefined;` first (return types `number | undefined`); the `SegmentedControl` option label becomes `stats && tab.value !== 'not_invoiced' ? \`${tab.label} · ${formatCentsExact(tabCents(stats, tab.value) ?? 0)}\` : tab.label` and `badge: stats ? tabCount(stats, tab.value) : undefined`.
-    - `emptyMessage`: `if (bucket === 'not_invoiced') return 'No sold estimates are waiting for an invoice.';`
-    - `restoreFiltersFromUrl` buckets list gains `'not_invoiced'`.
-  - `src/app/admin/(dashboard)/estimates/[id]/page.tsx`: the `EstimateDetail` interface gains `soldVia` and `soldByName`; add `function formatWhen(iso: string): string { return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }` next to `formatDay`; the Approval card body becomes
+
+```tsx
+type Bucket = 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
+```
+
+```tsx
+const TABS: ReadonlyArray<TabDef> = [
+  { value: 'open',  label: 'Open' },
+  { value: 'won',   label: 'Won' },
+  { value: 'lost',  label: 'Lost' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'not_invoiced', label: 'Sold, not invoiced' },
+  { value: null,    label: 'All' },
+];
+
+/** The pipeline stats have no "not invoiced" bucket: that tab shows no count or total. */
+type StatBucket = Exclude<Bucket, 'not_invoiced'>;
+
+function tabCount(stats: EstimatePipelineStats | null, bucket: Bucket | null): number | undefined {
+  if (!stats || bucket === 'not_invoiced') return undefined;
+  if (bucket === null) return stats.openCount + stats.wonCount + stats.lostCount + stats.draftCount;
+  return stats[`${bucket as StatBucket}Count`];
+}
+
+function tabCents(stats: EstimatePipelineStats | null, bucket: Bucket | null): number | undefined {
+  if (!stats || bucket === 'not_invoiced') return undefined;
+  if (bucket === null) return stats.openCents + stats.wonCents + stats.lostCents + stats.draftCents;
+  return stats[`${bucket as StatBucket}Cents`];
+}
+
+function emptyMessage(bucket: Bucket | null): string {
+  if (bucket === 'open')  return 'No open estimates — the pipeline is clear.';
+  if (bucket === 'won')   return 'No won estimates yet.';
+  if (bucket === 'lost')  return 'No lost estimates.';
+  if (bucket === 'draft') return 'No draft estimates.';
+  if (bucket === 'not_invoiced') return 'No sold estimates are waiting for an invoice.';
+  return 'No estimates yet. Create one to send a customer a proposal.';
+}
+```
+
+    In `restoreFiltersFromUrl`: `const buckets: readonly string[] = ['open', 'won', 'lost', 'draft', 'not_invoiced'];`. The `SegmentedControl` options map becomes:
+
+```tsx
+          options={TABS.map((tab) => {
+            const cents = tabCents(stats, tab.value);
+            return {
+              value: tab.value ?? 'all',
+              label: cents === undefined ? tab.label : `${tab.label} · ${formatCentsExact(cents)}`,
+              badge: tabCount(stats, tab.value),
+            };
+          })}
+```
+
+  - `src/app/admin/(dashboard)/estimates/[id]/page.tsx`: the `EstimateDetail` interface gains `readonly soldVia: string | null;` and `readonly soldByName: string | null;`; add next to `formatDay`:
+
+```tsx
+function formatWhen(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+```
+
+    and the Approval card's `CardContent` becomes (import `approvalLines` from `@/lib/admin/estimate-approval-copy`):
 
 ```tsx
           <CardContent className="space-y-1 text-sm text-muted-foreground">
@@ -3722,26 +4404,28 @@ export function approvalLines(
               },
               formatWhen,
               formatDay,
-            ).map((line) => (
-              <p key={line}>{line}</p>
+            ).map((line, i) => (
+              <p key={i}>
+                {line.map((seg, j) =>
+                  seg.strong ? <span key={j} className="font-medium text-foreground">{seg.text}</span> : <span key={j}>{seg.text}</span>,
+                )}
+              </p>
             ))}
           </CardContent>
 ```
 
-    (import `approvalLines` from `@/lib/admin/estimate-approval-copy`).
-
 - [ ] **Step 3: Run to verify they pass**
 
-Run: `npx vitest run src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-list-pagination.test.ts src/lib/admin/estimate-synced-guards.test.ts src/lib/admin/invoice-queries.test.ts src/app/api/admin/estimates`
+Run: `npx vitest run src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-list-pagination.test.ts src/lib/admin/estimate-synced-guards.test.ts src/lib/admin/invoice-queries.test.ts src/app/api/admin/estimates`
 Expected: PASS.
 
-- [ ] **Step 4: Look at it.** Dev server running; `node scripts/agent/screenshot-page.mjs "/admin/estimates?bucket=not_invoiced" 1280 /tmp/m3c-7-list.png` and a field-sold estimate's detail (use the Task 6 probe recipe on a throwaway org with `MINT_ORG_ID`, or skip the detail shot if no such row exists on dev and say so). Read `.claude/skills/page-estimates/SKILL.md` and `admin-pages` first; the tab follows the existing SegmentedControl style.
+- [ ] **Step 4: Look at it.** Dev server running; `node scripts/agent/screenshot-page.mjs "/admin/estimates?bucket=not_invoiced" 1280 /tmp/m3c-7-list.png` and a field-sold estimate's detail (the Task 6 probe recipe on a throwaway org with `MINT_ORG_ID` sells one). Read `.claude/skills/page-estimates/SKILL.md` and `admin-pages` first; the tab follows the existing SegmentedControl style.
 
 - [ ] **Step 5: Gates and commit**
 
 ```bash
-npx tsc --noEmit && npx eslint src/lib/admin/estimate-approval-copy.ts src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-list-pagination.test.ts src/app/api/admin/estimates/route.ts src/app/api/admin/estimates/route.test.ts "src/app/api/admin/estimates/[id]/route.ts" src/hooks/use-estimates.ts "src/app/admin/(dashboard)/estimates/page.tsx" "src/app/admin/(dashboard)/estimates/[id]/page.tsx" && npx vitest run
-git add src/lib/admin/estimate-approval-copy.ts src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-list-pagination.test.ts src/app/api/admin/estimates/route.ts src/app/api/admin/estimates/route.test.ts "src/app/api/admin/estimates/[id]/route.ts" src/hooks/use-estimates.ts "src/app/admin/(dashboard)/estimates/page.tsx" "src/app/admin/(dashboard)/estimates/[id]/page.tsx"
+npx tsc --noEmit && npx eslint src/lib/admin/estimate-approval-copy.ts src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-list-pagination.test.ts src/app/api/admin/estimates/route.ts src/app/api/admin/estimates/route.test.ts "src/app/api/admin/estimates/[id]/route.ts" src/hooks/use-estimates.ts "src/app/admin/(dashboard)/estimates/page.tsx" "src/app/admin/(dashboard)/estimates/[id]/page.tsx" && npx vitest run
+git add src/lib/admin/estimate-approval-copy.ts src/lib/admin/estimate-approval-copy.test.ts src/lib/admin/estimate-queries.ts src/lib/admin/estimate-queries.test.ts src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-list-pagination.test.ts src/app/api/admin/estimates/route.ts src/app/api/admin/estimates/route.test.ts "src/app/api/admin/estimates/[id]/route.ts" src/hooks/use-estimates.ts "src/app/admin/(dashboard)/estimates/page.tsx" "src/app/admin/(dashboard)/estimates/[id]/page.tsx"
 git commit -m "$(cat <<'EOF'
 feat(m3c): office sees who sold an estimate and a Sold, not invoiced filter
 
@@ -3764,7 +4448,7 @@ EOF
 - Produces:
   - `useIdempotencyKey({ intentId, requestId, persist, storageKey?, rehydrate? })` (defaults keep every M3b caller unchanged).
   - `estimate-intents.ts`: `ESTIMATE_INTENTS_KEY(rid)` = `tech:estimate:<rid>:intents`, `ESTIMATE_INTENT` (`create`, `sell(eid)`, `bill(eid)`, `decline(eid)`, `equipmentAdd`, `equipmentReplace(unitId)`), `StoredWrite { path; payload }`, `isStoredWrite`, `storedToRecover(raw, match)`, `recoveryKeeps(outcome)`, `withoutIntent(raw, intentId)`, `estimateWriteCopy(outcome, envelope)`.
-  - `fetchEstimates(jobId): Promise<{ kind: "ok"; view } | { kind: "hidden" } | { kind: "error" }>`; `recoverEstimateIntents(requestId, match): Promise<{ unresolved: number; succeeded: { intentId; data }[] }>`; `useEstimateWrite(requestId, intentId): { phase; send(path, payload): Promise<EstimateSend>; settle(outcome, landed) }` with `EstimateSend = { sent: false } | { sent: true; status: number | null; envelope; outcome: WriteOutcome; resentOld: boolean }`.
+  - `fetchEstimates(jobId): Promise<{ kind: "ok"; view } | { kind: "hidden" } | { kind: "error" }>`; `recoverEstimateIntents(requestId, match): Promise<{ unresolved: number; succeeded: { intentId; data }[] }>`; `useEstimateWrite(requestId, intentId, rehydrate = false): { phase; send(path, payload): Promise<EstimateSend>; settle(outcome, landed) }` with `EstimateSend = { sent: false } | { sent: true; status: number | null; envelope; outcome: WriteOutcome; resentOld: boolean }`.
   - `EstimatesCard({ jobId, refreshKey, onLoaded? })`; `EstimateBuilderClient({ jobId })`; page `/tech/jobs/[id]/estimates/new`.
   - `estimate-builder.ts`: `DraftLine`, `DraftOption`, `OptionChange`, `positionalName`, `startOptions`, `nextOptionNames`, `addLine`, `removeLine`, `setQuantity`, `optionFooter`, `checkDraft`, `DRAFT_KEY`, `serializeDraft`, `parseDraft`.
   - `add-item-done.ts`: `doneAction({ picked, canRetry, adding }): "wait" | "close" | "add_then_close"`.
@@ -4103,8 +4787,9 @@ export interface StoredWrite {
 }
 
 export function isStoredWrite(v: unknown): v is StoredWrite {
-  return typeof v === "object" && v !== null && "payload" in v
-    && typeof (v as { path?: unknown }).path === "string" && (v as { path: string }).path.startsWith("/api/tech/jobs/");
+  if (typeof v !== "object" || v === null || !("payload" in v)) return false;
+  const path = (v as { path?: unknown }).path; // read once: a second cast after `in` narrowing is TS2352
+  return typeof path === "string" && path.startsWith("/api/tech/jobs/");
 }
 
 export interface RecoverableIntent {
@@ -4269,7 +4954,8 @@ export function useIdempotencyKey(opts: {
     if (action === 'wait') return;
     if (action === 'add_then_close') {
       const status = await add();
-      if (status !== 'done' && status !== 'dropped') return;
+      // 'dropped': add() already reset and closed the sheet — never close twice.
+      if (status !== 'done') return;
     }
     reset();
     onClose();
@@ -4370,14 +5056,17 @@ export type EstimateSend =
 
 /**
  * One keyed write (M3c spec §7): the M3b reducer, persisted under the estimate
- * storage key, never rehydrated by the hook (the surface's recovery re-sends
- * stored intents first). A double tap while `sent` sends nothing; an `unknown`
- * intent re-sends its OLD body and OLD key (resentOld tells the caller).
- * After the caller has refetched, it calls `settle(outcome, landed)`.
+ * storage key. `rehydrate: false` (default) for surfaces whose mount recovery
+ * re-sends stored intents first (builder, estimate page, equipment card);
+ * `rehydrate: true` for the equipment sheet, which restores its own intent and
+ * re-sends it before Save unlocks (plan ruling 14). A double tap while `sent`
+ * sends nothing; an `unknown` intent re-sends its OLD body and OLD key
+ * (resentOld tells the caller). After the caller has refetched, it calls
+ * `settle(outcome, landed)`.
  */
-export function useEstimateWrite(requestId: string, intentId: string) {
+export function useEstimateWrite(requestId: string, intentId: string, rehydrate = false) {
   const { state, dispatch } = useIdempotencyKey({
-    intentId, requestId, persist: true, storageKey: ESTIMATE_INTENTS_KEY, rehydrate: false,
+    intentId, requestId, persist: true, storageKey: ESTIMATE_INTENTS_KEY, rehydrate,
   });
 
   const send = useCallback(async (path: string, payload: unknown): Promise<EstimateSend> => {
@@ -4413,7 +5102,6 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { BILLING_LINE, STATUS_CHIP, estimatesCardVisible, priceSummary, soldOptionOf } from '@/lib/tech/estimate-display';
 import type { TechEstimate, TechEstimateStatus, TechEstimatesView } from '@/lib/tech/estimate-view';
 import { fetchEstimates } from './fetch-estimates';
@@ -4486,7 +5174,9 @@ export function EstimatesCard({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [load]);
 
-  if (state === 'hidden' || (view && !estimatesCardVisible(view))) return null;
+  // Nothing until the first answer: on a job before arrival the card would
+  // otherwise flash a skeleton and then hide (review spec m11).
+  if (state === 'loading' || state === 'hidden' || (view && !estimatesCardVisible(view))) return null;
 
   return (
     <Card>
@@ -4494,9 +5184,7 @@ export function EstimatesCard({
         <CardTitle className="text-[17px]">Estimates</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {state === 'loading' ? (
-          <Skeleton className="h-12 w-full" />
-        ) : state === 'error' || !view ? (
+        {state === 'error' || !view ? (
           <p role="alert" className="text-[15px] text-danger-strong">Couldn&apos;t load this job&apos;s estimates.</p>
         ) : (
           <>
@@ -4809,7 +5497,8 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
       {!check.ok && <p className="text-[15px] text-muted-foreground">{check.reason}</p>}
       {message && <p role="alert" className="text-[15px] text-danger-strong">{message.text}</p>}
       <Button className="h-12 w-full rounded-xl text-[16px]"
-        disabled={locked || (message?.retry !== 'recover' && (!check.ok || !view.canCreate))}
+        // A retry re-sends the OLD body, so it stays tappable even while the edited draft is invalid (review spec m8).
+        disabled={locked || (!message?.retry && (!check.ok || !view.canCreate))}
         onClick={() => void (message?.retry === 'recover' ? recover() : save())}>
         {saving || recovering ? 'Saving…' : message?.retry ? 'Try again' : 'Save estimate'}
       </Button>
@@ -4839,7 +5528,7 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
 
   (`Try again` after an unknown save goes through `save()`: the intent is `unknown`, so `useEstimateWrite.send` re-sends the stored body with the stored key; edits made after an unknown save are only sent after the old body's answer — the M3b rule. `Try again` after a reload re-runs `recover()`, which re-sends the stored intent itself; a new key is never minted while a create may be in flight.)
 
-- [ ] **Step 7: Look at it.** With the dev server and a throwaway org from the Task 6 probe recipe (request `arrived`, a customer, two pricebook items, a default tax rate row): open `/tech/jobs/<rid>/estimates/new` at 390 px (`node scripts/agent/screenshot-page.mjs /tech/jobs/<rid>/estimates/new 390 /tmp/m3c-8-builder.png --tech` with `MINT_ORG_ID=$ORG`), add a second option (names become Good / Better), add an item through the sheet with Done (the pending pick is added), check the footer math, reload (the draft comes back), Save (lands on `/tech/jobs/<rid>/estimates/<eid>`, which 404s until Task 9 — expected). Look at every screenshot. Delete the org.
+- [ ] **Step 7: Look at it.** With the dev server and a throwaway org from the Task 6 probe recipe (request `arrived`, a customer, two pricebook items, a default tax rate row): open `/tech/jobs/<rid>/estimates/new` at 390 px (`node scripts/agent/screenshot-page.mjs /tech/jobs/<rid>/estimates/new 390 /tmp/m3c-8-builder.png --tech` with `MINT_ORG_ID=$ORG`), add a second option (names become Good / Better), add an item through the sheet with Done (the pending pick is added), check the footer math, reload (the draft comes back), Save (lands on `/tech/jobs/<rid>/estimates/<eid>`, which 404s until Task 9 is built — expected). Look at every screenshot. Delete the org.
 
 - [ ] **Step 8: Gates and commit**
 
@@ -4864,7 +5553,7 @@ EOF
 
 **Interfaces:**
 - Consumes: Task 3 `signatureNameOk`; Task 5 `TechEstimate`, `TechEstimatesView`, `canSell`, `soldBillingView`, `soldOptionOf`, `STATUS_CHIP`, `BILLING_LINE`, `SOLD_COPY`; Task 8 `fetchEstimates`, `recoverEstimateIntents`, `useEstimateWrite`, `ESTIMATE_INTENT`, `estimateWriteCopy`; portal `approveBlockedHint` (`@/lib/portal/estimate-decision`).
-- Produces: `CUSTOMER_HASH = "#customer"`, `LayerState`, `LayerEvent`, `LayerEffect`, `LAYER_CLOSED`, `layerStep(state, event): { state; effect }`; `estimate-page-copy.ts`: `CUSTOMER_COPY`, `customerHeading`, `initialChoice`, `previewLines`, `showAllLabel`, `footerSummary`, `approveConfirmCopy`, `saleResult`, `afterCheck`, `approvedLine`, `DECLINE_COPY`, `SOLD_ACTIONS`; `EstimatePageClient({ jobId, estimateId })`, `CustomerView({ estimate, companyName, customerDisplayName, onApprove, onClose })`; page `/tech/jobs/[id]/estimates/[eid]`.
+- Produces: `CUSTOMER_HASH = "#customer"`, `LayerState = { open: boolean }`, `LayerEvent`, `LayerEffect = "push" | "back" | "strip" | "strip_push" | "none"`, `LAYER_CLOSED`, `LAYER_OPEN`, `layerStep(state, event): { state; effect }`; `estimate-page-copy.ts`: `CUSTOMER_COPY`, `customerHeading`, `initialChoice`, `previewLines`, `showAllLabel`, `footerSummary`, `approveConfirmCopy`, `saleResult`, `afterCheck`, `approvedLine`, `DECLINE_COPY`, `SOLD_ACTIONS`; `EstimatePageClient({ jobId, estimateId })`, `CustomerView({ estimate, companyName, customerDisplayName, onApprove, onClose })`; page `/tech/jobs/[id]/estimates/[eid]`.
 
 - [ ] **Step 1: Failing pure tests.**
 
@@ -4872,35 +5561,35 @@ EOF
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { CUSTOMER_HASH, LAYER_CLOSED, layerStep, type LayerState } from "./customer-view-state";
+import { CUSTOMER_HASH, LAYER_CLOSED, LAYER_OPEN, layerStep } from "./customer-view-state";
 
-const OPEN_PUSHED: LayerState = { open: true, pushed: true };
-const OPEN_RELOADED: LayerState = { open: true, pushed: false };
-
-describe("customer layer history (spec §7.2)", () => {
+describe("customer layer history (spec §7.2, plan ruling 13)", () => {
   it("Show to customer pushes one #customer entry; a second show does nothing", () => {
-    expect(layerStep(LAYER_CLOSED, { type: "show" })).toEqual({ state: OPEN_PUSHED, effect: "push" });
-    expect(layerStep(OPEN_PUSHED, { type: "show" })).toEqual({ state: OPEN_PUSHED, effect: "none" });
+    expect(layerStep(LAYER_CLOSED, { type: "show" })).toEqual({ state: LAYER_OPEN, effect: "push" });
+    expect(layerStep(LAYER_OPEN, { type: "show" })).toEqual({ state: LAYER_OPEN, effect: "none" });
   });
   it("Back (popstate without the hash) closes the layer onto the estimate page, nothing more", () => {
-    expect(layerStep(OPEN_PUSHED, { type: "popstate", hash: "" })).toEqual({ state: LAYER_CLOSED, effect: "none" });
+    expect(layerStep(LAYER_OPEN, { type: "popstate", hash: "" })).toEqual({ state: LAYER_CLOSED, effect: "none" });
     expect(layerStep(LAYER_CLOSED, { type: "popstate", hash: "" })).toEqual({ state: LAYER_CLOSED, effect: "none" });
   });
   it("Forward onto a stale #customer entry never reopens it", () => {
     expect(layerStep(LAYER_CLOSED, { type: "popstate", hash: CUSTOMER_HASH })).toEqual({ state: LAYER_CLOSED, effect: "strip" });
   });
-  it("a reload with #customer reopens only while the estimate can be sold", () => {
-    expect(layerStep(LAYER_CLOSED, { type: "mount", hash: CUSTOMER_HASH, sellable: true })).toEqual({ state: OPEN_RELOADED, effect: "none" });
+  it("layerStep re-pushes #customer on a sellable reload so close is one back", () => {
+    const reopened = layerStep(LAYER_CLOSED, { type: "mount", hash: CUSTOMER_HASH, sellable: true });
+    expect(reopened).toEqual({ state: LAYER_OPEN, effect: "strip_push" });
+    expect(layerStep(reopened.state, { type: "close" })).toEqual({ state: LAYER_CLOSED, effect: "back" });
+    // React StrictMode mounts twice: the second mount must not push another entry.
+    expect(layerStep(reopened.state, { type: "mount", hash: CUSTOMER_HASH, sellable: true })).toEqual({ state: LAYER_OPEN, effect: "none" });
+  });
+  it("a mount without the hash leaves the layer closed", () => {
     expect(layerStep(LAYER_CLOSED, { type: "mount", hash: "", sellable: true })).toEqual({ state: LAYER_CLOSED, effect: "none" });
   });
   it("layerStep strips the hash on a reload of an estimate that can no longer be sold", () => {
     expect(layerStep(LAYER_CLOSED, { type: "mount", hash: CUSTOMER_HASH, sellable: false })).toEqual({ state: LAYER_CLOSED, effect: "strip" });
   });
-  it("closing a pushed layer goes back one entry", () => {
-    expect(layerStep(OPEN_PUSHED, { type: "close" })).toEqual({ state: LAYER_CLOSED, effect: "back" });
-  });
-  it("layerStep closes a reload-opened layer with a strip, not a back", () => {
-    expect(layerStep(OPEN_RELOADED, { type: "close" })).toEqual({ state: LAYER_CLOSED, effect: "strip" });
+  it("every close of an open layer is a single back; closing a closed layer does nothing", () => {
+    expect(layerStep(LAYER_OPEN, { type: "close" })).toEqual({ state: LAYER_CLOSED, effect: "back" });
     expect(layerStep(LAYER_CLOSED, { type: "close" })).toEqual({ state: LAYER_CLOSED, effect: "none" });
   });
 });
@@ -4971,40 +5660,43 @@ describe("customer view copy and rules (spec §7.2)", () => {
 
 ```ts
 /**
- * The customer layer's history machine (M3c spec §7.2). Pure: the estimate
- * page applies `effect` with window.history — push = pushState('#customer'),
- * back = history.back(), strip = replaceState without the hash. Next 16 keeps
- * its router state across native pushState / replaceState.
+ * The customer layer's history machine (M3c spec §7.2, plan ruling 13). Pure:
+ * the estimate page applies `effect` with window.history — push =
+ * pushState('#customer'); back = history.back(); strip = replaceState without
+ * the hash; strip_push = strip, then push. Next 16 keeps its router state
+ * across native pushState / replaceState.
  *
- * A layer opened by Show to customer owns one pushed entry, so Back closes it
- * onto the estimate page. A layer reopened by a reload has no entry of its own:
- * closing it strips the hash (spec), never navigates back.
+ * An open layer always owns exactly one '#customer' entry: Show to customer
+ * pushes it, and a reload that reopens the layer strips the reloaded entry and
+ * pushes a fresh one. So every close is one Back onto the estimate page, never
+ * further.
  */
 export const CUSTOMER_HASH = "#customer";
 
-export type LayerState = { readonly open: false } | { readonly open: true; readonly pushed: boolean };
+export type LayerState = { readonly open: boolean };
 export type LayerEvent =
   | { readonly type: "show" }
   | { readonly type: "mount"; readonly hash: string; readonly sellable: boolean }
   | { readonly type: "popstate"; readonly hash: string }
   | { readonly type: "close" };
-export type LayerEffect = "push" | "back" | "strip" | "none";
+export type LayerEffect = "push" | "back" | "strip" | "strip_push" | "none";
 
 export const LAYER_CLOSED: LayerState = { open: false };
+export const LAYER_OPEN: LayerState = { open: true };
 
 export function layerStep(s: LayerState, e: LayerEvent): { state: LayerState; effect: LayerEffect } {
   switch (e.type) {
     case "show":
-      return s.open ? { state: s, effect: "none" } : { state: { open: true, pushed: true }, effect: "push" };
+      return s.open ? { state: s, effect: "none" } : { state: LAYER_OPEN, effect: "push" };
     case "mount":
+      if (s.open) return { state: s, effect: "none" }; // StrictMode's second mount
       if (e.hash !== CUSTOMER_HASH) return { state: LAYER_CLOSED, effect: "none" };
-      return e.sellable ? { state: { open: true, pushed: false }, effect: "none" } : { state: LAYER_CLOSED, effect: "strip" };
+      return e.sellable ? { state: LAYER_OPEN, effect: "strip_push" } : { state: LAYER_CLOSED, effect: "strip" };
     case "popstate":
       if (e.hash === CUSTOMER_HASH) return s.open ? { state: s, effect: "none" } : { state: LAYER_CLOSED, effect: "strip" };
       return { state: LAYER_CLOSED, effect: "none" };
     case "close":
-      if (!s.open) return { state: s, effect: "none" };
-      return { state: LAYER_CLOSED, effect: s.pushed ? "back" : "strip" };
+      return s.open ? { state: LAYER_CLOSED, effect: "back" } : { state: s, effect: "none" };
   }
 }
 ```
@@ -5337,9 +6029,15 @@ function findEstimate(view: TechEstimatesView | null, eid: string): TechEstimate
 }
 
 function runEffect(effect: LayerEffect): void {
+  const strip = () => window.history.replaceState(null, '', window.location.pathname + window.location.search);
   if (effect === 'push') window.history.pushState(null, '', CUSTOMER_HASH);
   else if (effect === 'back') window.history.back();
-  else if (effect === 'strip') window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  else if (effect === 'strip') strip();
+  else if (effect === 'strip_push') {
+    // A reload reopened the layer: give it its own entry so Back closes it (plan ruling 13).
+    strip();
+    window.history.pushState(null, '', CUSTOMER_HASH);
+  }
 }
 
 function OptionBlock({ o }: { readonly o: TechEstimateOption }) {
@@ -5368,6 +6066,8 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
   const [view, setView] = useState<TechEstimatesView | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'error' | 'hidden'>('loading');
   const [recovering, setRecovering] = useState(true);
+  /** Stored intents a reload left unanswered: the page stays locked until they are (M3b rule). */
+  const [unresolved, setUnresolved] = useState(0);
   const [layer, setLayer] = useState<LayerState>(LAYER_CLOSED);
   const layerRef = useRef<LayerState>(LAYER_CLOSED);
   const [confirmDecline, setConfirmDecline] = useState(false);
@@ -5387,7 +6087,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
     }
     setLoadState((s) => (r.kind === 'hidden' ? 'hidden' : s === 'ok' ? s : 'error'));
     return null;
-  }, [jobId]);
+  }, [jobId, setView, setLoadState]); // setters listed: react-hooks/preserve-manual-memoization
 
   const dispatchLayer = useCallback((e: LayerEvent) => {
     const prev = layerRef.current;
@@ -5396,22 +6096,29 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
     setLayer(step.state);
     runEffect(step.effect);
     if (prev.open && !step.state.open) void refetch(); // the layer closed: show the technician the real state
-  }, [refetch]);
+  }, [refetch, setLayer]);
 
-  // Mount: re-send this estimate's stored intents (a reload during Approving…), then load, then the #customer rule.
+  /** Re-send this estimate's stored intents (old body, old key); state only changes after the await. */
+  const runRecovery = useCallback(async (): Promise<TechEstimatesView | null> => {
+    const rec = await recoverEstimateIntents(jobId, (id) => id.endsWith(`:${eid}`));
+    const v = await refetch();
+    setUnresolved(rec.unresolved);
+    setRecovering(false);
+    return v;
+  }, [jobId, eid, refetch, setUnresolved, setRecovering]);
+
+  // Mount: recovery (a reload during Approving…), then load, then the #customer rule.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      await recoverEstimateIntents(jobId, (id) => id.endsWith(`:${eid}`));
-      const v = await refetch();
+      const v = await runRecovery();
       if (cancelled) return;
-      setRecovering(false);
       dispatchLayer({ type: 'mount', hash: window.location.hash, sellable: v !== null && canSell(v, findEstimate(v, eid)) });
     })();
     return () => {
       cancelled = true;
     };
-  }, [jobId, eid, refetch, dispatchLayer]);
+  }, [eid, runRecovery, dispatchLayer]);
 
   useEffect(() => {
     const onPop = () => dispatchLayer({ type: 'popstate', hash: window.location.hash });
@@ -5429,7 +6136,11 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
 
   const approve = useCallback(async (optionId: string, signatureName: string, onChecking: () => void): Promise<'success' | 'failed'> => {
     const r = await sellSend(`/api/tech/jobs/${jobId}/estimates/${eid}/sell`, { optionId, signatureName });
-    if (!r.sent) return 'failed';
+    if (!r.sent) {
+      // A sell for this estimate is still in flight: let the refetch decide, never a premature failure (review spec m10).
+      onChecking();
+      return afterCheck(findEstimate(await refetch(), eid), optionId) ? 'success' : 'failed';
+    }
     const first = saleResult(r.outcome);
     if (first === 'success') {
       sellSettle(r.outcome, false);
@@ -5515,7 +6226,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
   if (!view.isLead) return <div className="space-y-4">{back}<p className="text-[15px]">Only the lead technician can open this.</p></div>;
   if (!e) return <div className="space-y-4">{back}<p className="text-[15px]">That estimate isn&apos;t on this job.</p></div>;
 
-  const locked = recovering || busy !== null;
+  const locked = recovering || unresolved > 0 || busy !== null;
   const sellable = canSell(view, e);
   const sold = e.status === 'sold' ? soldOptionOf(e) : null;
   const billingView = e.status === 'sold' ? soldBillingView(e, view) : null;
@@ -5523,6 +6234,15 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
   return (
     <div className="space-y-4 pb-6">
       {back}
+      {unresolved > 0 && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">
+          <span>Your last tap may not have saved. Try again.</span>
+          <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4 text-[15px]" disabled={recovering}
+            onClick={() => { setRecovering(true); void runRecovery(); }}>
+            Try again
+          </Button>
+        </div>
+      )}
       <Card>
         <CardHeader className="space-y-1">
           <CardTitle className="text-[17px]">{e.label}</CardTitle>
@@ -5607,7 +6327,7 @@ export function EstimatePageClient({ jobId, estimateId }: { readonly jobId: stri
 
   (The layer keeps rendering the estimate it opened on, even after a refetch marks it sold, so the success screen stays until the technician takes the phone back.)
 
-- [ ] **Step 6: Look at it and walk the layer.** Throwaway org (Task 6 recipe), a two-option open estimate made through the builder: 390 px screenshots of the estimate page, the layer with nothing selected (Approve disabled, the hint shows), the confirm, the success screen, the hand-back screen. In a Playwright script with the minted cookie: tap Show to customer → `document.elementFromPoint(20, 20)` and the Sign out button's center both land inside `[role=dialog]`; `history.back()` → the layer is gone and the URL has no hash and is still the estimate page; Show to customer → reload → the layer is back; choose Better, type a name, Approve, confirm → "Approved. Thank you." → Hand back → the page shows "Approved · … · Better" and `Add to the job's invoice`. Delete the org.
+- [ ] **Step 6: Look at it and walk the layer.** Throwaway org (Task 6 recipe), a two-option open estimate made through the builder: 390 px screenshots of the estimate page, the layer with nothing selected (Approve disabled, the hint shows), the confirm, the success screen, the hand-back screen. In a Playwright script with the minted cookie: tap Show to customer → `document.elementFromPoint(20, 20)` and the Sign out button's center both land inside `[role=dialog]`; `history.back()` → the layer is gone and the URL has no hash and is still the estimate page; Show to customer → reload → the layer is back → `history.back()` → the layer is gone, the URL has no hash and is still the estimate page (ruling 13) → Show to customer again; choose Better, type a name, Approve, confirm → "Approved. Thank you." → Hand back → the page shows "Approved · … · Better" and `Add to the job's invoice`. Delete the org.
 
 - [ ] **Step 7: Gates and commit**
 
@@ -5633,7 +6353,7 @@ EOF
 
 **Interfaces:**
 - Consumes: Task 4 `TechEquipmentUnit`, `TechEquipmentView`, `parseEquipmentInput`, `todayInZone`, `EQUIPMENT_ERROR_COPY`, `EquipmentRecord.retiredAt` / `replacedByEquipmentId` / `CustomerDetail.equipmentCount` (live only); Task 5 `TechEstimatesView`, `soldOptionOf`; Task 8 `EstimatesCard`, `useEstimateWrite`, `recoverEstimateIntents`, `ESTIMATE_INTENT`, `estimateWriteCopy`; `TechSheet` (`src/components/tech/invoice/tech-sheet.tsx`); `EQUIPMENT_TYPE_OPTIONS`, `equipmentTypeLabel` (`@/lib/admin/display-labels`).
-- Produces: `materialOverlapWarning(soldIds, selectedItemId): string | null`, `soldPricebookItemIds(view): ReadonlySet<string>`, `OVERLAP_WARNING`; `equipment-display.ts`: `EQUIPMENT_COPY`, `unitDetails(unit)`, `replaceHeading(unit)`, `EquipmentForm`, `emptyForm()`, `formForReplace(unit)`, `formBody(form, replacesId)`, `replacedOnLabel(iso)`; `EquipmentCard({ jobId, refreshKey })`, `EquipmentSheet({ jobId, replacing, onClose, onSaved })`.
+- Produces: `materialOverlapWarning(soldIds, selectedItemId): string | null`, `soldPricebookItemIds(view): ReadonlySet<string>`, `OVERLAP_WARNING`; `equipment-display.ts`: `EQUIPMENT_COPY`, `unitDetails(unit)`, `replaceHeading(unit)`, `EquipmentForm`, `emptyForm()`, `formForReplace(unit)`, `formBody(form, replacesId)`; `EquipmentCard({ jobId, refreshKey })`, `EquipmentSheet({ jobId, replacing, onClose, onSaved })`.
 
 - [ ] **Step 1: Failing pure tests.**
 
@@ -5672,7 +6392,7 @@ describe("materials overlap warning (spec §7.4)", () => {
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { emptyForm, formBody, formForReplace, replacedOnLabel, replaceHeading, unitDetails } from "./equipment-display";
+import { emptyForm, formBody, formForReplace, replaceHeading, unitDetails } from "./equipment-display";
 
 const unit = { id: "u1", equipmentType: "ac", make: "Carrier", model: "24ACC6", serialNumber: "S123", locationInHome: null, notes: null, installDate: null, managedExternally: false };
 
@@ -5692,9 +6412,6 @@ describe("equipment display (spec §7.5)", () => {
     expect(formBody({ ...emptyForm(), equipmentType: "ac", make: "  Trane ", model: " " }, "u1")).toEqual({ equipmentType: "ac", make: "Trane", replacesId: "u1" });
     expect(formBody({ ...emptyForm(), equipmentType: "other", notes: "Humidifier", installDate: "2026-11-06" }, null))
       .toEqual({ equipmentType: "other", notes: "Humidifier", installDate: "2026-11-06" });
-  });
-  it("office retired label in the business timezone", () => {
-    expect(replacedOnLabel("2026-11-06T17:00:00.000Z")).toBe("Replaced Nov 6, 2026");
   });
 });
 ```
@@ -5729,9 +6446,8 @@ export function materialOverlapWarning(soldIds: ReadonlySet<string>, selectedIte
 `src/lib/tech/equipment-display.ts`:
 
 ```ts
-/** Equipment card / sheet copy and form mapping (M3c spec §7.5), plus the office "Replaced" label. Pure. */
+/** Equipment card / sheet copy and form mapping (M3c spec §7.5). Pure. */
 import { equipmentTypeLabel } from "@/lib/admin/display-labels";
-import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import type { TechEquipmentUnit } from "./equipment-input";
 
 export const EQUIPMENT_COPY = {
@@ -5795,20 +6511,16 @@ export function formBody(f: EquipmentForm, replacesId: string | null): Record<st
   if (replacesId) out.replacesId = replacesId;
   return out;
 }
-
-export function replacedOnLabel(iso: string, timeZone: string = BUSINESS_BASE_LOCATION.timezone): string {
-  return `Replaced ${new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" }).format(new Date(iso))}`;
-}
 ```
 
   Run the two test files → PASS.
 
-- [ ] **Step 3: The equipment sheet** — `src/components/tech/equipment/equipment-sheet.tsx`:
+- [ ] **Step 3: The equipment sheet** — `src/components/tech/equipment/equipment-sheet.tsx` (plan ruling 14: the sheet rehydrates its intent from `sessionStorage` and, when it comes back `unknown`, re-sends the OLD body with the OLD key before Save unlocks; an unknown add can never mint a second key):
 
 ```tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TechSheet } from '@/components/tech/invoice/tech-sheet';
@@ -5816,13 +6528,17 @@ import { EQUIPMENT_TYPE_OPTIONS } from '@/lib/admin/display-labels';
 import { EQUIPMENT_ERROR_COPY, parseEquipmentInput, todayInZone, type TechEquipmentUnit } from '@/lib/tech/equipment-input';
 import { EQUIPMENT_COPY, emptyForm, formBody, formForReplace, replaceHeading, type EquipmentForm } from '@/lib/tech/equipment-display';
 import { ESTIMATE_INTENT, estimateWriteCopy } from '@/lib/tech/estimate-intents';
-import { useEstimateWrite } from '@/components/tech/estimates/use-estimate-write';
+import { useEstimateWrite, type EstimateSend } from '@/components/tech/estimates/use-estimate-write';
 
 const FIELD = 'h-11 rounded-xl text-[16px]';
+const UNKNOWN_COPY = 'Your last save may not have gone through. Try again.';
+const EARLIER_COPY = 'Your earlier save went through first. Check the equipment list.';
 
 /**
  * Add a unit, or replace `replacing` (M3c spec §7.5). Mount with
  * `key={intentId}` so each unit's replace has its own idempotency intent.
+ * `onSaved` reloads the card and resolves true when the reload shows the write
+ * landed (for a replace: the old unit left the list).
  */
 export function EquipmentSheet({
   jobId,
@@ -5836,50 +6552,76 @@ export function EquipmentSheet({
   readonly onSaved: () => Promise<boolean>;
 }) {
   const intentId = replacing ? ESTIMATE_INTENT.equipmentReplace(replacing.id) : ESTIMATE_INTENT.equipmentAdd;
-  const write = useEstimateWrite(jobId, intentId);
+  const { phase, send, settle } = useEstimateWrite(jobId, intentId, true);
   const [form, setForm] = useState<EquipmentForm>(() => (replacing ? formForReplace(replacing) : emptyForm()));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const resent = useRef(false);
   const today = todayInZone(new Date());
+  const path = `/api/tech/jobs/${jobId}/equipment`;
   const set = (k: keyof EquipmentForm) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  async function save(): Promise<void> {
-    const body = formBody(form, replacing?.id ?? null);
-    const check = parseEquipmentInput(body, today);
-    if (!check.ok) {
-      setError(EQUIPMENT_ERROR_COPY[check.error]);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const r = await write.send(`/api/tech/jobs/${jobId}/equipment`, body);
-    if (!r.sent) {
-      setSaving(false);
-      return;
-    }
+  /** Shared answer handling for a save and for the rehydrated re-send. */
+  async function handle(r: EstimateSend): Promise<void> {
+    if (!r.sent) return;
     if (r.outcome === 'success_refetch' || r.outcome === 'already_saved_refetch') {
-      write.settle(r.outcome, false);
+      settle(r.outcome, false);
       await onSaved();
       setSaving(false);
+      if (r.resentOld) {
+        setError(EARLIER_COPY); // the OLD body landed; the edited form was not sent
+        return;
+      }
       onClose();
       return;
     }
     const unknown = r.outcome === 'retry_same_key_after_refetch' || r.outcome === 'wait_then_refetch';
     const landed = unknown ? await onSaved() : false;
-    write.settle(r.outcome, landed);
+    settle(r.outcome, landed);
     setSaving(false);
     if (landed) {
       onClose();
       return;
     }
-    setError(estimateWriteCopy(r.outcome, r.envelope));
+    setError(unknown ? UNKNOWN_COPY : estimateWriteCopy(r.outcome, r.envelope));
   }
+
+  // Rehydrated as `unknown` (a reload or a closed sheet left it unanswered):
+  // re-send the stored body with the stored key before anything else. `send`
+  // re-sends the stored body whatever payload it is given while `unknown`.
+  useEffect(() => {
+    if (phase !== 'unknown' || resent.current) return;
+    resent.current = true;
+    void send(path, {}).then(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per rehydrated intent
+  }, [phase]);
+
+  async function save(): Promise<void> {
+    const body = formBody(form, replacing?.id ?? null);
+    if (phase !== 'unknown') {
+      const check = parseEquipmentInput(body, today);
+      if (!check.ok) {
+        setError(EQUIPMENT_ERROR_COPY[check.error]);
+        return;
+      }
+    }
+    setSaving(true);
+    setError(null);
+    const r = await send(path, body);
+    if (!r.sent) {
+      setSaving(false);
+      return;
+    }
+    await handle(r);
+  }
+
+  const locked = saving || phase === 'sent';
 
   return (
     <TechSheet
       open
       onClose={onClose}
-      busy={saving}
+      busy={locked}
       title={replacing ? replaceHeading(replacing) : EQUIPMENT_COPY.add}
       description={EQUIPMENT_COPY.sheetDescription}
     >
@@ -5889,7 +6631,7 @@ export function EquipmentSheet({
           <select
             value={form.equipmentType}
             onChange={set('equipmentType')}
-            disabled={saving}
+            disabled={locked}
             className="flex h-11 w-full rounded-xl border border-border-input bg-surface-raised px-3 text-[16px]"
           >
             <option value="">Choose…</option>
@@ -5899,22 +6641,22 @@ export function EquipmentSheet({
         {form.equipmentType === 'other' && (
           <label className="block space-y-1.5">
             <span className="text-[13px] font-medium text-muted-foreground">{EQUIPMENT_COPY.describe}</span>
-            <Input value={form.notes} onChange={set('notes')} maxLength={120} disabled={saving} className={FIELD} />
+            <Input value={form.notes} onChange={set('notes')} maxLength={120} disabled={locked} className={FIELD} />
           </label>
         )}
         {([['make', EQUIPMENT_COPY.make], ['model', EQUIPMENT_COPY.model], ['serialNumber', EQUIPMENT_COPY.serial], ['locationInHome', EQUIPMENT_COPY.location]] as const).map(([k, label]) => (
           <label key={k} className="block space-y-1.5">
             <span className="text-[13px] font-medium text-muted-foreground">{label}</span>
-            <Input value={form[k]} onChange={set(k)} maxLength={120} disabled={saving} className={FIELD} autoComplete="off" />
+            <Input value={form[k]} onChange={set(k)} maxLength={120} disabled={locked} className={FIELD} autoComplete="off" />
           </label>
         ))}
         <label className="block space-y-1.5">
           <span className="text-[13px] font-medium text-muted-foreground">{EQUIPMENT_COPY.installDate}</span>
-          <Input type="date" max={today} value={form.installDate} onChange={set('installDate')} disabled={saving} className={FIELD} />
+          <Input type="date" max={today} value={form.installDate} onChange={set('installDate')} disabled={locked} className={FIELD} />
         </label>
         {error && <p role="alert" className="text-[15px] text-danger-strong">{error}</p>}
-        <Button className="h-12 w-full rounded-xl text-[16px]" disabled={saving} onClick={() => void save()}>
-          {saving ? EQUIPMENT_COPY.saving : EQUIPMENT_COPY.save}
+        <Button className="h-12 w-full rounded-xl text-[16px]" disabled={locked} onClick={() => void save()}>
+          {locked ? EQUIPMENT_COPY.saving : phase === 'unknown' ? 'Try again' : EQUIPMENT_COPY.save}
         </Button>
       </div>
     </TechSheet>
@@ -5922,9 +6664,9 @@ export function EquipmentSheet({
 }
 ```
 
-  (`onSaved` reloads the card and resolves true when the GET succeeded; after an unknown answer the card's reload is the landed check only for a replace — the replaced unit leaves the list — so for an add an unknown answer keeps the sheet open with "Your last tap may not have saved. Try again." and the next Save re-sends the same body with the same key.) Make that rule explicit in `EquipmentCard.onSaved` below.
+  (`handle` is a plain function, not a `useCallback`: it only runs from events and the one-shot effect, so the React compiler memoizes it and no manual-memoization rule applies.)
 
-- [ ] **Step 4: The equipment card** — `src/components/tech/equipment/equipment-card.tsx`:
+- [ ] **Step 4: The equipment card** — `src/components/tech/equipment/equipment-card.tsx`. The card shows only to technicians who can write (spec §2: a non-cancelled assignment on a non-cancelled visit), re-sends stored equipment intents on mount and stays locked with a Try again while any is unanswered (ruling 14):
 
 ```tsx
 'use client';
@@ -5932,13 +6674,14 @@ export function EquipmentSheet({
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { equipmentTypeLabel } from '@/lib/admin/display-labels';
 import { EQUIPMENT_COPY, unitDetails } from '@/lib/tech/equipment-display';
 import { ESTIMATE_INTENT } from '@/lib/tech/estimate-intents';
 import type { TechEquipmentUnit, TechEquipmentView } from '@/lib/tech/equipment-input';
 import { recoverEstimateIntents } from '@/components/tech/estimates/recover-intents';
 import { EquipmentSheet } from './equipment-sheet';
+
+const UNRESOLVED_COPY = 'Your last save may not have gone through. Try again.';
 
 async function fetchEquipment(jobId: string): Promise<{ kind: 'ok'; view: TechEquipmentView } | { kind: 'hidden' } | { kind: 'error' }> {
   try {
@@ -5957,6 +6700,7 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
   const [view, setView] = useState<TechEquipmentView | null>(null);
   const [state, setState] = useState<'loading' | 'ok' | 'hidden' | 'error'>('loading');
   const [recovering, setRecovering] = useState(true);
+  const [unresolved, setUnresolved] = useState(0);
   const [sheet, setSheet] = useState<{ readonly replacing: TechEquipmentUnit | null } | null>(null);
 
   const load = useCallback(async (): Promise<TechEquipmentView | null> => {
@@ -5968,20 +6712,19 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
     }
     setState((s) => (r.kind === 'hidden' ? 'hidden' : s === 'ok' ? s : 'error'));
     return null;
-  }, [jobId]);
+  }, [jobId, setView, setState]);
+
+  /** Re-send stored equipment intents (old body, old key), then reload; state changes only after the awaits. */
+  const runRecovery = useCallback(async (): Promise<void> => {
+    const rec = await recoverEstimateIntents(jobId, (id) => id.startsWith('equipment:'));
+    await load();
+    setUnresolved(rec.unresolved);
+    setRecovering(false);
+  }, [jobId, load, setUnresolved, setRecovering]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      await recoverEstimateIntents(jobId, (id) => id.startsWith('equipment:'));
-      if (cancelled) return;
-      setRecovering(false);
-      await load();
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId, load, refreshKey]);
+    void runRecovery();
+  }, [runRecovery, refreshKey]);
 
   /** Reload; for a replace, true once the old unit has left the list (the write landed). */
   const onSaved = useCallback(async (): Promise<boolean> => {
@@ -5991,7 +6734,8 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
     return replacing !== null && !v.units.some((u) => u.id === replacing.id);
   }, [load, sheet]);
 
-  if (state === 'hidden') return null;
+  if (state === 'loading' || state === 'hidden' || (view && !view.canWrite)) return null;
+  const locked = recovering || unresolved > 0;
   const intentId = sheet?.replacing ? ESTIMATE_INTENT.equipmentReplace(sheet.replacing.id) : ESTIMATE_INTENT.equipmentAdd;
 
   return (
@@ -6000,12 +6744,19 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
         <CardTitle className="text-[17px]">{EQUIPMENT_COPY.title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {state === 'loading' ? (
-          <Skeleton className="h-12 w-full" />
-        ) : state === 'error' || !view ? (
+        {state === 'error' || !view ? (
           <p role="alert" className="text-[15px] text-danger-strong">{EQUIPMENT_COPY.loadError}</p>
         ) : (
           <>
+            {unresolved > 0 && (
+              <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">
+                <span>{UNRESOLVED_COPY}</span>
+                <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4 text-[15px]" disabled={recovering}
+                  onClick={() => { setRecovering(true); void runRecovery(); }}>
+                  Try again
+                </Button>
+              </div>
+            )}
             {view.units.length === 0 ? (
               <p className="text-[15px] text-muted-foreground">{EQUIPMENT_COPY.empty}</p>
             ) : (
@@ -6018,8 +6769,8 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
                     </div>
                     {u.managedExternally ? (
                       <span className="shrink-0 text-[13px] text-muted-foreground">{EQUIPMENT_COPY.managed}</span>
-                    ) : view.canWrite && (
-                      <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4 text-[15px]" disabled={recovering}
+                    ) : (
+                      <Button variant="outline" className="h-11 shrink-0 rounded-xl px-4 text-[15px]" disabled={locked}
                         onClick={() => setSheet({ replacing: u })}>
                         {EQUIPMENT_COPY.replace}
                       </Button>
@@ -6028,11 +6779,9 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
                 ))}
               </ul>
             )}
-            {view.canWrite && (
-              <Button variant="outline" className="h-11 rounded-xl px-4 text-[15px]" disabled={recovering} onClick={() => setSheet({ replacing: null })}>
-                {EQUIPMENT_COPY.add}
-              </Button>
-            )}
+            <Button variant="outline" className="h-11 rounded-xl px-4 text-[15px]" disabled={locked} onClick={() => setSheet({ replacing: null })}>
+              {EQUIPMENT_COPY.add}
+            </Button>
           </>
         )}
       </CardContent>
@@ -6043,6 +6792,8 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
   );
 }
 ```
+
+  (The card's mount recovery and the sheet's rehydration never race: the sheet opens only after recovery finished with nothing unanswered, and recovery clears every intent it resolved.)
 
 - [ ] **Step 5: Wire the job page** (`src/components/tech/tech-job-detail-client.tsx`; this file is NOT touched by the requests/calendar/dispatch workstream):
   - Imports:
@@ -6080,8 +6831,25 @@ import type { TechEstimatesView } from '@/lib/tech/estimate-view';
 
 - [ ] **Step 6: Office customer page** (`src/app/admin/(dashboard)/customers/[id]/page.tsx`, Equipment `SectionCard`; read `.claude/skills/page-customers/SKILL.md` first):
   - `count={customer.equipment.length}` → `count={customer.equipmentCount}` (live units only).
-  - Import `replacedOnLabel` from `@/lib/tech/equipment-display`.
-  - Each unit's wrapper `<div key={eq.id} className="rounded-lg border bg-muted/20 p-3">` becomes `<div key={eq.id} id={\`equipment-${eq.id}\`} className={\`rounded-lg border bg-muted/20 p-3 ${eq.retiredAt ? 'opacity-60' : ''}\`}>`.
+  - Import `replacedOnLabel` from `@/lib/admin/crm-equipment-records` (Task 4; an office page never imports a tech module).
+  - Each unit's wrapper (HEAD lines ~649–651, split over three lines):
+
+```tsx
+              <div
+                key={eq.id}
+                className="rounded-lg border bg-muted/20 p-3"
+              >
+```
+
+    becomes
+
+```tsx
+              <div
+                key={eq.id}
+                id={`equipment-${eq.id}`}
+                className={`rounded-lg border bg-muted/20 p-3 ${eq.retiredAt ? 'opacity-60' : ''}`}
+              >
+```
   - Under the make/model line add:
 
 ```tsx
@@ -6102,7 +6870,7 @@ import type { TechEstimatesView } from '@/lib/tech/estimate-view';
 
   (Ordering — live first, retired last — comes from the server, Task 4.)
 
-- [ ] **Step 7: Look at it.** Throwaway org (Task 6 recipe) with a customer, two live units (one FieldPulse: `fieldpulse_asset_id = 'fp-1'`), a sold estimate whose option holds pricebook item P: job page at 390 px shows Estimates after the summary and Equipment after Materials; picking P in the material form shows the overlap warning (the part still saves); Replace on the native unit → sheet titled "Replacing <make> air conditioner", type pre-filled → Save → the old unit leaves the card; the FieldPulse unit reads "Managed in FieldPulse" with no Replace; Add with type Other and no description → "Describe the equipment."; the office customer page (admin session with `MINT_ORG_ID`) lists the retired unit last, muted, "Replaced <date> · See the replacement", and the count excludes it. Look at every screenshot. Delete the org.
+- [ ] **Step 7: Look at it.** Throwaway org (Task 6 recipe) with a customer, two live units (one FieldPulse: `fieldpulse_asset_id = 'fp-1'`), a sold estimate whose option holds pricebook item P: job page at 390 px shows Estimates after the summary and Equipment after Materials; picking P in the material form shows the overlap warning (the part still saves); Replace on the native unit → sheet titled "Replacing <make> air conditioner", type pre-filled → Save → the old unit leaves the card; the FieldPulse unit reads "Managed in FieldPulse" with no Replace; Add with type Other and no description → "Describe the equipment."; throttle the network to offline, Add a unit (unknown answer, "Your last save may not have gone through. Try again."), close the sheet, go back online, reopen Add → the sheet re-sends the stored body first and the card shows ONE new unit; the office customer page (admin session with `MINT_ORG_ID`) lists the retired unit last, muted, "Replaced <date> · See the replacement", and the count excludes it. Look at every screenshot. Delete the org.
 
 - [ ] **Step 8: Gates and commit**
 
@@ -6448,13 +7216,47 @@ describe("field estimates (dev DB)", () => {
   it("(d) two concurrent bills with different keys and no draft → one draft, lines once", async () => {
     const rid = await newJob();
     const { eid } = await soldEstimate(rid);
-    const [a, b] = await Promise.all([billVia(rid, eid, randomUUID()), billVia(rid, eid, randomUUID())]);
+    // One retry each on an unstored STALE (a transient 40P01 deadlock under load), with a new key.
+    const billOnce = async (): Promise<RunOut> => {
+      const r = await billVia(rid, eid, randomUUID());
+      return code(r) === "STALE" ? billVia(rid, eid, randomUUID()) : r;
+    };
+    const [a, b] = await Promise.all([billOnce(), billOnce()]);
     expect([a.status, b.status].sort()).toEqual([200, 409]);
     expect([code(a), code(b)].filter(Boolean)).toEqual(["ALREADY_BILLED"]);
     const invs = await invoicesOf(rid);
     expect(invs).toHaveLength(1);
     expect(invs[0]!.state).toBe("draft");
     expect((await linesOf(String(invs[0]!.id))).filter((l) => l.estimate_line_item_id !== null)).toHaveLength(2);
+  }, 60_000);
+
+  it("(d2) the in-batch guard alone: billLinesSql run twice with the pre-check skipped → the second inserts nothing", async () => {
+    const rid = await newJob();
+    const { eid, better } = await soldEstimate(rid);
+    const c = await fw.createInvoiceFromJob(actor(rid), { invoiceId: randomUUID() });
+    if (!c.ok) throw new Error(c.reason);
+    const sold = await run(sql`SELECT id FROM estimate_line_items WHERE option_id = ${better} AND organization_id = ${org} ORDER BY id`);
+    // Fresh ids every run, exactly like a re-run of step 3: only NOT billed(eid) can stop the second.
+    const stmt = () => fw.billLinesSql({ org, rid, me: tech, inv: c.invoiceId, estimateId: eid, lines: sold.map((l) => ({ id: randomUUID(), eli: String(l.id) })) });
+    expect((await db.execute(stmt())).rows).toHaveLength(2);
+    expect((await db.execute(stmt())).rows).toHaveLength(0);
+    expect((await linesOf(c.invoiceId)).filter((l) => l.estimate_line_item_id !== null)).toHaveLength(2);
+  }, 60_000);
+
+  it("(d3) this key's derived invoice was voided → stored INVOICE_CHANGED; the same key replays it; a new key bills (ruling 11)", async () => {
+    const rid = await newJob();
+    const { eid } = await soldEstimate(rid);
+    const key = randomUUID();
+    const derived = idem.derivedId(scope(`${base(rid)}/${eid}/bill`, key), "invoice");
+    expect(await fw.createInvoiceFromJob(actor(rid), { invoiceId: derived })).toMatchObject({ ok: true, invoiceId: derived, created: true });
+    await db.execute(sql`UPDATE invoices SET state = 'void'::invoice_state WHERE id = ${derived} AND organization_id = ${org}`);
+    const r = await billVia(rid, eid, key);
+    expect([r.status, code(r)]).toEqual([409, "INVOICE_CHANGED"]);
+    const again = await billVia(rid, eid, key);
+    expect([again.replayed, code(again)]).toEqual([true, "INVOICE_CHANGED"]);
+    const fresh = await billVia(rid, eid, randomUUID());
+    expect(fresh.status).toBe(200);
+    expect(data(fresh).invoiceId).not.toBe(derived);
   }, 60_000);
 
   it("(e) office Generate after a field bill returns the field invoice (draft and after finalize)", async () => {
@@ -6579,6 +7381,23 @@ describe("field estimates (dev DB)", () => {
     expect(code(await equipVia(rid, randomUUID(), { equipmentType: "ac", replacesId: foreignUnit }))).toBe("NOT_FOUND");
     const [fu] = await run(sql`SELECT retired_at FROM customer_equipment WHERE id = ${foreignUnit} AND organization_id = ${org2}`);
     expect(fu!.retired_at).toBeNull();
+  }, 60_000);
+
+  it("(j2) same org: another request's estimate or another customer's unit → NOT_FOUND", async () => {
+    const ridA = await newJob();
+    const ridB = await newJob();
+    const sold = await soldEstimate(ridB);
+    const openEid = data(await createVia(ridB, randomUUID(), TWO())).estimateId as string;
+    const [openOpt] = await optionIds(openEid);
+    expect(code(await sellVia(ridA, openEid, randomUUID(), { optionId: openOpt!, signatureName: "Pat" }))).toBe("NOT_FOUND");
+    expect(code(await billVia(ridA, sold.eid, randomUUID()))).toBe("NOT_FOUND");
+    expect(code(await declineVia(ridA, openEid, randomUUID()))).toBe("NOT_FOUND");
+    expect((await estimateRow(openEid)).status).toBe("open");
+    expect(await invoicesOf(ridA)).toHaveLength(0);
+    const { encrypt } = await import("@/lib/crypto");
+    const otherCust = (await run(sql`INSERT INTO customers (organization_id,name_encrypted) VALUES (${org},${encrypt("Other Customer")}) RETURNING id`))[0]!.id as string;
+    const theirs = await unit({ locationId: null, customerId: otherCust });
+    expect(code(await equipVia(ridA, randomUUID(), { equipmentType: "ac", replacesId: theirs }))).toBe("NOT_FOUND");
   }, 60_000);
 
   it("(k) expired → ESTIMATE_EXPIRED; decline → dismissed, replay → success, then sell → ALREADY_DECIDED", async () => {
@@ -6707,7 +7526,7 @@ describe("field estimates (dev DB)", () => {
 - [ ] **Step 3: Run it**
 
 Run: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-estimate.test.ts`
-Expected: PASS (20 tests). Then `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-invoice.test.ts` still PASS (M3b regression), and `npx vitest run` (unit gate) still excludes both. Confirm both probe orgs are gone: `SELECT count(*) FROM organizations WHERE name LIKE 'Probe Org Field Estimate%'` → 0.
+Expected: PASS (23 tests). Then `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-invoice.test.ts` still PASS (M3b regression), and `npx vitest run` (unit gate) still excludes both. Confirm both probe orgs are gone: `SELECT count(*) FROM organizations WHERE name LIKE 'Probe Org Field Estimate%'` → 0.
 
 - [ ] **Step 4: Commit the suite**
 
@@ -6749,18 +7568,26 @@ EOF
   linked line (`invoice_line_items.estimate_line_item_id`) on a non-void native invoice
   with `estimate_id IS NULL` (job). The bill pre-checks, drafts through
   `createInvoiceFromJob` (seeds materials), then inserts under L_req → L_inv with
-  `NOT billed(eid)`. `ALREADY_BILLED` renders as the billed state. Linked lines can't be
-  removed in the field (`FROM_ESTIMATE`).
+  `NOT billed(eid)` (`billLinesSql`). `ALREADY_BILLED` renders as the billed state. Linked
+  lines can't be removed in the field (`FROM_ESTIMATE`). Spec deviations: when this key's
+  derived invoice is paid, refunded or voided the bill answers STORED `INVOICE_CHANGED`
+  "The job's invoice changed. Try again." (a new key derives a new invoice; unstored STALE
+  looped forever); `INVOICE_LOCKED` copy is "The job's invoice is already finalized. Ask
+  the office to bill this estimate." (Generate refuses while a paid draft exists).
 - **GET contract** adds `requestStatus` and `priorInvoicePaid` to spec §6; the bill success
   adds `hasMaterials`. Never cost, never the typed signature name.
 - **Customer view:** `#customer` via native pushState/popstate (`layerStep`); Back closes
-  onto the estimate page; a reload reopens only while sellable, else strips; a
-  reload-opened layer closes with replaceState. Customer-facing failures read "Something
-  went wrong. Please hand the phone back to your technician." only.
+  onto the estimate page, never further; a reload reopens the layer only while sellable,
+  else strips the hash; a reload that reopens it runs replaceState (strip) then
+  pushState('#customer'), so every close is one Back (spec deviation; a reload on an
+  already-pushed entry leaves one extra estimate-page entry). Customer-facing failures
+  read "Something went wrong. Please hand the phone back to your technician." only.
 - **Keys:** estimate/equipment intents live under `tech:estimate:<rid>:intents`
-  (`useIdempotencyKey({ storageKey, rehydrate: false })`); each surface re-sends stored
-  intents on mount (`recoverEstimateIntents`) before it unlocks. The invoice view's
-  `pendingWrite` counts only `/invoice%` and `/signature` keys.
+  (`useIdempotencyKey({ storageKey, rehydrate })`); the builder, the estimate page and the
+  equipment card re-send stored intents on mount (`recoverEstimateIntents`) and stay
+  locked with "Try again" while any is unanswered; the equipment sheet rehydrates its own
+  intent and re-sends the old body with the old key before Save unlocks. The invoice
+  view's `pendingWrite` counts only `/invoice%` and `/signature` keys.
 - **Equipment:** location rule `(r.location_id IS NULL OR ce.location_id IS NULL OR
   ce.location_id = r.location_id)` in the GET and every write; replace = lock old →
   insert while old is live → retire old only when this transaction wrote the new row.
@@ -6769,7 +7596,7 @@ EOF
   dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-estimate.test.ts`.
 ```
 
-  - `.claude/skills/page-estimates/SKILL.md` — add: "**Field estimates (M3c):** title 'Field estimate', no approval token, 30-day expiry, sold on the technician's phone. `estimates.sold_via` ('portal' | 'office' | 'field', NULL before M3c) and `sold_by` (technician for field, admin for office). Detail Approval card: field → 'Signed by <name>.' + 'Signed on site with <technician> · <time>'; office → 'Marked sold by <admin> · <time>'; old rows unchanged (`approvalLines`, `src/lib/admin/estimate-approval-copy.ts`). `Sold, not invoiced` tab (`bucket=not_invoiced`): native sold, no invoice of any state with this `estimate_id`, not on the job's invoice. Generate (`createInvoiceFromSoldEstimate`) refuses while the field bill holds the lines and returns that invoice; both insert paths write `estimate_line_item_id` with v7 ids in line order. A voided office invoice ends office billing (Generate returns it)."
+  - `.claude/skills/page-estimates/SKILL.md` — add: "**Field estimates (M3c):** title 'Field estimate', no approval token, 30-day expiry, sold on the technician's phone. `estimates.sold_via` ('portal' | 'office' | 'field', NULL before M3c) and `sold_by` (technician for field, admin for office). Detail Approval card (names in bold as before): field → 'Signed by <name>.' + 'Signed on site with <technician> · <time>'; office → 'Marked sold by <admin>'; old rows unchanged (`approvalLines`, `src/lib/admin/estimate-approval-copy.ts`). `Sold, not invoiced` tab (`bucket=not_invoiced`): native sold, no invoice of any state with this `estimate_id`, not on the job's invoice. Generate (`createInvoiceFromSoldEstimate`) refuses while the field bill holds the lines and returns that invoice; both insert paths write `estimate_line_item_id` with v7 ids in line order. A voided office invoice ends office billing (Generate returns it)."
   - `.claude/skills/page-customers/SKILL.md` — add: "**Retired units (M3c):** a unit replaced in the field has `retired_at` + `replaced_by_equipment_id`; the profile lists it last, muted, 'Replaced <date> · See the replacement' (link only while the replacement exists, `equipmentRecords`); the equipment count (profile and directory) counts live units only; chat-intake dedupe (`recordCustomerEquipment`) ignores retired units."
   - `.claude/skills/page-invoices/SKILL.md` — add: "**Estimate-linked lines (M3c):** `invoice_line_items.estimate_line_item_id` marks lines copied from a sold estimate (field bill and office Generate); the field can't remove them (409 `FROM_ESTIMATE` 'This item came from the approved estimate. Ask the office to change it.'); the tech view marks them `fromEstimate` ('From the estimate')."
   - Run `node scripts/agent/verify-skills.mjs` → 0 missing.
@@ -6778,7 +7605,7 @@ EOF
   - `replica/build-log.md` — append two rows:
 
 ```text
-S38 | 2026-11-06 | done | estimate templates, groupings, add-ons, deposits, discounts, edit/un-sell after save (M4); drawn signature on the estimate (deferred, no object storage on dev); sold-not-booked (M4) | M3c Sell on site: migration 0057 (invoice_line_items.estimate_line_item_id NO ACTION FK + index, estimates.sold_by/sold_via); field estimate builder (1-3 pricebook options, Good/Better/Best naming, undo, sessionStorage draft) and #customer layer (pushState/popstate; reload reopens only while sellable); sell = typed full name (portal rule) + sold_via field + sold_by; billed(eid) office half OR job half; bill drafts through createInvoiceFromJob and inserts under L_req with NOT billed(eid), ALREADY_BILLED shown as billed; office Generate guard + line links; Sold, not invoiced filter; decline; materials-overlap warning; rulings: GET adds requestStatus/priorInvoicePaid, bill adds hasMaterials, invoice preamble answers cancelled with JOB_CLOSED, FK named invoice_line_items_estimate_line_fk (63-char limit), equipment NOT_ASSIGNED; integration suite tests/integration/field-estimate.test.ts (a)-(t)
+S38 | 2026-11-06 | done | estimate templates, groupings, add-ons, deposits, discounts, edit/un-sell after save (M4); drawn signature on the estimate (deferred, no object storage on dev); sold-not-booked (M4) | M3c Sell on site: migration 0057 (invoice_line_items.estimate_line_item_id NO ACTION FK + index, estimates.sold_by/sold_via); field estimate builder (1-3 pricebook options, Good/Better/Best naming, undo, sessionStorage draft) and #customer layer (pushState/popstate; reload reopens only while sellable); sell = typed full name (portal rule) + sold_via field + sold_by; billed(eid) office half OR job half; bill drafts through createInvoiceFromJob and inserts under L_req with NOT billed(eid), ALREADY_BILLED shown as billed; office Generate guard + line links; Sold, not invoiced filter; decline; materials-overlap warning; rulings: GET adds requestStatus/priorInvoicePaid, bill adds hasMaterials, invoice preamble answers cancelled with JOB_CLOSED, FK named invoice_line_items_estimate_line_fk (63-char limit), equipment NOT_ASSIGNED, INVOICE_CHANGED stored (derived invoice paid/voided), INVOICE_LOCKED copy "Ask the office to bill this estimate.", customer-layer reload re-pushes #customer, equipment intents rehydrate before unlock; integration suite tests/integration/field-estimate.test.ts (a)-(t) + in-batch guard, INVOICE_CHANGED and same-org cases
 S39 | 2026-11-06 | done | equipment photos, barcode scan, warranty fields; location-info tab (M3d) | equipment add/replace from the field: any technician on the job, location rule shared by the GET and every write, replace retires + links in one batch (lock old, insert while live, xmin-gated retire), FieldPulse units refused, install date stored as noon Eastern; office lists retired units last and counts live units only; intake dedupe ignores retired units
 ```
 
@@ -6821,7 +7648,7 @@ EOF
 | §5 money INT32 checks, 22003 | Task 3 (`buildFieldEstimate`), Task 2 (`exceedsInt32`, `isNumericOverflow`) |
 | §5.1 create | Task 3 |
 | §5.2 sell (replay rule, expired, decided, option, lead, status; never bills) | Task 3 |
-| §5.3 bill (billed(eid), pre-check order, draft mapping incl. paid → STALE, batch, result, 22003), FROM_ESTIMATE, fromEstimate, pendingWrite narrowing | Task 1 (builders), Task 2 |
+| §5.3 bill (billed(eid), pre-check order, draft mapping — paid/refunded/voided → stored INVOICE_CHANGED per ruling 11, plain stale → STALE —, batch, result, 22003 in step 2 and step 3, materials in the int4 pre-check), FROM_ESTIMATE, fromEstimate, pendingWrite narrowing | Task 1 (builders), Task 2; in-batch guard proven on the DB by Task 11 (d2), INVOICE_CHANGED by (d3) |
 | §5.4 office Generate guard + line links + v7 order | Task 2 |
 | §5.5 decline | Task 3 (+ Task 9 UI, approval-link note) |
 | §5.6 equipment (input rules, preamble, location rule, replace CAS, FieldPulse, NO_CUSTOMER, intake dedupe ignores retired, erase unchanged) | Task 4, Task 6 (preamble) |
@@ -6832,13 +7659,15 @@ EOF
 | §7.3 estimate page (open / sold / billing branches incl. new-invoice note, after-add hints, expired / declined) | Task 9 |
 | §7.4 materials overlap | Task 10 |
 | §7.5 equipment UI | Task 10 |
-| §8 pure tests, SQL renders, route tests, integration (a)–(t), browser walk | Tasks 1–10 (pure/render/route), Task 11 (integration; (q) in Task 2), the lead's walk after Task 11 |
+| §8 pure tests, SQL renders, route tests, integration (a)–(t), browser walk | Tasks 1–10 (pure/render/route; all five route test files written out in Task 6), Task 11 (integration (a)–(t) plus (d2) in-batch guard, (d3) INVOICE_CHANGED, (j2) same-org other request/customer; (q) in Task 2), the lead's walk after Task 11 (incl. reload → Back) |
 | §9 docs | Task 11 |
 
-**2. Placeholder scan:** no TBD / "add appropriate" / "similar to Task N"; every code step carries code. Two places reference existing literals to update instead of reprinting them (Task 2 Step 4: the existing `removeInvoiceLine` render assertions; Task 2 Step 7: `fromEstimate: false` on every `lineTotalCents` literal in two named test files) — each names the file and the exact change.
+**2. Placeholder scan:** no TBD / "add appropriate" / "similar to Task N"; every code step carries code, including the v1 gaps the reviews listed (the sell / bill / decline / equipment route tests, the `approveEstimate` test, `getEstimateDetailById`, `createRequestEstimateInvoice`, the estimates-page tab code). One place names a mechanical edit instead of reprinting test files: Task 2 Step 7, `fromEstimate: false` on every `lineTotalCents` literal in two named test files.
 
-**3. Type consistency:** `BillReason` / `BillResult` (Task 2) ⊂ `EstimateRouteReason` (Task 3, spelled locally); `EstimateWriteReason` uses `estimate_not_found` everywhere (writers, errors, tests); `TechEstimatesView` fields (`requestStatus`, `priorInvoicePaid`, `jobInvoice`) match Task 5 producer and Tasks 8–10 consumers; `useEstimateWrite` returns `{ phase, send, settle }` (Tasks 8, 9, 10); `EquipmentInput.replacesId` is lower case (Task 4) and the route audits it as such (Task 6); `INVOICE_PREAMBLE` keeps `techWritePreamble(request, id)` callers unchanged.
+**v2 changes after review round 1:** sequential execution (ruling 1); reload re-pushes `#customer` (ruling 2); `INVOICE_CHANGED` stored (ruling 3); exported `billLinesSql` + DB proof (d2) and a deadlock retry in (d) (ruling 4); equipment intents rehydrate and the card/page stay locked while unanswered (ruling 5); `INVOICE_LOCKED` copy (ruling 6); TS2352 in `isStoredWrite`, the three manual-memoization errors (setters in deps), the four existing tests now owned (invoice-queries admin ~468, tech invoice-queries "cost" + "pendingWrite", estimate-detail via `soldVia == null` + new cases), hex-letter uuid tests, the add-item sheet's double close, `JOB_CLOSED` in the invoice client's message set (ruling 7); everything "described, not shown" written out (ruling 8); minors applied or rejected in the header (ruling 9).
+
+**3. Type consistency:** `BillReason` / `BillResult` (Task 2, incl. `invoice_changed`) ⊂ `EstimateRouteReason` (Task 3, spelled locally); `EstimateWriteReason` uses `estimate_not_found` everywhere (writers, errors, tests); `TechEstimatesView` fields (`requestStatus`, `priorInvoicePaid`, `jobInvoice`) match Task 5 producer and Tasks 8–10 consumers; `useEstimateWrite(requestId, intentId, rehydrate = false)` returns `{ phase, send, settle }` (Tasks 8, 9, 10); `LayerState = { open: boolean }` with `LAYER_OPEN` / `LAYER_CLOSED` (Task 9); `EquipmentInput.replacesId` is lower case (Task 4) and the route audits it as such (Task 6); `INVOICE_PREAMBLE` keeps `techWritePreamble(request, id)` callers unchanged.
 
 **4. Review Focus:** five lines above, each pinned by a named test in the owning task (Tasks 2, 3, 4, 9).
 
-**Accepted gaps (stated, not built):** the browser walk's keyboard-open layout needs a real phone (spec §8); a back gesture on a reload-opened customer layer leaves the estimate page because that layer owns no history entry (spec §7.2 chose replaceState for that case — see the hand-off notes); `deleteCustomer` leaves estimates and the typed name (spec §5.6 known gap).
+**Accepted gaps (stated, not built):** the browser walk's keyboard-open layout needs a real phone (spec §8); `deleteCustomer` leaves estimates and the typed name (spec §5.6 known gap).
