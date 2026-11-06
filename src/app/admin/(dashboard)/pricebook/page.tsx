@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, AlertCircle, Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { usePricebook, useTaxRates, type PricebookSortKey } from '@/hooks/use-pricebook';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
@@ -14,7 +14,6 @@ import { TaxRatesPanel } from '@/components/admin/pricebook/tax-rates-panel';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import {
   Select,
@@ -27,6 +26,7 @@ import { selectLabel } from '@/lib/admin/select-label';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { Pager } from '@/components/admin/ui/pager';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import type { PricebookItem } from '@/hooks/use-pricebook';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
@@ -113,7 +113,7 @@ export default function PricebookPage() {
     sort: sortKey,
   });
 
-  const { taxRates, isLoading: taxLoading, refetch: refetchTax } = useTaxRates();
+  const { taxRates, isLoading: taxLoading, error: taxError, refetch: refetchTax } = useTaxRates();
 
   // Reset to page 1 whenever the query (search / type / sort / toggles) changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -244,19 +244,16 @@ export default function PricebookPage() {
         </Button>
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
       {savedNotice && (
         <p role="status" className="text-sm text-success">
           {savedNotice}
         </p>
       )}
 
+      {/* A failed load is an error with Try again — never "No pricebook items yet." */}
+      {error && !isLoading ? (
+        <LoadErrorState title="Couldn't load the pricebook." onRetry={refetch} />
+      ) : (
       <PricebookTable
         items={items}
         isLoading={isLoading}
@@ -271,9 +268,10 @@ export default function PricebookPage() {
           setLaborOnly(false);
         }}
       />
+      )}
 
       {/* pager bar — only shown when there are results */}
-      {total > 0 && (
+      {!error && total > 0 && (
         <Pager
           page={safePage}
           totalPages={totalPages}
@@ -290,6 +288,8 @@ export default function PricebookPage() {
         taxRates={taxRates}
         isLoading={taxLoading}
         onChanged={handleRefetchAll}
+        loadFailed={taxError !== null}
+        onRetry={refetchTax}
       />
 
       <PricebookFormDialog

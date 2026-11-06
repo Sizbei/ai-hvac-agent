@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, AlertCircle, Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { useInventory, type InventorySortKey } from '@/hooks/use-inventory';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { usePricebook } from '@/hooks/use-pricebook';
@@ -10,7 +10,7 @@ import { InventoryFormDialog } from '@/components/admin/inventory/inventory-form
 import { PurchaseOrdersPanel } from '@/components/admin/inventory/purchase-orders-panel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { Separator } from '@/components/ui/separator';
 import {
   Select,
@@ -43,6 +43,7 @@ export default function InventoryPage() {
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
   // Persist filters to the URL (shareable links + survives refresh). Page is
   // intentionally NOT persisted. Defaults map to '' so they're dropped from the URL.
@@ -166,13 +167,18 @@ export default function InventoryPage() {
         </Button>
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+      {/* A failed load is one error with Try again — never "No materials
+          tracked" or an empty purchase-order list. */}
+      {savedNotice && (
+        <p role="status" className="text-sm text-success">
+          {savedNotice}
+        </p>
       )}
 
+      {error && !isLoading ? (
+        <LoadErrorState title="Couldn't load inventory." onRetry={refetch} />
+      ) : (
+      <>
       <InventoryTable
         items={inventory}
         isLoading={isLoading}
@@ -199,11 +205,17 @@ export default function InventoryPage() {
         inventory={inventory}
         onChanged={handleRefetch}
       />
+      </>
+      )}
 
       <InventoryFormDialog
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={handleRefetch}
+        onSuccess={() => {
+          handleRefetch();
+          setSavedNotice(editing ? 'Stock updated.' : 'Material tracked.');
+          setTimeout(() => setSavedNotice(null), 4000);
+        }}
         editing={editing}
         materials={untrackedMaterials}
       />

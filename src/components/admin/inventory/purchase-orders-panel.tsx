@@ -17,6 +17,7 @@ import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { PurchaseOrderFormDialog } from './purchase-order-form-dialog';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import type {
   PurchaseOrderSummary,
   InventoryItem,
@@ -55,10 +56,14 @@ export function PurchaseOrdersPanel({
   // swallowed failure would make an admin believe inventory was updated when it
   // wasn't.
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Receive adds stock and can't be undone here: ask first.
+  const [pendingReceive, setPendingReceive] = useState<PurchaseOrderSummary | null>(null);
 
   async function transition(id: string, action: 'order' | 'receive'): Promise<void> {
     setBusyId(id);
     setActionError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/admin/inventory/purchase-orders/${id}`, {
         method: 'PATCH',
@@ -66,6 +71,11 @@ export function PurchaseOrdersPanel({
         body: JSON.stringify({ action }),
       });
       if (res.ok) {
+        setNotice(
+          action === 'receive'
+            ? 'Purchase order received. Its quantities were added to stock.'
+            : 'Marked ordered.',
+        );
         onChanged();
       } else {
         setActionError(
@@ -98,6 +108,11 @@ export function PurchaseOrdersPanel({
       {actionError && (
         <p role="alert" className="text-sm text-destructive">
           {actionError}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="text-sm text-success">
+          {notice}
         </p>
       )}
 
@@ -153,7 +168,7 @@ export function PurchaseOrdersPanel({
                           variant="outline"
                           size="sm"
                           disabled={busyId === po.id}
-                          onClick={() => void transition(po.id, 'receive')}
+                          onClick={() => setPendingReceive(po)}
                         >
                           Receive
                         </Button>
@@ -167,10 +182,31 @@ export function PurchaseOrdersPanel({
         </Table>
       )}
 
+      <ConfirmDialog
+        open={pendingReceive !== null}
+        onOpenChange={(o) => { if (!o) setPendingReceive(null); }}
+        title="Receive this purchase order?"
+        description={
+          pendingReceive
+            ? `Everything on the ${pendingReceive.vendorName} order (${formatCentsExact(pendingReceive.totalCents)}) is added to stock. This can't be undone here.`
+            : ''
+        }
+        confirmLabel="Receive"
+        cancelLabel="Not yet"
+        onConfirm={() => {
+          const po = pendingReceive;
+          setPendingReceive(null);
+          if (po) void transition(po.id, 'receive');
+        }}
+      />
+
       <PurchaseOrderFormDialog
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={onChanged}
+        onSuccess={() => {
+          setNotice('Purchase order created as a draft.');
+          onChanged();
+        }}
         materials={materials}
         inventory={inventory}
       />

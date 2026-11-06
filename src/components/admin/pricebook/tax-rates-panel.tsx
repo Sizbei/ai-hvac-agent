@@ -24,11 +24,15 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { TaxRate } from '@/hooks/use-pricebook';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 
 interface TaxRatesPanelProps {
   readonly taxRates: readonly TaxRate[];
   readonly isLoading: boolean;
   readonly onChanged: () => void;
+  /** The tax rates request failed: show the error + Try again, not "none". */
+  readonly loadFailed?: boolean;
+  readonly onRetry?: () => Promise<void> | void;
 }
 
 /** Basis points -> "8.25%". */
@@ -55,6 +59,8 @@ export function TaxRatesPanel({
   taxRates,
   isLoading,
   onChanged,
+  loadFailed = false,
+  onRetry,
 }: TaxRatesPanelProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TaxRate | null>(null);
@@ -170,7 +176,9 @@ export function TaxRatesPanel({
         </Button>
       </div>
 
-      {!isLoading && taxRates.length === 0 ? (
+      {!isLoading && loadFailed && taxRates.length === 0 ? (
+        <LoadErrorState title="Couldn't load tax rates." onRetry={onRetry ?? onChanged} />
+      ) : !isLoading && taxRates.length === 0 ? (
         <div className="py-8 text-center text-muted-foreground">
           No tax rates configured.
         </div>
