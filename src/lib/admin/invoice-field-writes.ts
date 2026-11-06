@@ -435,12 +435,15 @@ async function billedNow(org: string, estimateId: string): Promise<{ billed: boo
 
 /**
  * Int4 headroom before drafting: an existing native draft is adopted as is;
- * with none, step 2 creates one seeded with the job's unbilled materials.
+ * an open native invoice seeds nothing (step 2 answers INVOICE_LOCKED); with
+ * neither, step 2 creates a draft seeded with the job's unbilled materials.
  */
 function headroomSql(org: string, rid: string): SQL {
   return sql`SELECT
       EXISTS (SELECT 1 FROM invoices d WHERE d.organization_id = ${org}::uuid AND d.service_request_id = ${rid}::uuid
         AND d.state = 'draft'::invoice_state AND d.fieldpulse_invoice_id IS NULL AND d.hcp_invoice_id IS NULL) AS draft_exists,
+      EXISTS (SELECT 1 FROM invoices o WHERE o.organization_id = ${org}::uuid AND o.service_request_id = ${rid}::uuid
+        AND o.state = 'open'::invoice_state AND o.fieldpulse_invoice_id IS NULL AND o.hcp_invoice_id IS NULL) AS open_exists,
       (SELECT COALESCE(SUM(l.line_total_cents), 0)::bigint FROM invoice_line_items l JOIN invoices i ON i.id = l.invoice_id
         WHERE i.organization_id = ${org}::uuid AND l.organization_id = ${org}::uuid AND i.service_request_id = ${rid}::uuid
           AND i.state = 'draft'::invoice_state AND i.fieldpulse_invoice_id IS NULL AND i.hcp_invoice_id IS NULL) AS draft_sub,
@@ -480,7 +483,8 @@ export async function billSoldEstimate(
 
   const taxBps = await getDefaultTaxBps(org);
   const [room] = await readRows(headroomSql(org, rid));
-  const existing = room?.draft_exists === true ? Number(room.draft_sub ?? 0) : Number(room?.materials_sub ?? 0);
+  const existing = room?.draft_exists === true ? Number(room.draft_sub ?? 0)
+    : room?.open_exists === true ? 0 : Number(room?.materials_sub ?? 0);
   const sale = lines.reduce((s, l) => s + Number(l.line_total_cents), 0);
   if (exceedsInt32(sale + existing, taxBps)) return { ok: false, reason: "too_large" };
 

@@ -1,8 +1,8 @@
 /**
  * Field equipment add / replace (M3c spec §5.6). ONE db.batch: L_req, then (for
  * a replace) the old row's lock, the guarded INSERT, the xmin-gated retire and
- * a tail read; every statement repeats the caller-on-the-job check and
- * `service_requests.customer_id = $cust`.
+ * a tail read; every statement, the tails included, repeats the
+ * caller-on-the-job check and `service_requests.customer_id = $cust`.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { lockRequestSql, readRows, runBatch } from "@/lib/admin/invoice-field-writes";
@@ -68,7 +68,8 @@ export async function addFieldEquipment(
     const rows = await runBatch([
       lockRequestSql(org, rid),
       insertNew(sql``),
-      sql`SELECT EXISTS (SELECT 1 FROM customer_equipment WHERE id = ${neu}::uuid AND organization_id = ${org}::uuid AND customer_id = ${cust}::uuid) AS exists`,
+      sql`SELECT EXISTS (SELECT 1 FROM customer_equipment WHERE id = ${neu}::uuid AND organization_id = ${org}::uuid AND customer_id = ${cust}::uuid)
+          AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid AND r.customer_id = ${cust}::uuid AND (${onJob})) AS exists`,
     ]);
     if (!Array.isArray(rows)) return fail("stale");
     if (rows[1]!.length > 0) return { ok: true, equipmentId: neu, created: true, replaced: false };
@@ -89,7 +90,7 @@ export async function addFieldEquipment(
       RETURNING ce.id`,
     sql`SELECT ce.retired_at IS NOT NULL AS retired, ce.replaced_by_equipment_id, ce.fieldpulse_asset_id IS NOT NULL AS synced
       FROM customer_equipment ce JOIN service_requests r ON r.id = ${rid}::uuid AND r.organization_id = ${org}::uuid
-      WHERE ${oldVisible}`,
+      WHERE ${oldVisible} AND r.customer_id = ${cust}::uuid AND (${onJob})`,
   ]);
   if (!Array.isArray(rows)) return fail("stale");
   if (rows[2]!.length > 0) return { ok: true, equipmentId: neu, created: true, replaced: true };

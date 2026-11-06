@@ -534,6 +534,16 @@ describe("billSoldEstimate", () => {
     expect((await billSoldEstimate(actorT, EST, { invoiceId: INV })).ok).toBe(true); // an existing draft is adopted, not seeded
   });
 
+  it("an open job invoice seeds nothing, so its materials don't count: step 2 answers invoice_locked, not too_large", async () => {
+    // 1.9e9 + tax fits int4; adding the 2e8 of materials would not.
+    readQueue.push(pre(), [{ id: EL1, line_total_cents: 1_900_000_000 }], room({ open_exists: true, materials_sub: 200_000_000 }),
+      [{ customer_id: CUST, native: true, external_invoice: false }], [], [{ billed: false, invoice_id: null }]);
+    batch.mockResolvedValueOnce(createRows("open"));
+    expect(await billSoldEstimate(actorT, EST, { invoiceId: INV })).toEqual({ ok: false, reason: "invoice_locked" });
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(reads.map(render).some((r) => r.includes("AS open_exists"))).toBe(true);
+  });
+
   it("a 22003 inside createInvoiceFromJob (seeding materials) is too_large, not a 500", async () => {
     happyReads();
     batch.mockRejectedValueOnce({ message: "q", cause: { code: "22003" } });

@@ -5,7 +5,7 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/crypto", () => ({ decrypt: (s: string) => s }));
 vi.mock("@/lib/admin/org-config-queries", () => ({ getOrgConfig: vi.fn() }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: vi.fn(), getPricebookItemById: vi.fn() }));
-import { assembleEstimates, estimatesSql, jobInvoiceSql, linesSql, optionsSql } from "./estimate-queries";
+import { assembleEstimates, estimatesSql, jobInvoiceSql, linesSql, optionsSql, shownCustomerName } from "./estimate-queries";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const RID = "22222222-2222-4222-8222-222222222222";
@@ -56,5 +56,13 @@ describe("assembleEstimates", () => {
     expect(out[0]!.options.map((o) => o.lines.length)).toEqual([0, 1]);
     expect(out[0]!.options[1]!.lines[0]).toEqual({ id: "l1", pricebookItemId: "p1", name: "Coil", quantity: 2, unitPriceCents: 100, lineTotalCents: 200 });
     expect(JSON.stringify(out)).not.toMatch(/cost/i);
+  });
+});
+
+describe("shownCustomerName", () => {
+  it("an erased customer has no name, so the view reads \"Your estimate\"", () => {
+    expect(shownCustomerName("[deleted]")).toBeNull();
+    expect(shownCustomerName("  ")).toBeNull();
+    expect(shownCustomerName(" Pat Probe ")).toBe("Pat Probe");
   });
 });

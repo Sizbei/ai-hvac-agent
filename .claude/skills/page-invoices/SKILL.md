@@ -74,6 +74,10 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
   real network-latency provider replaces the mock. The returned `invoiceState`
   comes from that UPDATE's `RETURNING`, so callers see what was actually
   written.
+- A card charge in flight holds its claim on `amountPaidCents`; a field bill
+  (M3c) that lands on that draft inside the window answers the stored
+  `INVOICE_LOCKED`, and the technician's next tap (a new key) bills it. Accepted
+  for v1; nothing is double-billed.
 - Refund control is rendered only when `canRefund=true` (set server-side by the
   detail page wrapper reading `isSuperAdmin`); the API enforces the gate too.
 - Compose `PageShell`, `PageHeader`, `Pager`, `SegmentedControl` from

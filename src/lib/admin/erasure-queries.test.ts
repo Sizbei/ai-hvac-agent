@@ -309,6 +309,18 @@ describe("anonymizeCustomer", () => {
     expect(est?.set).toMatchObject({ signatureName: null, signatureIp: null });
   });
 
+  it("scrubs estimate signatures on the customer's own estimates OR any estimate on the customer's requests (M3c)", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    const est = opFor("estimates");
+    expect(est?.set).toEqual({ signatureName: null, signatureIp: null, soldBy: null });
+    const [match] = est?.cond as TaggedCondition[];
+    expect(match.op).toBe("or");
+    expect(match.args).toHaveLength(2);
+    expect(match.args[0]).toMatchObject({ op: "eq", args: ["estimates.customerId", CUST] });
+    expect(match.args[1]).toEqual(["estimates.serviceRequestId", ["req-1", "req-2"]]);
+  });
+
   it("clears visit special instructions in the same batch", async () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);

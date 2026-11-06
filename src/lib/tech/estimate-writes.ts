@@ -33,14 +33,14 @@ function statusReason(status: unknown): EstimateWriteReason | null {
 
 // ---------------------------------------------------------------- create
 
-export function createOutcome(tail: Row | undefined, cust: string, eid: string): EstimateWriteResult {
+export function createOutcome(tail: Row | undefined, eid: string): EstimateWriteResult {
   if (!tail) return fail("stale");
   if (tail.exists === true) return { ok: true, estimateId: eid, created: false };
   if (tail.still_lead !== true) return fail("not_lead");
   const s = statusReason(tail.status);
   if (s) return fail(s);
-  if (lower(tail.customer_id) !== cust.toLowerCase()) return fail("no_customer");
-  return fail("stale");
+  if (tail.customer_id === null || tail.customer_id === undefined) return fail("no_customer");
+  return fail("stale"); // a different customer now, or nothing visible changed
 }
 
 export async function createFieldEstimate(
@@ -89,7 +89,7 @@ export async function createFieldEstimate(
   ]);
   if (!Array.isArray(rows)) return fail("stale");
   if (rows[1]!.length > 0) return { ok: true, estimateId: eid, created: true };
-  return createOutcome(rows[4]![0], cust, eid);
+  return createOutcome(rows[4]![0], eid);
 }
 
 // ---------------------------------------------------------------- sell

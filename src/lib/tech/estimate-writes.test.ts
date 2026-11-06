@@ -85,14 +85,16 @@ describe("createFieldEstimate (spec §5.1)", () => {
 describe("createOutcome", () => {
   const t = (over: Record<string, unknown>) => ({ still_lead: true, status: "arrived", customer_id: CUST, exists: false, ...over });
   it("an existing row with this id is a re-run, before every other answer", () =>
-    expect(createOutcome(t({ exists: true, still_lead: false, status: "completed" }), CUST, EST)).toEqual({ ok: true, estimateId: EST, created: false }));
+    expect(createOutcome(t({ exists: true, still_lead: false, status: "completed" }), EST)).toEqual({ ok: true, estimateId: EST, created: false }));
   it("then lead, status, customer", () => {
-    expect(createOutcome(t({ still_lead: false }), CUST, EST)).toEqual({ ok: false, reason: "not_lead" });
-    expect(createOutcome(t({ status: "scheduled" }), CUST, EST)).toEqual({ ok: false, reason: "not_on_site" });
-    expect(createOutcome(t({ status: "completed" }), CUST, EST)).toEqual({ ok: false, reason: "job_closed" });
-    expect(createOutcome(t({ customer_id: null }), CUST, EST)).toEqual({ ok: false, reason: "no_customer" });
-    expect(createOutcome(t({}), CUST, EST)).toEqual({ ok: false, reason: "stale" });
-    expect(createOutcome(undefined, CUST, EST)).toEqual({ ok: false, reason: "stale" });
+    expect(createOutcome(t({ still_lead: false }), EST)).toEqual({ ok: false, reason: "not_lead" });
+    expect(createOutcome(t({ status: "scheduled" }), EST)).toEqual({ ok: false, reason: "not_on_site" });
+    expect(createOutcome(t({ status: "completed" }), EST)).toEqual({ ok: false, reason: "job_closed" });
+    expect(createOutcome(t({ customer_id: null }), EST)).toEqual({ ok: false, reason: "no_customer" });
+    // the request now points at another customer: the job changed, not "no customer"
+    expect(createOutcome(t({ customer_id: ITEM }), EST)).toEqual({ ok: false, reason: "stale" });
+    expect(createOutcome(t({}), EST)).toEqual({ ok: false, reason: "stale" });
+    expect(createOutcome(undefined, EST)).toEqual({ ok: false, reason: "stale" });
   });
 });
 

@@ -7,6 +7,8 @@ import { db } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { getDefaultTaxBps } from "@/lib/admin/pricebook-queries";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
+import { ERASED_PLACEHOLDER } from "@/lib/admin/report-format";
+import { errorCode, logger } from "@/lib/logger";
 import { P_LIVE, P_NATIVE } from "@/lib/admin/invoice-field-writes";
 import { billingInvoiceIdSql, jobBilledSql, officeBilledSql } from "@/lib/admin/estimate-billing-sql";
 import { findActiveVisit, findReadableJob } from "@/lib/tech/ownership";
@@ -104,9 +106,16 @@ export function assembleEstimates(estRows: readonly Row[], optRows: readonly Row
 async function companyNameOf(org: string): Promise<string | null> {
   try {
     return (await getOrgConfig(org)).companyName ?? null;
-  } catch {
+  } catch (error) {
+    logger.warn({ code: errorCode(error), organizationId: org }, "Estimate view: company name read failed; showing none");
     return null;
   }
+}
+
+/** The name the customer view greets; an erased customer reads as no name ("Your estimate"). */
+export function shownCustomerName(plain: string): string | null {
+  const name = plain.trim();
+  return name === "" || name === ERASED_PLACEHOLDER ? null : name;
 }
 
 async function customerNameOf(org: string, customerId: string | null): Promise<string | null> {
@@ -114,8 +123,9 @@ async function customerNameOf(org: string, customerId: string | null): Promise<s
   const [row] = await rows(sql`SELECT name_encrypted FROM customers WHERE id = ${customerId}::uuid AND organization_id = ${org}::uuid`);
   if (!row?.name_encrypted) return null;
   try {
-    return decrypt(String(row.name_encrypted));
-  } catch {
+    return shownCustomerName(decrypt(String(row.name_encrypted)));
+  } catch (error) {
+    logger.warn({ code: errorCode(error), organizationId: org, customerId }, "Estimate view: customer name decrypt failed; showing none");
     return null;
   }
 }

@@ -194,6 +194,12 @@ export async function anonymizeCustomer(
     eq(invoices.customerId, customerId),
     inArray(invoices.serviceRequestId, requestIds),
   )!;
+  // Estimate signatures (M3c): the same rule. A field sale writes the typed name
+  // onto the estimate of the REQUEST, whose customer id is pinned at create.
+  const estimateSignatureMatch = or(
+    eq(estimates.customerId, customerId),
+    inArray(estimates.serviceRequestId, requestIds),
+  )!;
   const invoiceSignatureRows = await db
     .select({ signatureUrl: invoices.signatureUrl })
     .from(invoices)
@@ -327,17 +333,12 @@ export async function anonymizeCustomer(
           ),
         ),
       ),
-    // Estimates: drop the customer's e-signature name + IP.
+    // Estimates: drop the e-signature name + IP and who sold it, on the
+    // customer's own estimates OR any estimate on the customer's requests.
     db
       .update(estimates)
-      .set({ signatureName: null, signatureIp: null })
-      .where(
-        withTenant(
-          estimates,
-          organizationId,
-          eq(estimates.customerId, customerId),
-        ),
-      ),
+      .set({ signatureName: null, signatureIp: null, soldBy: null })
+      .where(withTenant(estimates, organizationId, estimateSignatureMatch)),
     // Detach + scrub the chat sessions (the messages are already deleted
     // above). metadata holds the plaintext intake slots (name, phone, email,
     // address, free-text extras); every reader treats NULL as "nothing

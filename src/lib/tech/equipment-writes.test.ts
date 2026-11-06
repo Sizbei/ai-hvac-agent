@@ -77,6 +77,10 @@ describe("addFieldEquipment (spec §5.6)", () => {
     readQueue.push([{ customer_id: CUST }]);
     batch.mockResolvedValueOnce(rowsOf([], [], [{ exists: true }]));
     expect(await addFieldEquipment(actor, { equipmentId: NEW }, input())).toEqual({ ok: true, equipmentId: NEW, created: false, replaced: false });
+    // The tail re-checks the request's customer and that the caller is still on the job.
+    const tail = stmts()[2]!;
+    expect(tail).toContain("r.customer_id = $");
+    expect(tail).toContain("a.status <> 'cancelled'::request_status");
   });
 
   it("replace: lock the old row, insert only while it is live, retire it only when this transaction wrote the new row", async () => {
@@ -97,6 +101,9 @@ describe("addFieldEquipment (spec §5.6)", () => {
     for (const st of s.slice(1, 5)) expect(st).toContain("ce.customer_id = $");
     // The INSERT and the retire UPDATE each re-check that the caller is on the job.
     for (const st of [s[2]!, s[3]!]) expect(st).toContain("a.status <> 'cancelled'::request_status");
+    // So does the tail read (a reassigned technician learns nothing from a replay).
+    expect(s[4]).toContain("r.customer_id = $");
+    expect(s[4]).toContain("a.status <> 'cancelled'::request_status");
   });
 
   it("replace zero rows map through replaceOutcome", async () => {
