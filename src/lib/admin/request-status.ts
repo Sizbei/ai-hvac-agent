@@ -74,6 +74,16 @@ export function requestStatusLabel(status: string): string {
   return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "Unknown";
 }
 
+/** 409 copy when a status change no longer applies (someone else moved the
+ * request first). Human words, never the raw enum. */
+export function transitionRefusedMessage(currentStatus: string): string {
+  return `This request is ${requestStatusLabel(currentStatus).toLowerCase()} now, so that change can’t be made. Reload to see the latest.`;
+}
+
+/** Statuses that resume a held request by sending someone again. On a native
+ * request whose visit a hold ended, these go through "Schedule next visit". */
+export const RESUME_TARGET_STATUSES = ["scheduled", "en_route", "arrived", "in_progress"] as const satisfies readonly RequestStatus[];
+
 export function canTransition(
   from: RequestStatus,
   to: RequestStatus,

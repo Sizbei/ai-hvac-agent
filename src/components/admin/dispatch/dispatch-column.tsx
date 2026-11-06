@@ -45,15 +45,20 @@ function JobCard({
   readonly job: DashboardRequest;
   readonly onSelect: (id: string) => void;
 }) {
+  // A visit a hold ended stays visible where it was, but reads as ended.
+  const ended = job.visitEnded === true;
+  const visitTag = ended ? 'Visit ended' : job.visitNumber ? `Visit #${job.visitNumber}` : null;
   return (
     <button
       type="button"
-      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}`}
+      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}${visitTag ? ` · ${visitTag}` : ''}`}
       onClick={() => onSelect(job.id)}
-      className={`w-full rounded-sm border border-border border-l-2 bg-surface-raised px-3 py-2 text-left transition-colors hover:bg-row-hover ${urgencyAccent(job.urgency).bar}`}
+      className={`w-full rounded-sm border border-l-2 px-3 py-2 text-left transition-colors hover:bg-row-hover ${urgencyAccent(job.urgency).bar} ${
+        ended ? 'border-dashed border-border-strong bg-surface-sunken text-muted-foreground' : 'border-border bg-surface-raised'
+      }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium tabular-nums">
+        <span className={`text-sm font-medium tabular-nums${ended ? ' line-through' : ''}`}>
           {formatTime(job.arrivalWindowStart)}
         </span>
         <div className="flex shrink-0 items-center gap-1">
@@ -81,6 +86,9 @@ function JobCard({
       <div className="mt-1 flex items-center gap-1.5">
         <UrgencyBadge urgency={job.urgency} />
         <StatusBadge status={job.status} />
+        {visitTag && (
+          <span className="text-xs font-medium text-muted-foreground">{visitTag}</span>
+        )}
       </div>
     </button>
   );
@@ -105,7 +113,7 @@ export function DispatchColumn({
         />
         <h2 className="truncate text-[15px] font-semibold">{title}</h2>
         <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
-          {jobs.length}
+          {jobs.filter((j) => !j.visitEnded).length}
         </span>
       </div>
 

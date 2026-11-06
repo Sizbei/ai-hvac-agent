@@ -24,6 +24,7 @@ vi.mock("@/lib/tech/ownership", async (importOriginal) => ({
   findActiveVisit: vi.fn(),
 }));
 vi.mock("@/lib/admin/audit", () => ({ logAudit: vi.fn() }));
+vi.mock("@/lib/admin/current-visit", () => ({ readVisitEnded: vi.fn(async () => false) }));
 vi.mock("@/lib/integrations/google-calendar/sync", () => ({ syncRequestToCalendar: vi.fn(), deleteRequestFromCalendar: vi.fn() }));
 vi.mock("@/lib/integrations/housecall-pro/job-sync", () => ({ pushJobToHcp: vi.fn(), cancelHcpJob: vi.fn() }));
 vi.mock("@/lib/integrations/fieldpulse/job-sync", () => ({ pushJobToFieldpulse: vi.fn(), cancelFieldpulseJob: vi.fn() }));
@@ -41,6 +42,7 @@ import { scheduleRequest, updateRequestStatus } from "@/lib/admin/queries";
 import { completeRequestFromAdmin, holdVisit, readRequestState } from "@/lib/tech/status-writes";
 import { findActiveVisit } from "@/lib/tech/ownership";
 import { logAudit } from "@/lib/admin/audit";
+import { readVisitEnded } from "@/lib/admin/current-visit";
 
 const RID = "11111111-1111-4111-8111-111111111111";
 const A1 = "22222222-2222-4222-8222-222222222222";
@@ -100,7 +102,11 @@ describe("PATCH /api/admin/requests/[id] — status routing", () => {
     mocked(completeRequestFromAdmin).mockResolvedValue({ ok: false, reason: "invalid_transition", currentStatus: "assigned" });
     const res = await patch({ status: "completed" });
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatchObject({ code: "INVALID_TRANSITION", message: "Cannot change status to 'completed' from 'assigned'" });
+    expect((await res.json()).error).toEqual({
+      code: "INVALID_TRANSITION",
+      message: "This request is assigned now, so that change can’t be made. Reload to see the latest.",
+      details: { currentStatus: "assigned" },
+    });
   });
 
   it("409 STALE when the hold lost a race", async () => {
@@ -119,6 +125,50 @@ describe("PATCH /api/admin/requests/[id] — status routing", () => {
     const res = await patch({ status: "completed" });
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("STALE");
+  });
+});
+
+describe("PATCH /api/admin/requests/[id] — resuming a hold (round-2 P0)", () => {
+  it.each(["scheduled", "en_route", "arrived", "in_progress"])(
+    "native held request whose visit ended: %s → 409 VISIT_ENDED, nothing written",
+    async (target) => {
+      mocked(readRequestState).mockResolvedValue({ status: "on_hold", native: true });
+      mocked(readVisitEnded).mockResolvedValue(true);
+      const res = await patch({ status: target });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toEqual({
+        code: "VISIT_ENDED",
+        message: "This visit ended when the request was put on hold. Schedule the next visit instead.",
+      });
+      expect(readVisitEnded).toHaveBeenCalledWith("org", RID);
+      expect(updateRequestStatus).not.toHaveBeenCalled();
+      expect(logAudit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("a held request with a live visit still resumes by status", async () => {
+    mocked(readRequestState).mockResolvedValue({ status: "on_hold", native: true });
+    mocked(readVisitEnded).mockResolvedValue(false);
+    mocked(updateRequestStatus).mockResolvedValue({ ok: true, status: "scheduled" });
+    expect((await patch({ status: "scheduled" })).status).toBe(200);
+    expect(updateRequestStatus).toHaveBeenCalled();
+  });
+
+  it("synced held requests and non-held requests never consult the visit", async () => {
+    mocked(readRequestState).mockResolvedValue({ status: "on_hold", native: false });
+    mocked(updateRequestStatus).mockResolvedValue({ ok: true, status: "scheduled" });
+    expect((await patch({ status: "scheduled" })).status).toBe(200);
+    mocked(readRequestState).mockResolvedValue({ status: "assigned", native: true });
+    mocked(updateRequestStatus).mockResolvedValue({ ok: true, status: "en_route" });
+    expect((await patch({ status: "en_route" })).status).toBe(200);
+    expect(readVisitEnded).not.toHaveBeenCalled();
+  });
+
+  it("cancelling or completing a held request is still allowed", async () => {
+    mocked(readRequestState).mockResolvedValue({ status: "on_hold", native: true });
+    mocked(updateRequestStatus).mockResolvedValue({ ok: true, status: "cancelled" });
+    expect((await patch({ status: "cancelled" })).status).toBe(200);
+    expect(readVisitEnded).not.toHaveBeenCalled();
   });
 });
 

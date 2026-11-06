@@ -23,6 +23,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  appointments,
   serviceRequests,
   requestNotes,
   users,
@@ -60,6 +61,14 @@ import { DASHBOARD_LIST_LIMIT } from "./types";
 import { getTechnicianAvailability } from "./scheduling-queries";
 import { technicianTimeOffOverlapping } from "./shift-queries";
 import { businessIsoDate, businessDayBounds } from "./calendar-time";
+import {
+  displayVisitIdSql,
+  officePlacement,
+  officeVisitSql,
+  parseOfficeVisit,
+  placeOfficeJob,
+  placedByVisitSql,
+} from "./current-visit";
 import type {
   AdminRequest,
   AdminRequestDetail,
@@ -204,6 +213,7 @@ export async function getRequests(
       isAfterHours: serviceRequests.isAfterHours,
       createdAt: serviceRequests.createdAt,
       updatedAt: serviceRequests.updatedAt,
+      officeVisit: officeVisitSql(),
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
@@ -239,7 +249,12 @@ export async function getRequests(
         : row.hcpJobId != null
           ? "housecall"
           : null,
-    assignedToName: row.assignedToName,
+    // A later visit's lead is who goes now (the request column is visit #1's).
+    assignedToName: placeOfficeJob(
+      { arrivalWindowStart: null, arrivalWindowEnd: null, assignedToName: row.assignedToName },
+      null,
+      officePlacement(parseOfficeVisit(row.officeVisit)),
+    ).job.assignedToName,
     isAfterHours: row.isAfterHours,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -302,6 +317,8 @@ export async function getRequestById(
       leadSource: serviceRequests.leadSource,
       fieldpulseMetrics: serviceRequests.fieldpulseMetrics,
       fieldpulseData: serviceRequests.fieldpulseData,
+      // The visit the office shows as current (a later visit, or one a hold ended).
+      officeVisit: officeVisitSql(),
     })
     .from(serviceRequests)
     .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
@@ -439,6 +456,7 @@ export async function getRequestById(
     },
     fieldpulseMetrics: (row.fieldpulseMetrics as FieldpulseJobMetrics | null) ?? null,
     fieldpulseData: (row.fieldpulseData as Record<string, unknown> | null) ?? null,
+    currentVisit: officePlacement(parseOfficeVisit(row.officeVisit)),
   };
 }
 
@@ -1471,6 +1489,104 @@ export async function getDashboardOverview(
  * rather than querying a garbage range. Tenant-scoped; decrypted customer
  * NAMES only.
  */
+// ─── Office placement (current visit) ────────────────────────────────────────
+// Calendar, month and dispatch place a request by the visit the technician's
+// phone shows (current-visit.ts): the request columns when visit #1 is current,
+// else the later visit, or the visit a hold ended (shown as ended, never live).
+
+const placedSelect = () =>
+  ({
+    ...dashboardRequestSelect,
+    assignedTo: serviceRequests.assignedTo,
+    officeVisit: officeVisitSql(),
+  }) as const;
+
+type PlacedRow = DashboardRequestRow & {
+  readonly assignedTo: string | null;
+  readonly officeVisit?: string | null;
+};
+
+interface PlacedRange {
+  readonly start: Date;
+  readonly end: Date;
+  /** "start": window starts in the range (dispatch); "overlap": half-open overlap (calendar). */
+  readonly by: "start" | "overlap";
+}
+
+function rangeOn(
+  startCol: typeof serviceRequests.arrivalWindowStart | typeof appointments.arrivalWindowStart,
+  endCol: typeof serviceRequests.arrivalWindowEnd | typeof appointments.arrivalWindowEnd,
+  range: PlacedRange,
+): SQL[] {
+  return range.by === "start"
+    ? [isNotNull(startCol), gte(startCol, range.start), lt(startCol, range.end)]
+    : [isNotNull(startCol), isNotNull(endCol), lt(startCol, range.end), gt(endCol, range.start)];
+}
+
+/** Jobs placed by the request's own window. */
+function placedByRequestQuery(
+  organizationId: string,
+  statuses: readonly RequestStatus[],
+  range: PlacedRange,
+) {
+  return db
+    .select(placedSelect())
+    .from(serviceRequests)
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        ...rangeOn(serviceRequests.arrivalWindowStart, serviceRequests.arrivalWindowEnd, range),
+        inArray(serviceRequests.status, [...statuses]),
+      ),
+    )
+    .orderBy(asc(serviceRequests.arrivalWindowStart));
+}
+
+/** Jobs the office shows by another visit: driven from the visits in range. */
+function placedByVisitQuery(
+  organizationId: string,
+  statuses: readonly RequestStatus[],
+  range: PlacedRange,
+) {
+  return db
+    .select(placedSelect())
+    .from(appointments)
+    .innerJoin(serviceRequests, eq(serviceRequests.id, appointments.serviceRequestId))
+    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        eq(appointments.organizationId, organizationId),
+        ...rangeOn(appointments.arrivalWindowStart, appointments.arrivalWindowEnd, range),
+        inArray(serviceRequests.status, [...statuses]),
+        sql`${appointments.id} = ${displayVisitIdSql()}`,
+        placedByVisitSql(),
+      ),
+    );
+}
+
+/** Both feeds → cards with their lane, window-ordered. A row the other feed
+ * owns is dropped, so a request is never placed twice. */
+function mergePlacedRows(
+  byRequest: readonly PlacedRow[],
+  byVisit: readonly PlacedRow[],
+): { readonly job: DashboardRequest; readonly technicianId: string | null }[] {
+  const out: { readonly job: DashboardRequest; readonly technicianId: string | null }[] = [];
+  for (const [rows, requestFeed] of [[byRequest, true], [byVisit, false]] as const) {
+    for (const row of rows) {
+      const placement = officePlacement(parseOfficeVisit(row.officeVisit));
+      if ((placement.kind === "request") !== requestFeed) continue;
+      out.push(placeOfficeJob(toDashboardRequest(row), row.assignedTo, placement));
+    }
+  }
+  return out.sort((a, b) =>
+    (a.job.arrivalWindowStart ?? "").localeCompare(b.job.arrivalWindowStart ?? ""),
+  );
+}
+
 export async function getDispatchBoard(
   organizationId: string,
   isoDate?: string,
@@ -1481,30 +1597,13 @@ export async function getDispatchBoard(
       : businessIsoDate(new Date());
   const bounds = businessDayBounds(date)!;
 
-  // The board's job-card select mirrors dashboardRequestSelect but also carries
-  // the raw assignedTo id so we can bucket jobs into technician columns.
-  const dispatchSelect = {
-    ...dashboardRequestSelect,
-    assignedTo: serviceRequests.assignedTo,
-  } as const;
-
-  const [technicians, jobRows] = await Promise.all([
+  // Job cards carry the raw assignedTo id (and the current visit) so we can
+  // bucket jobs into technician columns.
+  const range: PlacedRange = { start: bounds.start, end: bounds.end, by: "start" };
+  const [technicians, requestRows, visitRows] = await Promise.all([
     getTechnicians(organizationId),
-    db
-      .select(dispatchSelect)
-      .from(serviceRequests)
-      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          isNotNull(serviceRequests.arrivalWindowStart),
-          gte(serviceRequests.arrivalWindowStart, bounds.start),
-          lt(serviceRequests.arrivalWindowStart, bounds.end),
-          inArray(serviceRequests.status, [...OPEN_STATUSES]),
-        ),
-      )
-      .orderBy(asc(serviceRequests.arrivalWindowStart)),
+    placedByRequestQuery(organizationId, OPEN_STATUSES, range),
+    placedByVisitQuery(organizationId, OPEN_STATUSES, range),
   ]);
 
   // Seed a bucket for each ACTIVE technician first, so jobs assigned to them
@@ -1517,9 +1616,8 @@ export async function getDispatchBoard(
   );
   const unassigned: DashboardRequest[] = [];
 
-  for (const row of jobRows) {
-    const job = toDashboardRequest(row);
-    const bucket = row.assignedTo ? byTech.get(row.assignedTo) : undefined;
+  for (const { job, technicianId } of mergePlacedRows(requestRows, visitRows)) {
+    const bucket = technicianId ? byTech.get(technicianId) : undefined;
     if (bucket) {
       bucket.push(job); // rows are window-ordered, so each bucket stays sorted
     } else {
@@ -1573,12 +1671,12 @@ export async function getSchedulingCalendar(
     throw new Error("Invalid calendar range");
   }
 
-  const calendarSelect = {
-    ...dashboardRequestSelect,
-    assignedTo: serviceRequests.assignedTo,
-  } as const;
+  const statuses = includeCompleted
+    ? [...OPEN_STATUSES, ...TERMINAL_STATUSES]
+    : [...OPEN_STATUSES];
+  const range: PlacedRange = { start, end, by: "overlap" };
 
-  const [technicians, placedRows, unscheduledRows, availability] =
+  const [technicians, placedRows, unscheduledRows, availability, visitRows] =
     await Promise.all([
     getTechnicians(organizationId),
     // Placed jobs: an arrival window OVERLAPPING the range, in an open state.
@@ -1589,27 +1687,7 @@ export async function getSchedulingCalendar(
     // job spanning a day boundary, or a job opened just before a week view's
     // first midnight). The end bound is STRICT (gt) so a job ending exactly at
     // rangeStart belongs to the prior range, matching the booked-time feed.
-    db
-      .select(calendarSelect)
-      .from(serviceRequests)
-      .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          isNotNull(serviceRequests.arrivalWindowStart),
-          isNotNull(serviceRequests.arrivalWindowEnd),
-          lt(serviceRequests.arrivalWindowStart, end),
-          gt(serviceRequests.arrivalWindowEnd, start),
-          inArray(
-            serviceRequests.status,
-            includeCompleted
-              ? [...OPEN_STATUSES, ...TERMINAL_STATUSES]
-              : [...OPEN_STATUSES],
-          ),
-        ),
-      )
-      .orderBy(asc(serviceRequests.arrivalWindowStart)),
+    placedByRequestQuery(organizationId, statuses, range),
     // Unscheduled: open intake not yet fully placed — no tech OR no window.
     db
       .select(dashboardRequestSelect)
@@ -1638,6 +1716,8 @@ export async function getSchedulingCalendar(
       .limit(DASHBOARD_LIST_LIMIT),
     // Recurring working hours for every tech — drives S4 out-of-hours shading.
     getTechnicianAvailability(organizationId),
+    // Requests shown by a later visit, or by the visit a hold ended.
+    placedByVisitQuery(organizationId, statuses, range),
   ]);
 
   const activeTechs = technicians.filter((tech) => tech.isActive);
@@ -1646,9 +1726,8 @@ export async function getSchedulingCalendar(
   );
   const unassigned: DashboardRequest[] = [];
 
-  for (const row of placedRows) {
-    const job = toDashboardRequest(row);
-    const bucket = row.assignedTo ? byTech.get(row.assignedTo) : undefined;
+  for (const { job, technicianId } of mergePlacedRows(placedRows, visitRows)) {
+    const bucket = technicianId ? byTech.get(technicianId) : undefined;
     if (bucket) {
       bucket.push(job); // rows are window-ordered, so each lane stays sorted
     } else {
@@ -1701,30 +1780,16 @@ export async function getMonthCalendar(
     throw new Error("Invalid month calendar range");
   }
 
-  // Same half-open window-overlap predicate as the day/week board.
-  const placedRows = await db
-    .select(dashboardRequestSelect)
-    .from(serviceRequests)
-    .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        isNotNull(serviceRequests.arrivalWindowStart),
-        isNotNull(serviceRequests.arrivalWindowEnd),
-        // Date objects (not ISO strings): the arrival-window columns are
-        // timestamptz, matching how the day/week board passes its bounds.
-        lt(serviceRequests.arrivalWindowStart, end),
-        gt(serviceRequests.arrivalWindowEnd, start),
-        inArray(
-          serviceRequests.status,
-          includeCompleted
-            ? [...OPEN_STATUSES, ...TERMINAL_STATUSES]
-            : [...OPEN_STATUSES],
-        ),
-      ),
-    )
-    .orderBy(asc(serviceRequests.arrivalWindowStart));
+  // Same half-open window-overlap predicate (and current-visit placement) as
+  // the day/week board. Date objects, not ISO strings: the columns are timestamptz.
+  const statuses = includeCompleted
+    ? [...OPEN_STATUSES, ...TERMINAL_STATUSES]
+    : [...OPEN_STATUSES];
+  const range: PlacedRange = { start, end, by: "overlap" };
+  const [requestRows, visitRows] = await Promise.all([
+    placedByRequestQuery(organizationId, statuses, range),
+    placedByVisitQuery(organizationId, statuses, range),
+  ]);
 
   // Bucket window-ordered rows by the business day their window starts on. A row
   // whose start day isn't in the grid (shouldn't happen — the range is built
@@ -1732,12 +1797,12 @@ export async function getMonthCalendar(
   const jobsByDay = new Map<string, DashboardRequest[]>(
     gridDays.map((day) => [day, [] as DashboardRequest[]]),
   );
-  for (const row of placedRows) {
-    if (!row.arrivalWindowStart) continue;
-    const startDate = new Date(row.arrivalWindowStart);
+  for (const { job } of mergePlacedRows(requestRows, visitRows)) {
+    if (!job.arrivalWindowStart) continue;
+    const startDate = new Date(job.arrivalWindowStart);
     if (Number.isNaN(startDate.getTime())) continue;
     const bucket = jobsByDay.get(businessIsoDate(startDate));
-    if (bucket) bucket.push(toDashboardRequest(row)); // already window-ordered
+    if (bucket) bucket.push(job); // already window-ordered
   }
 
   const monthPrefix = `${month}-`;

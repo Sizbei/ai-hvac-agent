@@ -36,19 +36,24 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
     : '—';
 
   const accent = urgencyAccent(job.urgency);
+  // A visit a hold ended: shown where it was, clearly not live.
+  const ended = job.visitEnded === true;
+  const visitTag = ended ? 'Visit ended' : job.visitNumber ? `Visit #${job.visitNumber}` : null;
 
   return (
     <button
       type="button"
-      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}`}
+      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}${visitTag ? ` · ${visitTag}` : ''}`}
       onClick={() => onSelect(job.id)}
       // Raised (white = a record) body, hairline border, and a 3px urgency
       // left rail so a glance reads priority by color — same semantic families
       // as the urgency badges.
-      className={`flex h-full w-full flex-col overflow-hidden rounded-sm border border-border border-l-[3px] ${accent.bar} bg-surface-raised px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-row-hover`}
+      className={`flex h-full w-full flex-col overflow-hidden rounded-sm border border-l-[3px] ${accent.bar} px-2 py-1 text-left text-xs leading-tight transition-colors hover:bg-row-hover ${
+        ended ? 'border-dashed border-border-strong bg-surface-sunken text-muted-foreground' : 'border-border bg-surface-raised'
+      }`}
     >
       <div className="flex shrink-0 items-center gap-1">
-        <span className="truncate font-mono font-medium tabular-nums">{time}</span>
+        <span className={`truncate font-mono font-medium tabular-nums${ended ? ' line-through' : ''}`}>{time}</span>
         {job.isAfterHours && (
           <span
             title="After hours"
@@ -65,9 +70,14 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
         )}
       </div>
       {/* shrink-0: on a short card the customer outranks the badges. */}
-      <span className="shrink-0 truncate font-medium text-foreground">
+      <span className={`shrink-0 truncate font-medium ${ended ? 'text-muted-foreground' : 'text-foreground'}`}>
         {job.customerName ?? 'Unknown'}
       </span>
+      {visitTag && (
+        <span className="shrink-0 truncate text-[11px] font-medium leading-[14px] text-muted-foreground">
+          {visitTag}
+        </span>
+      )}
       {!compact && (
         <>
           <span className="truncate text-[11px] leading-[14px] text-muted-foreground">

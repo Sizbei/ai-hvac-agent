@@ -178,3 +178,46 @@ describe("cancelAppointment — job time and finished rows", () => {
     expect(close.params).toContain(AID);
   });
 });
+
+describe("addAppointment — next visit after a hold (round-2 P0)", () => {
+  const visitRow = {
+    id: "v2", serviceRequestId: REQ, appointmentNumber: 2, scheduledDate: null, startsAt: null, endsAt: null,
+    arrivalWindowStart: null, arrivalWindowEnd: null, isConfirmed: false, cancelledAt: null,
+    specialInstructions: null, version: 0,
+  };
+
+  it("on a held request: locks first, then insert, rows, and a landed-gated resume to scheduled", async () => {
+    selectQueue.push([{ status: "on_hold" }], [{ id: T1 }, { id: T2 }], [{ appointmentNumber: 1 }], [visitRow], []);
+    timeOff.mockResolvedValue([]);
+    batch.mockResolvedValue([{}, { rows: [{ id: "v2" }] }, {}, { rows: [{ id: REQ }] }]);
+    const r = await addAppointment(ORG, REQ, input, T1);
+    expect(r).toMatchObject({ id: "v2", appointmentNumber: 2, resumed: true });
+    const items = batch.mock.calls[0]![0] as unknown[];
+    expect(items).toHaveLength(4);
+    expect(render(executed[0]).sql).toMatch(/^SELECT 1 FROM service_requests WHERE id = \$1::uuid AND organization_id = \$2::uuid FOR NO KEY UPDATE$/);
+    expect(render(executed[1]).sql).toMatch(/^INSERT INTO appointments/);
+    const resume = render(executed[3]).sql;
+    expect(resume).toMatch(/^UPDATE service_requests SET status = 'scheduled'::request_status,\s+hold_reason = NULL, follow_up_date = NULL/);
+    expect(resume).toContain("status = 'on_hold'::request_status AND fieldpulse_job_id IS NULL AND hcp_job_id IS NULL");
+    expect(resume).toMatch(/p\.xmin = pg_current_xact_id\(\)::xid\)\s+RETURNING id$/);
+  });
+
+  it("not resumed when the request left hold first (resume UPDATE matched nothing)", async () => {
+    selectQueue.push([{ status: "on_hold" }], [{ id: T1 }, { id: T2 }], [{ appointmentNumber: 1 }], [visitRow], []);
+    timeOff.mockResolvedValue([]);
+    batch.mockResolvedValue([{}, { rows: [{ id: "v2" }] }, {}, { rows: [] }]);
+    const r = await addAppointment(ORG, REQ, input, T1);
+    expect(r).toMatchObject({ id: "v2" });
+    expect(r).not.toHaveProperty("resumed");
+  });
+
+  it("an in-flight request is untouched: no lock, no resume statement", async () => {
+    selectQueue.push([{ status: "scheduled" }], [{ id: T1 }, { id: T2 }], [{ appointmentNumber: 1 }], [visitRow], []);
+    timeOff.mockResolvedValue([]);
+    batch.mockResolvedValue([{ rows: [{ id: "v2" }] }, {}]);
+    const r = await addAppointment(ORG, REQ, input, T1);
+    expect(r).not.toHaveProperty("resumed");
+    expect(batch.mock.calls[0]![0]).toHaveLength(2);
+    expect(render(executed[0]).sql).toMatch(/^INSERT INTO appointments/);
+  });
+});

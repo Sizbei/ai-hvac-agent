@@ -169,3 +169,14 @@ describe('requestStatusLabel', () => {
     expect(requestStatusLabel('')).toBe('Unknown');
   });
 });
+
+describe("transitionRefusedMessage (round-2 P1-4)", () => {
+  it("says what the request is now in words, never the raw enum", async () => {
+    const { transitionRefusedMessage } = await import("./request-status");
+    expect(transitionRefusedMessage("cancelled")).toBe(
+      "This request is cancelled now, so that change can’t be made. Reload to see the latest.",
+    );
+    expect(transitionRefusedMessage("on_hold")).not.toContain("on_hold");
+    expect(transitionRefusedMessage("in_progress")).toContain("in progress");
+  });
+});

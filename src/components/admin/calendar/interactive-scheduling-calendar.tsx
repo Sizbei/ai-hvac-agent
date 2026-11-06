@@ -123,6 +123,11 @@ function positionJobs(
   return positioned.map((p, i) => ({ ...p, ...slots[i]! }));
 }
 
+/** Lane header count: visits a hold ended are shown but aren't booked work. */
+function liveJobCount(jobs: readonly DashboardRequest[]): number {
+  return jobs.filter((j) => !j.visitEnded).length;
+}
+
 function HourLines() {
   return (
     <div className="pointer-events-none absolute inset-0">
@@ -214,6 +219,9 @@ function DayLane({
       {positioned.map(({ job, topPx, heightPx, outside, column, columns }) => {
         const isTerminal =
           job.status === 'completed' || job.status === 'cancelled';
+        // A later visit or one a hold ended isn't the request's own window:
+        // dragging would rewrite visit #1, so these open the sheet instead.
+        const pinned = job.visitEnded === true || job.visitNumber !== undefined;
         return (
           <div
             key={job.id}
@@ -237,6 +245,8 @@ function DayLane({
               <div className="h-full w-full opacity-50">
                 <CalendarJobCard job={job} onSelect={onSelect} compact={compact} />
               </div>
+            ) : pinned ? (
+              <CalendarJobCard job={job} onSelect={onSelect} compact={compact} />
             ) : (
               <DraggableJobCard
                 job={job}
@@ -281,7 +291,7 @@ function DayView({
             <Inbox className="size-4 text-warning-strong" />
             <span className="truncate">Unassigned</span>
             <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
-              {unassigned.length}
+              {liveJobCount(unassigned)}
             </span>
           </div>
           <DayLane
@@ -298,7 +308,7 @@ function DayView({
               <User className="size-4 text-foreground-faint" />
               <span className="truncate">{lane.technicianName}</span>
               <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
-                {lane.jobs.length}
+                {liveJobCount(lane.jobs)}
               </span>
             </div>
             <DayLane

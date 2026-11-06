@@ -71,6 +71,7 @@ import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
 import { canSaveSchedule, scheduleInputsFrom } from '@/lib/admin/request-schedule-inputs';
+import { cancelRequestDescription, sheetVisitView } from '@/lib/admin/request-visit-view';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -78,7 +79,7 @@ import { canSaveSchedule, scheduleInputsFrom } from '@/lib/admin/request-schedul
 type ManualTargetStatus = (typeof MANUAL_TARGET_STATUSES)[number];
 
 const STATUS_ACTION_LABELS: Record<ManualTargetStatus, string> = {
-  scheduled: 'Schedule visit',
+  scheduled: 'Mark scheduled',
   en_route: 'Mark en route',
   arrived: 'Mark arrived',
   in_progress: 'Start work',
@@ -381,6 +382,10 @@ function VisitsSection({
   refreshKey,
   terminal,
   preferredDay,
+  addSignal,
+  prefillTechnicianIds,
+  nextVisit,
+  onChanged,
 }: {
   readonly requestId: string;
   readonly technicians: readonly TechnicianRecord[];
@@ -390,6 +395,14 @@ function VisitsSection({
   readonly terminal: boolean;
   /** Business-tz day Add visit opens on (the request's own day), when it has one. */
   readonly preferredDay: string | null;
+  /** Bumped by the sheet's "Schedule next visit" button to open the add dialog. */
+  readonly addSignal: number;
+  /** Technicians the add dialog starts with (the visit a hold ended). */
+  readonly prefillTechnicianIds: readonly string[];
+  /** A hold ended the visit: the add dialog is "Schedule next visit". */
+  readonly nextVisit: boolean;
+  /** A visit was added or cancelled: the request may have changed too. */
+  readonly onChanged: () => void;
 }) {
   const [visits, setVisits] = useState<readonly AppointmentRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -434,11 +447,19 @@ function VisitsSection({
     };
   }, [requestId, reload, refreshKey]);
 
-  function openAdd(): void {
+  function openAdd(prefill: readonly string[] = []): void {
     setPick(null);
-    setTechIds([]);
+    setTechIds(prefill.slice(0, MAX_TECHNICIANS_PER_VISIT));
     setAddError(null);
     setAddOpen(true);
+  }
+
+  // "Schedule next visit" in the status row opens this dialog (adjusting state
+  // during render on a prop change, not in an effect).
+  const [seenSignal, setSeenSignal] = useState(addSignal);
+  if (addSignal !== seenSignal) {
+    setSeenSignal(addSignal);
+    openAdd(prefillTechnicianIds);
   }
 
   function toggleTech(id: string): void {
@@ -478,6 +499,7 @@ function VisitsSection({
       setAddOpen(false);
       setNotice(null);
       await load();
+      onChanged();
     } catch {
       setAddError('Could not connect to server.');
     } finally {
@@ -513,6 +535,7 @@ function VisitsSection({
       setCancelTarget(null);
       setNotice(null);
       await load();
+      onChanged();
     } catch {
       setCancelError('Could not connect to server.');
     } finally {
@@ -528,7 +551,7 @@ function VisitsSection({
         count={visits?.length}
         action={
           terminal ? undefined : (
-            <Button type="button" size="sm" variant="outline" onClick={openAdd}>
+            <Button type="button" size="sm" variant="outline" onClick={() => openAdd()}>
               Add visit
             </Button>
           )
@@ -600,9 +623,10 @@ function VisitsSection({
       <Dialog open={addOpen} onOpenChange={(o) => { if (!saving) setAddOpen(o); }}>
         <DialogContent className="max-h-[90vh] min-w-0 overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Add visit</DialogTitle>
+            <DialogTitle>{nextVisit ? 'Schedule next visit' : 'Add visit'}</DialogTitle>
             <DialogDescription>
               Pick an arrival window and who is going. The first technician leads.
+              {nextVisit && ' The request comes off hold once the visit is booked.'}
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3">
@@ -652,7 +676,7 @@ function VisitsSection({
               Cancel
             </Button>
             <Button type="button" onClick={() => void saveVisit()} disabled={!canSave}>
-              {saving ? 'Adding…' : 'Add visit'}
+              {saving ? 'Adding…' : nextVisit ? 'Schedule visit' : 'Add visit'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -704,6 +728,8 @@ export function RequestDetailSheet({
   const [followUpInput, setFollowUpInput] = useState<string>('');
   const [isPatching, setIsPatching] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
+  // Bumped by "Schedule next visit" to open the Visits section's add dialog.
+  const [nextVisitSignal, setNextVisitSignal] = useState(0);
 
   const [noteInput, setNoteInput] = useState<string>('');
   const [isAddingNote, setIsAddingNote] = useState(false);
@@ -747,6 +773,26 @@ export function RequestDetailSheet({
     }
   }, [requestId, noteInput]);
 
+  // Re-read the request in place (no skeleton): after a visit is added or
+  // cancelled, or when a write was refused because the request moved on.
+  const refreshDetail = useCallback(async (): Promise<void> => {
+    if (!requestId) return;
+    try {
+      const res = await fetch(`/api/admin/requests/${requestId}`);
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success) return;
+      const next = body.data as AdminRequestDetail;
+      if (next.id !== requestId) return;
+      setDetail(next);
+      const inputs = scheduleInputsFrom(next.scheduledDate, next.arrivalWindowStart, next.arrivalWindowEnd);
+      setScheduledInput(inputs.date);
+      setArrivalWindowInput(inputs.window);
+      setSelectedTechId(next.assignedTo ?? '');
+    } catch {
+      // Keep what is on screen; the next open reloads it.
+    }
+  }, [requestId]);
+
   // Shared PATCH for status transitions and scheduled-date changes. Returns the
   // refreshed detail (server is the source of truth for derived fields like
   // completedAt) and surfaces a friendly error otherwise.
@@ -781,6 +827,12 @@ export function RequestDetailSheet({
           return true;
         }
         setWorkflowError(body.error?.message ?? 'Couldn’t update the request. Please try again.');
+        // 409: someone else moved the request first. Show its real state.
+        if (res.status === 409) {
+          setHoldOpen(false);
+          void refreshDetail();
+          onAssigned();
+        }
         return false;
       } catch {
         setWorkflowError('Couldn’t reach the server. Please try again.');
@@ -789,7 +841,7 @@ export function RequestDetailSheet({
         setIsPatching(false);
       }
     },
-    [requestId, onAssigned],
+    [requestId, onAssigned, refreshDetail],
   );
 
   // Fetch technician list (once)
@@ -974,10 +1026,11 @@ export function RequestDetailSheet({
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Assignment failed' },
-        }));
-        setAssignError(body?.error?.message ?? 'Assignment failed');
+        const body = await res.json().catch(() => null);
+        setAssignError(body?.error?.message ?? 'Couldn’t assign the technician. Please try again.');
+        // The select goes back to who is really assigned, not the refused pick.
+        setSelectedTechId(detail?.assignedTo ?? '');
+        if (res.status === 409) void refreshDetail();
         return;
       }
 
@@ -1004,9 +1057,16 @@ export function RequestDetailSheet({
     } finally {
       setIsAssigning(false);
     }
-  }, [requestId, selectedTechId, detail, technicians, onAssigned, isReassignMode]);
+  }, [requestId, selectedTechId, detail, technicians, onAssigned, isReassignMode, refreshDetail]);
 
   const activeTechnicians = technicians.filter((t) => t.isActive);
+  // The visit the office shows as current — the same one the technician's phone shows.
+  const visitView = detail ? sheetVisitView(detail) : null;
+  const statusButtons = detail
+    ? allowedTransitions(detail.status as RequestStatus).filter(
+        (next) => !visitView?.hiddenTransitions.includes(next),
+      )
+    : [];
   const isTerminalStatus =
     detail?.status === 'completed' || detail?.status === 'cancelled';
   const scheduleCanSave = detail
@@ -1068,11 +1128,26 @@ export function RequestDetailSheet({
                 key={detail.id}
                 requestId={detail.id}
                 technicians={technicians}
-                refreshKey={[detail.status, detail.assignedTo, detail.arrivalWindowStart, detail.scheduledDate].join('|')}
+                refreshKey={[detail.status, detail.assignedTo, detail.arrivalWindowStart, detail.scheduledDate, detail.currentVisit.kind].join('|')}
                 terminal={detail.status === 'completed' || detail.status === 'cancelled'}
                 preferredDay={
-                  scheduleInputsFrom(detail.scheduledDate, detail.arrivalWindowStart, detail.arrivalWindowEnd).date || null
+                  scheduleInputsFrom(
+                    visitView?.mode === 'request' ? detail.scheduledDate : null,
+                    visitView?.arrivalWindowStart ?? null,
+                    visitView?.arrivalWindowEnd ?? null,
+                  ).date || null
                 }
+                addSignal={nextVisitSignal}
+                prefillTechnicianIds={
+                  detail.currentVisit.kind === 'ended' && detail.currentVisit.technicianId
+                    ? [detail.currentVisit.technicianId]
+                    : []
+                }
+                nextVisit={visitView?.mode === 'ended'}
+                onChanged={() => {
+                  void refreshDetail();
+                  onAssigned();
+                }}
               />
 
               <section>
@@ -1264,7 +1339,22 @@ export function RequestDetailSheet({
               {/* Assignment — hidden for terminal requests (completed/
                   cancelled), where neither assign nor reassign is permitted. */}
               {detail.status !== 'completed' &&
-                detail.status !== 'cancelled' && (
+                detail.status !== 'cancelled' && visitView && !visitView.requestControls && (
+              <section>
+                <h3 className="text-sm font-semibold mb-2">Assignment</h3>
+                <div className="rounded-md border p-3 space-y-2">
+                  {visitView.technicianName && (
+                    <p className="text-sm">
+                      {visitView.mode === 'ended' ? 'Was booked with: ' : 'Currently assigned to: '}
+                      <span className="font-medium">{visitView.technicianName}</span>
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">{visitView.notice}</p>
+                </div>
+              </section>
+              )}
+              {detail.status !== 'completed' &&
+                detail.status !== 'cancelled' && visitView?.requestControls && (
               <section>
                 <h3 className="text-sm font-semibold mb-2">Assignment</h3>
                 <div className="rounded-md border p-3 space-y-3">
@@ -1428,16 +1518,33 @@ export function RequestDetailSheet({
                     <span className="text-xs text-muted-foreground">
                       Move this request to:
                     </span>
+                    {visitView?.mode === 'ended' && (
+                      <p className="text-xs text-muted-foreground">{visitView.notice}</p>
+                    )}
                     <div className="flex flex-wrap gap-2">
-                      {allowedTransitions(detail.status as RequestStatus).map(
-                        (next) => (
+                      {visitView?.mode === 'ended' && (
+                        <Button
+                          size="sm"
+                          disabled={isPatching}
+                          onClick={() => setNextVisitSignal((n) => n + 1)}
+                        >
+                          Schedule next visit
+                        </Button>
+                      )}
+                      {statusButtons.map(
+                        (next, index) => (
                           <Button
                             key={next}
                             size="sm"
+                            // One filled button per row: the first forward step
+                            // (none when "Schedule next visit" leads).
                             variant={
-                              next === 'cancelled' || next === 'on_hold'
-                                ? 'outline'
-                                : 'default'
+                              index === 0 &&
+                              visitView?.mode !== 'ended' &&
+                              next !== 'cancelled' &&
+                              next !== 'on_hold'
+                                ? 'default'
+                                : 'outline'
                             }
                             aria-expanded={next === 'on_hold' ? holdOpen : undefined}
                             disabled={isPatching}
@@ -1547,7 +1654,7 @@ export function RequestDetailSheet({
                   )}
 
                   <div className="space-y-2">
-                    {!isTerminalStatus && (
+                    {!isTerminalStatus && visitView?.requestControls && (
                       <>
                         <span className="text-xs text-muted-foreground">
                           Scheduled service date &amp; arrival window:
@@ -1614,15 +1721,20 @@ export function RequestDetailSheet({
                       </>
                     )}
                     {formatArrivalWindow(
-                      detail.arrivalWindowStart,
-                      detail.arrivalWindowEnd,
+                      visitView?.arrivalWindowStart ?? null,
+                      visitView?.arrivalWindowEnd ?? null,
                     ) && (
                       <p className="text-xs text-muted-foreground">
-                        Arrival window:{" "}
-                        <span className="font-medium text-foreground">
+                        {visitView?.mode === 'ended' ? 'Ended visit:' : 'Arrival window:'}{" "}
+                        <span
+                          className={cn(
+                            'font-medium text-foreground',
+                            visitView?.mode === 'ended' && 'text-muted-foreground line-through',
+                          )}
+                        >
                           {formatArrivalWindow(
-                            detail.arrivalWindowStart,
-                            detail.arrivalWindowEnd,
+                            visitView?.arrivalWindowStart ?? null,
+                            visitView?.arrivalWindowEnd ?? null,
                           )}
                         </span>
                       </p>
@@ -1637,7 +1749,7 @@ export function RequestDetailSheet({
                   open={cancelConfirmOpen}
                   onOpenChange={(o) => { if (!o && !isPatching) setCancelConfirmOpen(false); }}
                   title="Cancel this request?"
-                  description="The technician will see it as cancelled."
+                  description={cancelRequestDescription(Boolean(detail.assignedTo))}
                   confirmLabel="Cancel request"
                   confirmingLabel="Cancelling…"
                   cancelLabel="Keep request"

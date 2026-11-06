@@ -111,8 +111,20 @@ export async function listAppointments(organizationId: string, requestId: string
 }
 
 export type AddAppointmentResult =
-  | AppointmentRecord
+  /** `resumed`: the request was on hold (a hold ends the visit) and this visit took it back to scheduled. */
+  | (AppointmentRecord & { readonly resumed?: true })
   | { readonly reason: "request_not_found" | "request_cancelled" | "request_completed" | "technician_not_found" | "time_off" | "conflict" };
+
+/** The next visit on a native request a hold ended resumes it: on_hold → scheduled,
+ * hold fields cleared, only if THIS transaction wrote the visit. */
+function resumeHeldRequest(organizationId: string, requestId: string, appointmentId: string) {
+  return db.execute(sql`UPDATE service_requests SET status = 'scheduled'::request_status,
+      hold_reason = NULL, follow_up_date = NULL, updated_at = now()
+    WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid
+      AND status = 'on_hold'::request_status AND fieldpulse_job_id IS NULL AND hcp_job_id IS NULL
+      AND ${landed(organizationId, appointmentId)}
+    RETURNING id`);
+}
 
 export async function addAppointment(
   organizationId: string, requestId: string, input: AppointmentInput, actorUserId: string,
@@ -132,6 +144,11 @@ export async function addAppointment(
   const end = new Date(input.arrivalWindowEnd).toISOString();
   if (await anyTimeOff(organizationId, ordered, new Date(start), new Date(end))) return { reason: "time_off" };
 
+  // On hold: this visit is the "next visit" the office plans after a hold, so
+  // the same batch resumes the request. Lock first (request -> visit -> rows):
+  // the resume UPDATE needs the row lock FOR SHARE alone would have to upgrade.
+  const resume = status === "on_hold";
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const existing = await db.select({ appointmentNumber: appointments.appointmentNumber }).from(appointments)
       .where(withTenant(appointments, organizationId, eq(appointments.serviceRequestId, requestId)));
@@ -141,7 +158,8 @@ export async function addAppointment(
       // FOR SHARE on the request row: a concurrent cancel either commits first
       // (the re-checked status excludes the row, nothing is inserted) or waits
       // for this batch, after which its trigger cancels the new visit too.
-      const [inserted] = await db.batch([
+      const results = await db.batch([
+        ...(resume ? [lockRequest(organizationId, requestId)] : []),
         db.execute(sql`INSERT INTO appointments (id, organization_id, service_request_id, appointment_number,
             scheduled_date, starts_at, ends_at, arrival_window_start, arrival_window_end, special_instructions)
           SELECT ${id}::uuid, r.organization_id, r.id, ${appointmentNumber}::smallint,
@@ -152,7 +170,10 @@ export async function addAppointment(
           FOR SHARE
           RETURNING id`),
         insertAssignments(organizationId, id, ordered, actorUserId),
-      ]);
+        ...(resume ? [resumeHeldRequest(organizationId, requestId, id)] : []),
+      ] as never) as unknown as readonly { readonly rows: readonly unknown[] }[];
+      const inserted = results[resume ? 1 : 0]!;
+      const resumed = resume && (results[3]?.rows.length ?? 0) > 0;
       if (inserted.rows.length === 0) {
         // Time off can land between the pre-check and the insert.
         if (await anyTimeOff(organizationId, ordered, new Date(start), new Date(end))) return { reason: "time_off" };
@@ -162,7 +183,7 @@ export async function addAppointment(
       }
       const record = await getAppointment(organizationId, requestId, id);
       if (!record) throw new Error("Visit vanished after insert");
-      return record;
+      return resumed ? { ...record, resumed: true } : record;
     } catch (error: unknown) {
       if (isUniqueViolation(error, "appointments_request_number_unique") && attempt === 0) continue;
       if (isUniqueViolation(error)) return { reason: "conflict" };

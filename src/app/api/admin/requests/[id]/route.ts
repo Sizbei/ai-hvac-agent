@@ -20,8 +20,11 @@ import {
 } from "@/lib/integrations/fieldpulse/job-sync";
 import { syncJobNoteToHcp } from "@/lib/integrations/housecall-pro/note-sync";
 import { syncNoteToFieldpulse } from "@/lib/integrations/fieldpulse/note-sync";
+import { readVisitEnded } from "@/lib/admin/current-visit";
 import {
   MANUAL_TARGET_STATUSES,
+  RESUME_TARGET_STATUSES,
+  transitionRefusedMessage,
   HOLD_REASONS,
   type HoldReason,
   type RequestStatus,
@@ -185,17 +188,35 @@ export async function PATCH(
       const target = parsed.data.status as (typeof MANUAL_TARGET_STATUSES)[number];
       const invalid = (from: string) =>
         errorResponse(
-          `Cannot change status to '${target}' from '${from}'`,
+          transitionRefusedMessage(from),
           "INVALID_TRANSITION",
           409,
+          { currentStatus: from },
         );
+      const isResume = (RESUME_TARGET_STATUSES as readonly string[]).includes(target);
       // A NATIVE request's hold and completion follow the technician rules
       // (the hold ends the active visit; completion refuses while a technician
       // is still working). Synced requests keep updateRequestStatus.
       const state =
-        target === "on_hold" || target === "completed"
+        target === "on_hold" || target === "completed" || isResume
           ? await readRequestState(session.organizationId, id)
           : null;
+      // M3a: a hold ENDS the visit and the office plans the next one. A bare
+      // status resume would leave the request pointing at the ended visit
+      // (the technician's phone no longer lists it), so it is refused here and
+      // the sheet offers "Schedule next visit" (POST …/appointments) instead.
+      if (
+        isResume &&
+        state?.native &&
+        state.status === "on_hold" &&
+        (await readVisitEnded(session.organizationId, id))
+      ) {
+        return errorResponse(
+          "This visit ended when the request was put on hold. Schedule the next visit instead.",
+          "VISIT_ENDED",
+          409,
+        );
+      }
       let result: { readonly ok: true; readonly status: RequestStatus };
       if (state?.native && target === "on_hold") {
         const active = await findActiveVisit(session.organizationId, id);

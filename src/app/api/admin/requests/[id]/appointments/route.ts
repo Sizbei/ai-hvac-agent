@@ -4,6 +4,7 @@ import { listAppointments, addAppointment } from "@/lib/admin/appointment-querie
 import { appointmentInputSchema } from "@/lib/admin/appointment-types";
 import { WINDOW_ENDED_MESSAGE, instantHasPassed } from "@/lib/admin/window-ended";
 import { logAudit } from "@/lib/admin/audit";
+import { recordStatusEvent } from "@/lib/admin/status-events";
 import {
   successResponse,
   errorResponse,
@@ -139,6 +140,28 @@ export async function POST(
     }).catch((auditError: unknown) => {
       logger.error({ error: auditError }, "Failed to audit visit creation");
     });
+
+    // The next visit after a hold resumed the request (on_hold → scheduled).
+    if (result.resumed) {
+      await recordStatusEvent({
+        organizationId: session.organizationId,
+        serviceRequestId: id,
+        fromStatus: "on_hold",
+        toStatus: "scheduled",
+        actorType: "human",
+        actorId: session.userId,
+      });
+      await logAudit({
+        organizationId: session.organizationId,
+        userId: session.userId,
+        action: "request_status_changed",
+        entity: "service_request",
+        entityId: id,
+        details: JSON.stringify({ status: "scheduled" }),
+      }).catch((auditError: unknown) => {
+        logger.error({ error: auditError }, "Failed to audit request resume");
+      });
+    }
 
     return successResponse({ appointment: result }, 201);
   } catch (error: unknown) {

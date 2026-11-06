@@ -129,6 +129,13 @@ vi.mock('drizzle-orm', () => ({
 // Mock schema tables — provide column-like objects
 vi.mock('@/lib/db/schema', () => ({
   requestStatusEvents: { id: 'rse.id' },
+  appointments: {
+    id: 'ap.id',
+    organizationId: 'ap.organizationId',
+    serviceRequestId: 'ap.serviceRequestId',
+    arrivalWindowStart: 'ap.arrivalWindowStart',
+    arrivalWindowEnd: 'ap.arrivalWindowEnd',
+  },
   serviceRequests: {
     id: 'sr.id',
     status: 'sr.status',
@@ -1228,6 +1235,56 @@ describe('getDispatchBoard', () => {
     expect(board.unassigned).toEqual([]);
   });
 
+  it('places a request by its current visit: a later visit in its lead\'s column, an ended one shown as ended (round-2 P0)', async () => {
+    const visit = (o: Record<string, unknown>) =>
+      JSON.stringify({ id: 'v', number: 1, start: null, end: null, ended: false, leadId: null, leadStatus: null, leadName: null, ...o });
+    selectResolutions = [
+      [
+        { id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() },
+        { id: TECH_B, name: 'Bob', email: 'b@x.io', isActive: true, createdAt: new Date() },
+      ],
+      // Request-column feed: j2's current visit is #2, so this copy is dropped.
+      [
+        jobRow({ id: 'j1', referenceNumber: 'HVAC-1', assignedTo: TECH_A, officeVisit: null }),
+        jobRow({ id: 'j2', referenceNumber: 'HVAC-2', assignedTo: TECH_A, officeVisit: visit({ number: 2 }) }),
+      ],
+      // Visit feed.
+      [
+        jobRow({
+          id: 'j2', referenceNumber: 'HVAC-2', assignedTo: TECH_A, assignedToName: 'Ann',
+          officeVisit: visit({
+            id: 'v2', number: 2, start: '2026-06-10T16:00:00+00:00', end: '2026-06-10T20:00:00+00:00',
+            leadId: TECH_B, leadStatus: 'assigned', leadName: 'Bob',
+          }),
+        }),
+        jobRow({
+          id: 'j3', referenceNumber: 'HVAC-3', assignedTo: TECH_A, status: 'on_hold',
+          officeVisit: visit({
+            id: 'v1', number: 1, ended: true, start: '2026-06-10T13:00:00+00:00', end: '2026-06-10T17:00:00+00:00',
+            leadId: TECH_A, leadStatus: 'cancelled', leadName: 'Ann',
+          }),
+        }),
+      ],
+    ];
+
+    const board = await getDispatchBoard(ORG_ID, '2026-06-10');
+    const colA = board.columns.find((c) => c.technicianId === TECH_A)!;
+    const colB = board.columns.find((c) => c.technicianId === TECH_B)!;
+    expect(colA.jobs.map((j) => [j.referenceNumber, j.visitEnded ?? false])).toEqual([
+      ['HVAC-1', false],
+      ['HVAC-3', true],
+    ]);
+    expect(colB.jobs).toHaveLength(1);
+    expect(colB.jobs[0]).toMatchObject({
+      referenceNumber: 'HVAC-2',
+      visitNumber: 2,
+      assignedToName: 'Bob',
+      arrivalWindowStart: '2026-06-10T16:00:00.000Z',
+      arrivalWindowEnd: '2026-06-10T20:00:00.000Z',
+    });
+    expect(board.unassigned).toEqual([]);
+  });
+
   it('falls back to today for an invalid date string', async () => {
     selectResolutions = [[], []];
     const board = await getDispatchBoard(ORG_ID, 'not-a-date');
@@ -1310,6 +1367,31 @@ describe('getSchedulingCalendar', () => {
     // S4: availability now travels with the calendar (drives out-of-hours
     // shading + the conflict warning). None configured in this fixture → empty.
     expect(calendar.availability).toEqual([]);
+  });
+
+  it('puts a later visit in its lead\'s lane, never the request column\'s technician (round-2 P0)', async () => {
+    // select 0 = techs; 1 = placed by request; 2 = unscheduled; 3 = availability; 4 = placed by visit.
+    selectResolutions = [
+      [
+        { id: TECH_A, name: 'Ann', email: 'a@x.io', isActive: true, createdAt: new Date() },
+        { id: TECH_B, name: 'Bob', email: 'b@x.io', isActive: true, createdAt: new Date() },
+      ],
+      [],
+      [],
+      [],
+      [
+        placedRow({
+          id: 'j2', referenceNumber: 'HVAC-2', assignedTo: TECH_A,
+          officeVisit: JSON.stringify({
+            id: 'v2', number: 2, start: '2026-06-08T16:00:00Z', end: '2026-06-08T20:00:00Z',
+            ended: false, leadId: TECH_B, leadStatus: 'assigned', leadName: 'Bob',
+          }),
+        }),
+      ],
+    ];
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    expect(calendar.lanes.find((l) => l.technicianId === TECH_A)!.jobs).toEqual([]);
+    expect(calendar.lanes.find((l) => l.technicianId === TECH_B)!.jobs.map((j) => j.visitNumber)).toEqual([2]);
   });
 
   it('carries technician availability for out-of-hours shading (S4)', async () => {

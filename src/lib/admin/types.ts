@@ -21,8 +21,27 @@ export interface AdminRequest {
   readonly syncedSource: 'fieldpulse' | 'housecall' | null;
 }
 
+/**
+ * Which visit the office shows as current (current-visit.ts). "request": the
+ * request's own technician/window columns. "visit": a later visit (#2+) is the
+ * active one. "ended": a hold ended the visit and nothing is booked yet.
+ */
+export type OfficePlacement =
+  | { readonly kind: 'request' }
+  | {
+      readonly kind: 'visit' | 'ended';
+      readonly appointmentId: string;
+      readonly appointmentNumber: number;
+      readonly arrivalWindowStart: string | null;
+      readonly arrivalWindowEnd: string | null;
+      readonly technicianId: string | null;
+      readonly technicianName: string | null;
+    };
+
 // Request detail (includes decrypted PII + transcript)
 export interface AdminRequestDetail extends AdminRequest {
+  /** The visit the office shows as current; the technician's phone reads the same one. */
+  readonly currentVisit: OfficePlacement;
   readonly customerPhone: string | null;
   readonly customerEmail: string | null;
   readonly address: string | null;
@@ -200,6 +219,10 @@ export interface DashboardRequest {
   readonly createdAt: string;
   /** Non-null when this job was imported from FieldPulse or Housecall Pro. */
   readonly syncedSource: 'fieldpulse' | 'housecall' | null;
+  /** Set when the card shows a visit other than the request's first one (#2+). */
+  readonly visitNumber?: number;
+  /** A hold ended this visit and nothing is booked yet: shown, never dragged. */
+  readonly visitEnded?: boolean;
 }
 
 /** Max rows any single dashboard list returns. A list at this length is shown

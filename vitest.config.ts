@@ -23,6 +23,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/field-invoice.test.ts",
   // Technician getting-started guide: derivation + stamps against the dev DB (two throwaway orgs).
   "tests/integration/tech-guide.test.ts",
+  // Hold → schedule next visit: office placement vs the technician's phone (one throwaway org).
+  "tests/integration/hold-next-visit.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the
