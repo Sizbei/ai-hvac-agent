@@ -42,6 +42,17 @@ export interface SyncedArAging {
   readonly totalOutstandingCents: number;
 }
 
+export interface OperationsSamples {
+  /** Requests behind responseTimeSeconds.current. */
+  readonly response: number;
+  /** Invoices behind timeToPaidSeconds.current. */
+  readonly timeToPaid: number;
+  /** Invoices paid in the window within an hour of being issued. */
+  readonly paidAtVisit: number;
+  /** Requests behind firstResponseHumanSeconds.current. */
+  readonly firstResponseHuman: number;
+}
+
 export interface OperationsMetrics {
   /** The selected window, in days — echoed back for the page header/labels. */
   readonly rangeDays: number;
@@ -53,7 +64,12 @@ export interface OperationsMetrics {
   readonly onSiteSeconds: number | null;
 
   // 2. AR days for invoicing.
-  /** Avg seconds from native invoice created → paid. Synced FP/HCP excluded. */
+  /**
+   * MEDIAN seconds from a native invoice being issued (issuedAt, else
+   * createdAt) to its final payment, for invoices paid in the window. Invoices
+   * paid within PAID_AT_VISIT_SECONDS of issue are left out (collected at the
+   * visit) and counted in `samples.paidAtVisit`. Synced FP/HCP excluded.
+   */
   readonly timeToPaidSeconds: MetricTrend;
   /**
    * Point-in-time aging of NATIVE open receivables (independent of window).
@@ -88,10 +104,13 @@ export interface OperationsMetrics {
   readonly importedJobsCurrent: number;
 
   // 4. Waiting times.
-  /** Avg seconds created → a HUMAN dispatcher assigns the job. The headline. */
+  /** MEDIAN seconds created → a HUMAN dispatcher assigns the job. The headline. */
   readonly firstResponseHumanSeconds: MetricTrend;
-  /** Avg seconds created → auto-dispatch assigns. Muted secondary; current window. */
+  /** Avg seconds created → auto-dispatch assigns (autoAssigned requests only). Muted secondary; current window. */
   readonly firstResponseSystemSeconds: number | null;
+
+  /** How many items stand behind each current-window figure (shown on the cards). */
+  readonly samples: OperationsSamples;
 
   // 5. Dispatch health (7-day rollup: real vs shadow outcomes + commit rate).
   readonly dispatchHealth: DispatchOutcomeRollup;

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
+import type { OperationsSamples } from '@/lib/admin/operations-metrics-types';
 
 export interface MetricTrend {
   readonly current: number | null;
@@ -62,6 +63,8 @@ export interface OperationsMetrics {
   readonly importedJobsCurrent: number;
   readonly firstResponseHumanSeconds: MetricTrend;
   readonly firstResponseSystemSeconds: number | null;
+  /** How many items stand behind each current-window figure. */
+  readonly samples: OperationsSamples;
   readonly dispatchHealth: DispatchOutcomeRollup;
 }
 
@@ -161,7 +164,7 @@ export function useOperationsMetrics(
         );
         if (!active) return;
         if (!res.ok) {
-          setError('Failed to load operations metrics');
+          setError("Couldn't load the operations numbers.");
           return;
         }
         const body = (await res.json()) as {
@@ -177,7 +180,7 @@ export function useOperationsMetrics(
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
-        if (active) setError('Could not connect to server. Please try again.');
+        if (active) setError("Couldn't reach the server.");
       } finally {
         if (active) {
           setIsLoading(false);

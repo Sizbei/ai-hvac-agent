@@ -90,6 +90,21 @@ export function assignedAtCreation(
   return secondsBetween(toDate(firstAt), toDate(createdAt)) < ASSIGNED_AT_CREATION_SECONDS;
 }
 
+/**
+ * An invoice paid this soon after it was issued was collected at the visit
+ * (the technician wrote it up and took payment on the spot). It says nothing
+ * about how long customers take to pay a bill, and mixing those in made the
+ * headline read "7 s". They are counted separately as "paid at the visit".
+ */
+export const PAID_AT_VISIT_SECONDS = 60 * 60;
+
+export function paidAtVisit(
+  paidAt: string | Date,
+  issuedAt: string | Date,
+): boolean {
+  return secondsBetween(toDate(paidAt), toDate(issuedAt)) < PAID_AT_VISIT_SECONDS;
+}
+
 type EventRow = {
   readonly firstAt: string | Date;
   readonly createdAt: string | Date;
@@ -196,6 +211,7 @@ export async function getOperationsMetrics(
         actorType: requestStatusEvents.actorType,
         firstAt: sql<string>`min(${requestStatusEvents.at})`,
         createdAt: serviceRequests.createdAt,
+        autoAssigned: serviceRequests.autoAssigned,
       })
       .from(requestStatusEvents)
       .innerJoin(
@@ -219,9 +235,11 @@ export async function getOperationsMetrics(
         requestStatusEvents.serviceRequestId,
         requestStatusEvents.actorType,
         serviceRequests.createdAt,
+        serviceRequests.autoAssigned,
       ),
 
-    // Time to paid: native paid invoices + their paid-date (last succeeded pay).
+    // Time to paid: native paid invoices + their paid-date (last succeeded pay),
+    // measured from when the invoice was ISSUED (issuedAt, else createdAt).
     // Bounded to payments in [prevFrom, toDate_) so the fetch doesn't scan ALL
     // paid history on every load. Result-preserving: the paid-date is the MAX
     // succeeded payment, and JS keeps only paid-dates inside a window — an
@@ -230,7 +248,7 @@ export async function getOperationsMetrics(
     db
       .select({
         firstAt: sql<string>`max(${payments.createdAt})`,
-        createdAt: invoices.createdAt,
+        createdAt: sql<string>`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`,
       })
       .from(invoices)
       .innerJoin(payments, eq(payments.invoiceId, invoices.id))
@@ -246,7 +264,7 @@ export async function getOperationsMetrics(
           lt(payments.createdAt, toDate_),
         ),
       )
-      .groupBy(invoices.id, invoices.createdAt),
+      .groupBy(invoices.id, invoices.issuedAt, invoices.createdAt),
 
     // On-site duration: avg minutes over closed time entries in the CURRENT window.
     db
@@ -390,23 +408,38 @@ export async function getOperationsMetrics(
     toDate_,
     prevFrom,
   );
+  // Median, not mean: over a long range one request left waiting for weeks
+  // would otherwise drag the headline far from a typical wait.
   const firstResponseHumanSeconds: MetricTrend = {
-    current: average(humanBuckets.current),
-    previous: average(humanBuckets.previous),
+    current: median(humanBuckets.current),
+    previous: median(humanBuckets.previous),
   };
+  // Auto-dispatch only: office bookings that pick a technician at creation are
+  // also tagged "system" but are not a dispatch response (they read "1 s").
   const firstResponseSystemSeconds = average(
     bucketDurations(
-      firstAssignments.filter((r) => r.actorType === "system"),
+      firstAssignments.filter((r) => r.actorType === "system" && r.autoAssigned === true),
       fromDate,
       toDate_,
       prevFrom,
     ).current,
   );
 
-  const paidBuckets = bucketDurations(paidRows, fromDate, toDate_, prevFrom);
+  const paidLater = bucketDurations(
+    paidRows.filter((r) => !paidAtVisit(r.firstAt, r.createdAt)),
+    fromDate,
+    toDate_,
+    prevFrom,
+  );
+  const paidAtVisitCount = bucketDurations(
+    paidRows.filter((r) => paidAtVisit(r.firstAt, r.createdAt)),
+    fromDate,
+    toDate_,
+    prevFrom,
+  ).current.length;
   const timeToPaidSeconds: MetricTrend = {
-    current: average(paidBuckets.current),
-    previous: average(paidBuckets.previous),
+    current: median(paidLater.current),
+    previous: median(paidLater.previous),
   };
 
   const avgMinutes = toNumberOrNull(onSiteRow[0]?.avgMinutes);
@@ -455,6 +488,12 @@ export async function getOperationsMetrics(
     importedJobsCurrent,
     firstResponseHumanSeconds,
     firstResponseSystemSeconds,
+    samples: {
+      response: responseBuckets.current.length,
+      timeToPaid: paidLater.current.length,
+      paidAtVisit: paidAtVisitCount,
+      firstResponseHuman: humanBuckets.current.length,
+    },
     dispatchHealth,
   };
 }

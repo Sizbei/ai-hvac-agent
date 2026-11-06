@@ -104,6 +104,7 @@ vi.mock('@/lib/db/schema', () => ({
   serviceRequests: {
     id: 'serviceRequests.id',
     createdAt: 'serviceRequests.createdAt',
+    autoAssigned: 'serviceRequests.autoAssigned',
     organizationId: 'serviceRequests.org',
     fieldpulseJobId: 'serviceRequests.fieldpulseJobId',
     hcpJobId: 'serviceRequests.hcpJobId',
@@ -140,7 +141,11 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
-import { getOperationsMetrics, assignedAtCreation } from './operations-metrics-queries';
+import {
+  getOperationsMetrics,
+  assignedAtCreation,
+  paidAtVisit,
+} from './operations-metrics-queries';
 
 const ORG = 'org-1';
 const FROM = new Date('2026-06-01T00:00:00Z');
@@ -192,7 +197,7 @@ describe('getOperationsMetrics', () => {
         { serviceRequestId: 'r-h1', actorType: 'human', firstAt: '2026-06-05T00:00:00Z', createdAt: new Date('2026-06-04T00:00:00Z') }, // 86400 cur
         { serviceRequestId: 'r-h2', actorType: 'human', firstAt: '2026-06-15T00:00:00Z', createdAt: new Date('2026-06-14T00:00:00Z') }, // 86400 cur
         { serviceRequestId: 'r-h3', actorType: 'human', firstAt: '2026-05-10T00:00:00Z', createdAt: new Date('2026-05-09T00:00:00Z') }, // 86400 prev
-        { serviceRequestId: 'r-s1', actorType: 'system', firstAt: '2026-06-05T00:00:42Z', createdAt: new Date('2026-06-05T00:00:00Z') }, // 42 cur
+        { serviceRequestId: 'r-s1', actorType: 'system', autoAssigned: true, firstAt: '2026-06-05T00:00:42Z', createdAt: new Date('2026-06-05T00:00:00Z') }, // 42 cur
       ],
       paid: [
         { firstAt: '2026-06-20T00:00:00Z', createdAt: new Date('2026-06-14T00:00:00Z') }, // 518400 cur
@@ -243,6 +248,69 @@ describe('getOperationsMetrics', () => {
     expect(m.firstResponseHumanSeconds.current).toBe(600);
   });
 
+  it('time to paid leaves out invoices paid at the visit (the "7 s" headline) and counts them separately', async () => {
+    queueAll({
+      paid: [
+        // Default org on dev: three invoices paid 1.5 s, 1.5 s and 19 s after issue.
+        { firstAt: '2026-06-17T03:49:42.665Z', createdAt: '2026-06-17T03:49:41.117Z' },
+        { firstAt: '2026-06-17T03:49:43.559Z', createdAt: '2026-06-17T03:49:42.002Z' },
+        { firstAt: '2026-06-12T17:23:10.828Z', createdAt: '2026-06-12T17:22:51.629Z' },
+      ],
+    });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    expect(m.timeToPaidSeconds.current).toBeNull();
+    expect(m.samples.paidAtVisit).toBe(3);
+    expect(m.samples.timeToPaid).toBe(0);
+  });
+
+  it('time to paid is the MEDIAN, so one very late payer does not drag a long range', async () => {
+    queueAll({
+      paid: [
+        { firstAt: '2026-06-05T00:00:00Z', createdAt: '2026-06-01T00:00:00Z' }, // 4 days
+        { firstAt: '2026-06-10T00:00:00Z', createdAt: '2026-06-04T00:00:00Z' }, // 6 days
+        { firstAt: '2026-06-28T00:00:00Z', createdAt: '2026-01-01T00:00:00Z' }, // ~178 days
+      ],
+    });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    expect(m.timeToPaidSeconds.current).toBe(6 * 86400);
+    expect(m.samples.timeToPaid).toBe(3);
+    expect(m.samples.paidAtVisit).toBe(0);
+  });
+
+  it('time to paid starts at the issue date (issuedAt, else createdAt)', async () => {
+    queueAll({});
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const paidCols = JSON.stringify(captured[2]?.columns ?? {});
+    expect(paidCols).toContain('coalesce(');
+    expect(paidCols).toContain('invoices.issuedAt');
+  });
+
+  it('paidAtVisit uses a one-hour cut-off', () => {
+    expect(paidAtVisit('2026-06-05T00:59:59Z', '2026-06-05T00:00:00Z')).toBe(true);
+    expect(paidAtVisit('2026-06-05T01:00:00Z', '2026-06-05T00:00:00Z')).toBe(false);
+  });
+
+  it('auto-dispatch counts autopilot assignments only, not office bookings tagged system', async () => {
+    queueAll({
+      assigned: [
+        { serviceRequestId: 'r-office', actorType: 'system', autoAssigned: false, firstAt: '2026-06-05T00:00:01Z', createdAt: new Date('2026-06-05T00:00:00Z') },
+        { serviceRequestId: 'r-auto', actorType: 'system', autoAssigned: true, firstAt: '2026-06-06T00:00:20Z', createdAt: new Date('2026-06-06T00:00:00Z') },
+      ],
+    });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    expect(m.firstResponseSystemSeconds).toBe(20);
+  });
+
+  it('reports how many requests stand behind response time', async () => {
+    queueAll({
+      inProgress: [
+        { firstAt: '2026-06-10T00:00:00Z', createdAt: new Date('2026-04-12T00:00:00Z') },
+      ],
+    });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    expect(m.samples.response).toBe(1);
+  });
+
   it('assignedAtCreation uses a 60 s cut-off', () => {
     expect(assignedAtCreation('2026-06-05T00:00:59Z', '2026-06-05T00:00:00Z')).toBe(true);
     expect(assignedAtCreation('2026-06-05T00:01:00Z', '2026-06-05T00:00:00Z')).toBe(false);
@@ -252,7 +320,7 @@ describe('getOperationsMetrics', () => {
     queueAll({
       assigned: [
         // Same request: system assigned it in 5s, a dispatcher reassigned 6h later.
-        { serviceRequestId: 'r-x', actorType: 'system', firstAt: '2026-06-05T00:00:05Z', createdAt: new Date('2026-06-05T00:00:00Z') },
+        { serviceRequestId: 'r-x', actorType: 'system', autoAssigned: true, firstAt: '2026-06-05T00:00:05Z', createdAt: new Date('2026-06-05T00:00:00Z') },
         { serviceRequestId: 'r-x', actorType: 'human', firstAt: '2026-06-05T06:00:00Z', createdAt: new Date('2026-06-05T00:00:00Z') },
       ],
     });

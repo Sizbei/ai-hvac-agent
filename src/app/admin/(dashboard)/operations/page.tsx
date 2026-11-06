@@ -25,28 +25,19 @@ import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import {
+  formatDuration,
+  responseSublabel,
+  timeToPaidSublabel,
+  dispatcherSublabel,
+  dispatchHealthSublabel,
+} from '@/lib/admin/operations-format';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
   { label: 'Last 90 days', days: 90 },
   { label: 'Last 365 days', days: 365 },
 ] as const;
-
-/** Adaptive duration formatter: seconds → the most readable unit. */
-function formatDuration(seconds: number | null): string {
-  if (seconds === null) return '—';
-  const s = Math.abs(seconds);
-  if (s < 90) return `${Math.round(s)} s`;
-  if (s < 90 * 60) return `${Math.round(s / 60)} min`;
-  if (s < 48 * 3600) return `${(s / 3600).toFixed(1)} hrs`;
-  return `${(s / 86400).toFixed(1)} days`;
-}
-
-/** "Response time" sublabel: what the median measures, plus time on site when known. */
-function responseSublabel(onSiteSeconds: number | null): string {
-  const base = 'Median from booking to a technician on site';
-  return onSiteSeconds === null ? base : `${base} · ${formatDuration(onSiteSeconds)} avg on site`;
-}
 
 interface DeltaShape {
   readonly text: string;
@@ -90,7 +81,7 @@ export default function OperationsPage() {
     return { from: from.toISOString(), to: to.toISOString() };
   }, [days]);
 
-  const { metrics, isLoading, isRevalidating, error } = useOperationsMetrics(range);
+  const { metrics, isLoading, isRevalidating, error, refetch } = useOperationsMetrics(range);
   const aging = metrics?.arAging;
   const agingTotal = aging?.nativeOutstandingCents ?? 0;
   const agingPct = (cents: number) =>
@@ -123,7 +114,12 @@ export default function OperationsPage() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span>{error}</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Try again
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -136,16 +132,16 @@ export default function OperationsPage() {
           delta={metrics ? toStatDelta(durationDelta(metrics.responseTimeSeconds), days) : undefined}
           intent="neutral"
           loading={isLoading}
-          sublabel={metrics ? responseSublabel(metrics.onSiteSeconds ?? null) : undefined}
+          sublabel={metrics ? responseSublabel(metrics) : undefined}
         />
         <StatCard
-          label="Avg time to paid"
+          label="Time to paid"
           icon={Wallet}
           value={metrics ? formatDuration(metrics.timeToPaidSeconds.current) : '—'}
           delta={metrics ? toStatDelta(durationDelta(metrics.timeToPaidSeconds), days) : undefined}
           intent="neutral"
           loading={isLoading}
-          sublabel="Your invoices only · synced FieldPulse/HCP excluded"
+          sublabel={metrics ? timeToPaidSublabel(metrics) : undefined}
         />
         <StatCard
           label="Requests booked"
@@ -156,7 +152,7 @@ export default function OperationsPage() {
           loading={isLoading}
           sublabel={
             metrics
-              ? `Native service requests · ${(
+              ? `Booked here · ${(
                   (metrics.jobsBooked.current ?? 0) / Math.max(1, metrics.rangeDays)
                 ).toFixed(1)} / day avg` +
                 ((metrics.importedJobsCurrent ?? 0) > 0
@@ -176,11 +172,7 @@ export default function OperationsPage() {
           delta={metrics ? toStatDelta(durationDelta(metrics.firstResponseHumanSeconds), days) : undefined}
           intent="neutral"
           loading={isLoading}
-          sublabel={
-            metrics
-              ? `Average wait for a dispatcher to assign a new request · auto-dispatch ${formatDuration(metrics.firstResponseSystemSeconds ?? null)}`
-              : undefined
-          }
+          sublabel={metrics ? dispatcherSublabel(metrics) : undefined}
         />
 
         <StatCard
@@ -193,11 +185,7 @@ export default function OperationsPage() {
           }
           intent="neutral"
           loading={isLoading}
-          sublabel={
-            metrics
-              ? `Commit rate (7d, real + preview) · ${metrics.dispatchHealth.real.total} real · ${metrics.dispatchHealth.shadow.total} preview · ${metrics.dispatchHealth.overrides} overrides`
-              : undefined
-          }
+          sublabel={metrics ? dispatchHealthSublabel(metrics.dispatchHealth) : undefined}
         />
       </StatStrip>
 
