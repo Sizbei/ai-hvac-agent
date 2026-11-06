@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { markupFromPrice, priceFromMarkup } from './pricebook-markup';
+import { markupFromPrice, markupInputAfterPriceEdit, priceFromMarkup } from './pricebook-markup';
 
 describe('priceFromMarkup', () => {
   it('prices cost plus markup', () => {
@@ -22,5 +22,17 @@ describe('markupFromPrice', () => {
   it('is 0 without cost or at/below cost', () => {
     expect(markupFromPrice(18500, 0)).toBe(0);
     expect(markupFromPrice(5000, 6000)).toBe(0);
+  });
+});
+
+describe('markupInputAfterPriceEdit', () => {
+  it('recomputes the markup when the price changes (cost 20, price 55 → 175)', () => {
+    expect(markupInputAfterPriceEdit(5500, 2000)).toBe('175');
+  });
+  it('clears the markup without a usable cost or price', () => {
+    expect(markupInputAfterPriceEdit(5500, 0)).toBe('');
+    expect(markupInputAfterPriceEdit(5500, null)).toBe('');
+    expect(markupInputAfterPriceEdit(null, 2000)).toBe('');
+    expect(markupInputAfterPriceEdit(1500, 2000)).toBe('');
   });
 });

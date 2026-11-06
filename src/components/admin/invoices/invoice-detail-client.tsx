@@ -33,7 +33,7 @@ import { RecordPaymentCard } from '@/components/admin/invoices/record-payment-ca
 import { FinalizeButton } from '@/components/admin/invoices/finalize-button';
 import { InvoiceCollectionsSide } from '@/components/admin/invoices/invoice-collections-side';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
-import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
+import { formatCentsExact, parseMoneyInput } from '@/lib/admin/money-format';
 import { rollUpMargin, computeMargin, fpDiscountCents, hasUncostedLines, UNCOSTED_MARGIN_NOTE } from '@/lib/admin/margin';
 import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
@@ -43,6 +43,7 @@ import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   canRecordPayment,
   canSendReminder,
+  centsToInputDollars,
   invoiceLinkAction,
   paymentMethodSummary,
   paymentStatusLabel,
@@ -228,10 +229,21 @@ export function InvoiceDetailClient({
   // ── MONEY HANDLERS (refund; recording lives in RecordPaymentCard) ─────────
 
   const handleRefund = useCallback(
-    async (paymentId: string, provider: string): Promise<void> => {
-      const amountCents = parseDollarsToCents(refundAmount);
+    async (paymentId: string, provider: string, refundableCents: number): Promise<void> => {
+      const parsed = parseMoneyInput(refundAmount);
+      if (!parsed.ok) {
+        setRefundError(parsed.error);
+        return;
+      }
+      const amountCents = parsed.cents;
       if (amountCents < 1) {
         setRefundError('Enter an amount greater than zero.');
+        return;
+      }
+      if (amountCents > refundableCents) {
+        setRefundError(
+          `That's more than the ${formatCentsExact(refundableCents)} left to refund on this payment.`,
+        );
         return;
       }
       setIsRefunding(true);
@@ -663,7 +675,8 @@ export function InvoiceDetailClient({
                               onClick={() => {
                                 setRefundFor(p.id);
                                 setRefundToken(mintKey());
-                                setRefundAmount('');
+                                // Pre-fill what's left to refund, like Record payment does.
+                                setRefundAmount(centsToInputDollars(p.amountCents - refunded));
                                 setRefundReason('customer_request');
                                 setRefundError(null);
                                 setRefundNotice(null);
@@ -704,7 +717,16 @@ export function InvoiceDetailClient({
                             only while still refundable — matches the button gate so a
                             fully-refunded payment can't keep an open form). */}
                         {canRefund && !invoice.syncedSource && refundable && refundFor === p.id && (
-                          <div className="mt-3 space-y-2 border-t pt-3">
+                          <form
+                            noValidate
+                            className="mt-3 space-y-2 border-t pt-3"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (!isRefunding) {
+                                void handleRefund(p.id, p.provider, p.amountCents - refunded);
+                              }
+                            }}
+                          >
                             <div className="flex flex-wrap items-end gap-2">
                               <div className="space-y-1">
                               <Label htmlFor={`refund-amount-${p.id}`} className="text-xs">
@@ -745,13 +767,14 @@ export function InvoiceDetailClient({
                                 </SelectContent>
                               </Select>
                               <Button
+                                type="submit"
                                 size="sm"
                                 disabled={isRefunding || !refundAmount}
-                                onClick={() => void handleRefund(p.id, p.provider)}
                               >
                                 {isRefunding ? 'Refunding…' : 'Confirm refund'}
                               </Button>
                               <Button
+                                type="button"
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => setRefundFor(null)}
@@ -762,7 +785,7 @@ export function InvoiceDetailClient({
                             {refundError && (
                               <p role="alert" className="text-xs text-destructive">{refundError}</p>
                             )}
-                          </div>
+                          </form>
                         )}
                       </div>
                     );

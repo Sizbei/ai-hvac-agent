@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import Link from 'next/link';
 import { Plus, Trash2, Copy, Check, Sparkles, BadgeCheck } from 'lucide-react';
 import {
   Dialog,
@@ -21,9 +22,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { parseDollarsToCents, formatCentsExact } from '@/lib/admin/money-format';
+import { formatCentsExact, parseMoneyInput } from '@/lib/admin/money-format';
 import { usePricebook, useTaxRates, type PricebookItem } from '@/hooks/use-pricebook';
-import { defaultTaxBps, draftOptionTotals } from '@/lib/admin/estimate-draft';
+import {
+  defaultTaxBps,
+  draftLinePriceError,
+  draftOptionTotals,
+  isEstimateDraftDirty,
+} from '@/lib/admin/estimate-draft';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import {
   EstimateCustomerPicker,
   type PickedCustomer,
@@ -111,6 +118,8 @@ export function EstimateCreateDialog({
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const [approvalUrl, setApprovalUrl] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
@@ -166,6 +175,8 @@ export function EstimateCreateDialog({
     setSendToCustomer(false);
     setError(null);
     setApprovalUrl(null);
+    setCreatedId(null);
+    setDiscardOpen(false);
     setCopied(false);
     setIsSuggesting(false);
     setSuggestNote(null);
@@ -304,6 +315,12 @@ export function EstimateCreateDialog({
       }
     }
 
+    const priceError = draftLinePriceError(options);
+    if (priceError) {
+      setError(priceError);
+      return;
+    }
+
     // Build the payload. Catalog lines submit only pricebookItemId (+ qty +
     // member-price toggle) — the SERVER re-snapshots name/price/cost. Manual lines
     // submit name + price.
@@ -321,7 +338,7 @@ export function EstimateCreateDialog({
             : {
                 name: l.name.trim(),
                 quantity: Math.max(1, parseInt(l.quantity, 10) || 1),
-                unitPriceCents: parseDollarsToCents(l.unitPrice),
+                unitPriceCents: manualUnitCents(l.unitPrice),
               },
         ),
     }));
@@ -351,12 +368,17 @@ export function EstimateCreateDialog({
       const body = await res.json().catch(() => ({ success: false }));
       if (res.ok && body.success) {
         setApprovalUrl(body.data.approvalUrl as string);
+        setCreatedId((body.data.estimateId as string | undefined) ?? null);
         onCreated?.();
       } else {
-        setError(body.error?.message ?? 'Failed to create estimate.');
+        setError(
+          res.status >= 500 || !body.error?.message
+            ? "Couldn't create the estimate. Please try again."
+            : body.error.message,
+        );
       }
     } catch {
-      setError('Could not connect to the server.');
+      setError("Couldn't reach the server. Please try again.");
     } finally {
       setIsSubmitting(false);
       submittingRef.current = false;
@@ -374,14 +396,30 @@ export function EstimateCreateDialog({
     }
   }
 
+  function close(): void {
+    onOpenChange(false);
+    reset();
+  }
+
+  // Esc, the X, a click outside and Cancel ask first when something was
+  // built — a half-made Good/Better/Best was lost to one Esc.
+  function requestClose(): void {
+    if (submittingRef.current) return;
+    if (
+      !approvalUrl &&
+      isEstimateDraftDirty({ pickedCustomer: pickedCustomer !== null, title, options })
+    ) {
+      setDiscardOpen(true);
+      return;
+    }
+    close();
+  }
+
   return (
+    <>
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        if (!o && submittingRef.current) return;
-        onOpenChange(o);
-        if (!o) reset();
-      }}
+      onOpenChange={(o) => (o ? onOpenChange(true) : requestClose())}
     >
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -462,6 +500,7 @@ export function EstimateCreateDialog({
               <div key={oi} className="rounded-lg border p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <Input
+                    aria-label={`Option ${oi + 1} name`}
                     value={opt.name}
                     onChange={(e) => updateOption(oi, { name: e.target.value })}
                     placeholder="Option name (e.g. Good)"
@@ -639,10 +678,20 @@ export function EstimateCreateDialog({
 
         <DialogFooter>
           {approvalUrl ? (
-            <Button onClick={() => onOpenChange(false)}>Done</Button>
+            <>
+              {createdId && (
+                <Button
+                  variant="outline"
+                  render={<Link href={`/admin/estimates/${createdId}`} />}
+                >
+                  Open estimate
+                </Button>
+              )}
+              <Button onClick={close}>Done</Button>
+            </>
           ) : (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button variant="outline" onClick={requestClose}>
                 Cancel
               </Button>
               <Button onClick={handleSubmit} disabled={isSubmitting}>
@@ -653,7 +702,23 @@ export function EstimateCreateDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmDialog
+      open={discardOpen}
+      onOpenChange={setDiscardOpen}
+      title="Discard this estimate?"
+      description="The options and lines you’ve built will be lost."
+      confirmLabel="Discard"
+      cancelLabel="Keep editing"
+      onConfirm={close}
+    />
+    </>
   );
+}
+
+/** A manual line's price in cents (blank = $0; validated before submit). */
+function manualUnitCents(raw: string): number {
+  const parsed = parseMoneyInput(raw);
+  return parsed.ok ? parsed.cents : 0;
 }
 
 /** Running subtotal / tax / total under each option (a preview; the server re-prices). */

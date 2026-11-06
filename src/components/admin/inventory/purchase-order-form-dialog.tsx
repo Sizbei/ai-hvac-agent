@@ -21,7 +21,7 @@ import { selectLabel } from '@/lib/admin/select-label';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
+import { formatCentsExact, parseMoneyInput } from '@/lib/admin/money-format';
 import type { InventoryItem } from '@/hooks/use-inventory';
 import type { MaterialOption } from './inventory-form-dialog';
 
@@ -92,7 +92,8 @@ export function PurchaseOrderFormDialog({
 
   const total = lines.reduce((sum, l) => {
     const qty = parseInt(l.quantity, 10);
-    const cost = parseDollarsToCents(l.unitCost);
+    const parsed = parseMoneyInput(l.unitCost);
+    const cost = parsed.ok ? parsed.cents : 0;
     return sum + (Number.isFinite(qty) ? qty : 0) * cost;
   }, 0);
 
@@ -114,17 +115,31 @@ export function PurchaseOrderFormDialog({
       return;
     }
 
+    const costs: number[] = [];
+    for (const l of validLines) {
+      if (!l.unitCost.trim()) {
+        costs.push(0);
+        continue;
+      }
+      const parsed = parseMoneyInput(l.unitCost);
+      if (!parsed.ok) {
+        setError(`Unit cost for ${nameFor(l.pricebookItemId) || 'a line'}: ${parsed.error}`);
+        return;
+      }
+      costs.push(parsed.cents);
+    }
+
     setIsSubmitting(true);
     setError(null);
 
     try {
       const payload = {
         vendorName: vendorName.trim(),
-        lines: validLines.map((l) => ({
+        lines: validLines.map((l, i) => ({
           pricebookItemId: l.pricebookItemId,
           description: nameFor(l.pricebookItemId),
           quantity: parseInt(l.quantity, 10),
-          unitCostCents: parseDollarsToCents(l.unitCost),
+          unitCostCents: costs[i] ?? 0,
         })),
       };
 
@@ -136,9 +151,13 @@ export function PurchaseOrderFormDialog({
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'An unexpected error occurred' },
+          error: null,
         }));
-        setError(body?.error?.message ?? 'Failed to create purchase order');
+        setError(
+          res.status >= 500 || !body?.error?.message
+            ? "Couldn't create the purchase order. Please try again."
+            : body.error.message,
+        );
         return;
       }
 
@@ -161,7 +180,7 @@ export function PurchaseOrderFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form noValidate onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="po-vendor">Vendor</Label>
             <Input

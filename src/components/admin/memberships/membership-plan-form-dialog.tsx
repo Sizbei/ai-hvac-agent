@@ -19,7 +19,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
+import { formatCentsExact, parseMoneyInput } from '@/lib/admin/money-format';
 import type { MembershipPlan } from '@/hooks/use-membership-plans';
 
 interface MembershipPlanFormDialogProps {
@@ -87,14 +87,17 @@ export function MembershipPlanFormDialog({
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  const previewPrice = parseMoneyInput(form.price);
+
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     if (!form.name.trim()) {
       setError('Name is required');
       return;
     }
-    if (!form.price.trim() || parseDollarsToCents(form.price) < 0) {
-      setError('A valid price is required');
+    const price = parseMoneyInput(form.price);
+    if (!price.ok) {
+      setError(`Price: ${price.error}`);
       return;
     }
     if (submittingRef.current) return;
@@ -106,7 +109,7 @@ export function MembershipPlanFormDialog({
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
-        priceCents: parseDollarsToCents(form.price),
+        priceCents: price.cents,
         billingPeriod: form.billingPeriod,
         visitsPerYear: Number.parseInt(form.visitsPerYear, 10) || 0,
       };
@@ -150,7 +153,7 @@ export function MembershipPlanFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form noValidate onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="plan-name">Name</Label>
             <Input
@@ -225,9 +228,9 @@ export function MembershipPlanFormDialog({
             </p>
           </div>
 
-          {form.price.trim() && (
+          {previewPrice.ok && (
             <p className="text-xs text-muted-foreground">
-              Charged {formatCentsExact(parseDollarsToCents(form.price))} per{' '}
+              Charged {formatCentsExact(previewPrice.cents)} per{' '}
               {form.billingPeriod === 'annual' ? 'year' : 'month'}.
             </p>
           )}

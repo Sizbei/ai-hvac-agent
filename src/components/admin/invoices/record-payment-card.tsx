@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { SegmentedControl } from '@/components/ui/segmented-control';
-import { formatCentsExact, parseDollarsToCents } from '@/lib/admin/money-format';
+import { formatCentsExact, parseMoneyInput } from '@/lib/admin/money-format';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   CARD_PAYMENTS_OFF_COPY,
@@ -65,7 +65,12 @@ export function RecordPaymentCard({
   const [error, setError] = useState<string | null>(null);
 
   const handleRecord = useCallback(async (): Promise<void> => {
-    const amountCents = parseDollarsToCents(amount);
+    const parsed = parseMoneyInput(amount);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
+    const amountCents = parsed.cents;
     if (amountCents < 1) {
       setError('Enter an amount greater than zero.');
       return;
@@ -117,7 +122,17 @@ export function RecordPaymentCard({
       <CardHeader>
         <CardTitle className="text-base">Record payment</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent>
+        {/* A real form so Enter in the amount records; noValidate keeps our
+            own messages ("Use dollars and cents…") instead of the browser's. */}
+        <form
+          noValidate
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!isSaving) void handleRecord();
+          }}
+        >
         {!cardPaymentsEnabled && (
           <p className="text-xs text-muted-foreground">{CARD_PAYMENTS_OFF_COPY}</p>
         )}
@@ -164,7 +179,7 @@ export function RecordPaymentCard({
             />
             Deposit
           </label>
-          <Button size="sm" disabled={isSaving || !amount} onClick={() => void handleRecord()}>
+          <Button type="submit" size="sm" disabled={isSaving || !amount}>
             {isSaving ? 'Recording…' : 'Record'}
           </Button>
         </div>
@@ -177,6 +192,7 @@ export function RecordPaymentCard({
             {error}
           </p>
         )}
+        </form>
       </CardContent>
     </Card>
   );

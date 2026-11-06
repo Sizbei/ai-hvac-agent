@@ -15,3 +15,18 @@ export function markupFromPrice(priceCents: number, costCents: number): number {
   if (costCents <= 0 || priceCents <= costCents) return 0;
   return Math.round(((priceCents - costCents) / costCents) * 100);
 }
+
+/**
+ * The Markup % field after the price was typed by hand: recomputed from the
+ * new price over cost so the stored markup never disagrees with the price.
+ * Blank when there is no usable cost or the price isn't above it (a blank
+ * markup is derived again at save time).
+ */
+export function markupInputAfterPriceEdit(
+  priceCents: number | null,
+  costCents: number | null,
+): string {
+  if (priceCents === null || costCents === null || costCents <= 0) return '';
+  if (priceCents <= costCents) return '';
+  return String(markupFromPrice(priceCents, costCents));
+}

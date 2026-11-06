@@ -6,7 +6,7 @@
  * The server re-prices on create — these are a preview, not the record.
  */
 import { computeOptionTotals, type OptionTotals } from './money';
-import { parseDollarsToCents } from './money-format';
+import { parseMoneyInput } from './money-format';
 
 export interface DraftLine {
   readonly name: string;
@@ -25,6 +25,52 @@ export function draftQuantity(raw: string): number {
   return Math.max(1, parseInt(raw, 10) || 1);
 }
 
+/** A manual line's typed price in cents; blank or invalid previews as $0. */
+function draftUnitCents(raw: string): number {
+  const parsed = parseMoneyInput(raw);
+  return parsed.ok ? parsed.cents : 0;
+}
+
+/**
+ * The first manual line whose typed price is not dollars and cents
+ * ("1.999", "abc"), as a human message; null when every price is usable.
+ * A blank price is allowed (a $0 line).
+ */
+export function draftLinePriceError(
+  options: ReadonlyArray<{ readonly lineItems: readonly DraftLine[] }>,
+): string | null {
+  for (const o of options) {
+    for (const l of o.lineItems) {
+      if (l.pricebookItemId || !l.name.trim() || !l.unitPrice.trim()) continue;
+      const parsed = parseMoneyInput(l.unitPrice);
+      if (!parsed.ok) return `Price for “${l.name.trim()}”: ${parsed.error}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether the New estimate dialog holds work the office would lose on Esc or
+ * a click outside: a picked customer, a title, a second option, a renamed
+ * option, or any line with an item, name or price.
+ */
+export function isEstimateDraftDirty(draft: {
+  readonly pickedCustomer: boolean;
+  readonly title: string;
+  readonly options: ReadonlyArray<{ readonly name: string; readonly lineItems: readonly DraftLine[] }>;
+}): boolean {
+  if (draft.pickedCustomer || draft.title.trim() !== '') return true;
+  if (draft.options.length > 1) return true;
+  return draft.options.some(
+    (o) =>
+      o.name.trim() !== 'Good' ||
+      o.lineItems.length > 1 ||
+      o.lineItems.some(
+        (l) => l.pricebookItemId !== null || l.name.trim() !== '' || l.unitPrice.trim() !== '',
+      ),
+  );
+}
+
 export function draftOptionTotals(
   lines: readonly DraftLine[],
   itemById: ReadonlyMap<string, DraftCatalogItem>,
@@ -39,7 +85,7 @@ export function draftOptionTotals(
       return [{ quantity: draftQuantity(l.quantity), unitPriceCents: unit }];
     }
     if (!l.name.trim()) return [];
-    return [{ quantity: draftQuantity(l.quantity), unitPriceCents: parseDollarsToCents(l.unitPrice) }];
+    return [{ quantity: draftQuantity(l.quantity), unitPriceCents: draftUnitCents(l.unitPrice) }];
   });
   return computeOptionTotals(priced, taxBps);
 }

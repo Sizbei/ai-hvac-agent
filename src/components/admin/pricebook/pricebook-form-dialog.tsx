@@ -17,14 +17,11 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { selectLabel } from '@/lib/admin/select-label';
-import { markupFromPrice, priceFromMarkup } from '@/lib/admin/pricebook-markup';
+import { markupFromPrice, markupInputAfterPriceEdit, priceFromMarkup } from '@/lib/admin/pricebook-markup';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import {
-  formatCentsExact,
-  parseDollarsToCents,
-} from '@/lib/admin/money-format';
+import { parseMoneyInput } from '@/lib/admin/money-format';
 import type { PricebookItem } from '@/hooks/use-pricebook';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
@@ -129,24 +126,59 @@ export function PricebookFormDialog({
     setForm((prev) => {
       const next = { ...prev, [field]: value };
       if (!next.cost.trim() || !next.markupPct.trim()) return next;
-      const derived = priceFromMarkup(parseDollarsToCents(next.cost), parseInt(next.markupPct, 10));
+      const cost = parseMoneyInput(next.cost);
+      if (!cost.ok) return next;
+      const derived = priceFromMarkup(cost.cents, parseInt(next.markupPct, 10));
       return derived === null ? next : { ...next, price: (derived / 100).toFixed(2) };
     });
   }
 
-  function validate(): string | null {
-    if (!form.name.trim()) return 'Name is required';
-    if (!form.price.trim() || parseDollarsToCents(form.price) < 0) {
-      return 'A valid price is required';
+  /**
+   * Price typed by hand: the markup follows it (or clears) so the saved
+   * markup never disagrees with the price.
+   */
+  function updatePrice(value: string): void {
+    setForm((prev) => {
+      const price = parseMoneyInput(value);
+      const cost = parseMoneyInput(prev.cost);
+      return {
+        ...prev,
+        price: value,
+        markupPct: markupInputAfterPriceEdit(
+          price.ok ? price.cents : null,
+          cost.ok ? cost.cents : null,
+        ),
+      };
+    });
+  }
+
+  /** Every money field strictly parsed, or the first human error. */
+  function validate():
+    | { readonly ok: true; readonly priceCents: number; readonly memberPriceCents: number | null; readonly costCents: number }
+    | { readonly ok: false; readonly error: string } {
+    if (!form.name.trim()) return { ok: false, error: 'Name is required.' };
+    const price = parseMoneyInput(form.price);
+    if (!price.ok) return { ok: false, error: `Price: ${price.error}` };
+    let memberPriceCents: number | null = null;
+    if (form.memberPrice.trim()) {
+      const member = parseMoneyInput(form.memberPrice);
+      if (!member.ok) return { ok: false, error: `Member price: ${member.error}` };
+      memberPriceCents = member.cents;
     }
-    return null;
+    let costCents = 0;
+    if (form.cost.trim()) {
+      const cost = parseMoneyInput(form.cost);
+      if (!cost.ok) return { ok: false, error: `Cost: ${cost.error}` };
+      costCents = cost.cents;
+    }
+    return { ok: true, priceCents: price.cents, memberPriceCents, costCents };
   }
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
+    const checked = validate();
+    if (!checked.ok) {
+      setError(checked.error);
       return;
     }
     if (submittingRef.current) return;
@@ -161,15 +193,13 @@ export function PricebookFormDialog({
         name: form.name.trim(),
         sku: form.sku.trim() || undefined,
         description: form.description.trim() || undefined,
-        priceCents: parseDollarsToCents(form.price),
-        memberPriceCents: form.memberPrice.trim()
-          ? parseDollarsToCents(form.memberPrice)
-          : null,
-        costCents: form.cost.trim() ? parseDollarsToCents(form.cost) : 0,
+        priceCents: checked.priceCents,
+        memberPriceCents: checked.memberPriceCents,
+        costCents: checked.costCents,
         // A blank markup is the one the price implies over cost, not 0.
         markupPct: form.markupPct.trim()
           ? parseInt(form.markupPct, 10)
-          : markupFromPrice(parseDollarsToCents(form.price), form.cost.trim() ? parseDollarsToCents(form.cost) : 0),
+          : markupFromPrice(checked.priceCents, checked.costCents),
         hours: form.hours.trim() ? parseInt(form.hours, 10) : null,
         warranty: form.warranty.trim() || undefined,
       };
@@ -188,9 +218,13 @@ export function PricebookFormDialog({
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'An unexpected error occurred' },
+          error: null,
         }));
-        setError(body?.error?.message ?? 'Failed to save item');
+        setError(
+          body?.error?.code === 'ITEM_ALREADY_EXISTS'
+            ? 'An item with this SKU already exists.'
+            : "Couldn't save the item. Please try again.",
+        );
         return;
       }
 
@@ -225,7 +259,7 @@ export function PricebookFormDialog({
 
         <FieldpulseDetails data={editing?.fieldpulseData ?? null} />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form noValidate onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="item-type">Type</Label>
@@ -289,7 +323,7 @@ export function PricebookFormDialog({
                 min="0"
                 inputMode="decimal"
                 value={form.price}
-                onChange={(e) => updateField('price', e.target.value)}
+                onChange={(e) => updatePrice(e.target.value)}
                 placeholder="0.00"
                 required
               />
@@ -359,13 +393,6 @@ export function PricebookFormDialog({
             />
           </div>
 
-          {form.price.trim() && (
-            <p className="text-xs text-muted-foreground">
-              Price will be stored as{' '}
-              {formatCentsExact(parseDollarsToCents(form.price))}.
-            </p>
-          )}
-
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <DialogFooter>
@@ -378,7 +405,7 @@ export function PricebookFormDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : 'Save'}
+              {isSubmitting ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
         </form>
