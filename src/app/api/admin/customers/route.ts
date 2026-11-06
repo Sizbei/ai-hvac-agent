@@ -48,7 +48,10 @@ export async function GET(request: NextRequest) {
       fieldpulseSynced,
     });
     const response = successResponse(result);
-    response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
+    // no-store: the list (and its search) reflects edits, archive and unarchive
+    // at once. A browser-cached body would show pre-edit results and the hook
+    // never refetches to correct them.
+    response.headers.set('Cache-Control', 'no-store');
     return response;
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch customers");

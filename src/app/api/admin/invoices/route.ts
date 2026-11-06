@@ -108,7 +108,9 @@ export async function GET(request: NextRequest) {
       // its customer-link action accordingly.
       cardPaymentsEnabled: cardPaymentsEnabled(),
     });
-    response.headers.set('Cache-Control', 'private, max-age=0, stale-while-revalidate=30');
+    // no-store: payments, reminders and voids must show at once; a
+    // browser-cached body would render the pre-change list.
+    response.headers.set('Cache-Control', 'no-store');
     return response;
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list invoices");
