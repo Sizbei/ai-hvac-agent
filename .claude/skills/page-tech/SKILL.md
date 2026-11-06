@@ -82,6 +82,12 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   active lead may hold or close out. `?visit=<appointment id>` on
   `/tech/jobs/[id]` (UUID-checked) picks which of the tech's visits to show;
   list rows link with it.
+- **Office side of a hold:** the office shows the same active visit
+  (`src/lib/admin/current-visit.ts`); a visit a hold ended reads "Visit ended"
+  and the office resumes by scheduling the next visit (`addAppointment` flips
+  `on_hold` → `scheduled` in its batch). A bare status resume on an ended visit
+  is refused (409 `VISIT_ENDED`). status-writes and the 0050 trigger are
+  unchanged by this (see page-requests "Current visit").
 - **Actions** (`status-actions.ts`, pure; `status-writes.ts` writes one
   `db.batch` per tap, lock-first, xmin-gated): `en_route`, `arrived`,
   `in_progress` stamp the tech's own row (the lead's tap also advances the

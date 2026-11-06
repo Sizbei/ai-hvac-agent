@@ -64,7 +64,24 @@ sources ignore shifts. The calendar still renders requests only; visits #2+
 (`appointments`) are rendered in M2. Known gap: the conflict dialog still
 offers "Schedule anyway" for a time-off conflict (server refuses it).
 
+**Current visit placement:** day/week (`getSchedulingCalendar`), month and the
+dispatch board place a request by the visit the technician's phone shows
+(`current-visit.ts`, see page-requests). Two feeds merged by
+`mergePlacedRows` in queries.ts: `placedByRequestQuery` (request columns) and
+`placedByVisitQuery` (driven from `appointments` in range, where the displayed
+visit is #2+ or ended); a row the other feed owns is dropped. In queries.test.ts
+the visit feed is the LAST select (calendar index 4, dispatch 2, month 1).
+Cards carry `visitNumber` (#2+) and `visitEnded`: a later visit shows
+"Visit #2" in its lead's lane, an ended one stays where it was, dashed and
+struck through ("Visit ended"), and neither is draggable (a drop would rewrite
+visit #1). Lane counts skip ended cards.
+
 **Gotchas:**
+- Overlapping cards sit side by side: `overlapColumns`
+  (`src/lib/admin/calendar-overlap.ts`) splits each cluster of overlapping
+  cards into equal columns (pixel spans, so min-height and pinned cards count).
+- A failed day/week load renders `LoadErrorState` instead of the grid (never
+  "Nothing to place"); the hook's error copy is human.
 - A job whose window lies wholly outside the drawn hours is pinned to the
   lane's top/bottom edge (`placeJobInLane` in calendar-time.ts, dashed
   outline) — never drop it silently; the lane header counts it.

@@ -57,6 +57,11 @@ detail sheet opens for an unassigned request — fail-open (empty = no card show
   `dispatchDecisions` (overriddenTechnicianId, overriddenByUserId, overriddenAt).
 
 **Gotchas:**
+- Jobs are placed by the current visit (see page-calendar "Current visit
+  placement"): a visit #2+ sits in its lead's column with "Visit #2"; a visit
+  a hold ended stays, dashed and struck through with "Visit ended", and the
+  column count skips it.
+- Suggestion reasons count "requests that day" (the request's day).
 - Columns render busy-first (`busyColumnsFirst`,
   `src/lib/admin/dispatch-board-order.ts`).
 - `GET /requests/[id]/decision` answers 200 with `data: null` when no decision

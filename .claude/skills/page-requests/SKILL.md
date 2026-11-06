@@ -84,6 +84,16 @@ requestId, referenceNumber, schedule: none | placed | failed }`. 400 validation
   `@/lib/ai/extraction-schema` without `jobTypeValues` and imports this route.
 - Dialog: `<fieldset>`/form inside the grid `DialogContent` need `min-w-0` or
   the 14 day chips widen the dialog past the viewport.
+- **Past windows:** `src/lib/admin/window-ended.ts`. The pickers grey out a
+  band that already ended ("Already ended") and `firstOpenDay(…, now)` skips a
+  finished today. `parseCreateRequestBody(raw, todayIso, now)` refuses an ended
+  band (400, `WINDOW_ENDED_MESSAGE`); `POST …/appointments` refuses an ended
+  window (400 `WINDOW_ENDED`). Add visit opens on the request's own day
+  (`initialVisitDay`).
+- Form errors: a message shows only while its field is still invalid
+  (`pruneFixedErrors`); a failed submit focuses the first invalid field
+  (`firstInvalidField`). The 409 conflict copy names the clashing request when
+  there is one (`scheduleConflictMessage`'s `conflictReference`).
 
 **Statuses (M0a):** `request_status` includes `en_route` and `arrived`
 (migration 0048). Shared lists live in `src/lib/admin/request-status.ts`
@@ -107,6 +117,35 @@ is CAS on `version`: 409 `VERSION_CONFLICT`; other errors `IS_FIRST_VISIT`,
 section using the shared `src/components/admin/window-picker.tsx`. Tech-app
 ownership: see "Tech loop guards (M3a)"; the calendar does not render
 visits #2+ yet (M2).
+
+**Current visit (office = phone):** `src/lib/admin/current-visit.ts` decides
+which visit the office shows, by the same rule as the phone (`pickActiveVisit`).
+`officePlacement` kinds: `request` (visit #1 or none: the request columns),
+`visit` (a visit #2+ is active: its window and lead), `ended` (a NATIVE request
+`on_hold` whose visits are all over: no open row on a live visit and no
+unstaffed live visit; this includes a hold after the technician had progress,
+where the visit stays live with a `completed` row). `getRequestById` returns it
+as `currentVisit`; `getRequests` shows a later visit's lead in the technician
+column; calendar/month/dispatch place by it (see page-calendar). The SQL
+(`officeVisitSql`, `visitEndedSql`, `displayVisitIdSql`, `placedByVisitSql`) is
+correlated to `"service_requests"."id"` and gated (only `on_hold` or visit #2+
+rows run the subqueries). Integration proof:
+`tests/integration/hold-next-visit.test.ts` (dev DB).
+- Sheet (`sheetVisitView`, `src/lib/admin/request-visit-view.ts`): `ended` →
+  "Schedule next visit" (opens the Visits add dialog titled "Schedule next
+  visit", pre-filled with the ended visit's technician and the request's day)
+  and no bare resume (scheduled / en route / arrived / start), no reassign or
+  date/window controls; `visit` → "Currently assigned to" is that visit's lead,
+  edits go through Visits, and no office progress taps (they mirror onto
+  visit #1 only).
+- `addAppointment` on an `on_hold` request resumes it (→ `scheduled`, hold
+  fields cleared) in the same batch: request lock first, then insert, rows, and
+  a native-only UPDATE gated on `landed()`. The route then records the status
+  event and an audit row (`resumed: true` on the result).
+- `PATCH` status `scheduled|en_route|arrived|in_progress` on a native `on_hold`
+  request whose visit ended → 409 `VISIT_ENDED` ("…Schedule the next visit
+  instead."). 409 `INVALID_TRANSITION` copy is `transitionRefusedMessage`
+  (no raw enums) with `details.currentStatus`; the sheet reloads on any 409.
 
 **Tech loop guards (M3a):** native requests only.
 - Admin `PATCH` status `on_hold` follows the tech hold rule (visit ends, open
@@ -159,6 +198,11 @@ visits #2+ yet (M2).
   `src/lib/admin/request-status.ts` (calendar-drag parity); the visit-one guard
   still refuses once a technician has progress. 409 copy uses
   `requestStatusLabel`, never the raw enum.
+- Load errors: the list uses `listViewState` + `LoadErrorState` ("Couldn't
+  load requests.", Try again); the hook keys its error to the filter/page and
+  clears rows from another filter when a load fails. The sheet's load error has
+  Try again. The requests API 500s carry human copy. "Submitted" is the
+  business-time day.
 - Detail sheet: "Cancel request" goes through a ConfirmDialog; hold reason and
   follow-up date show only after "Put on hold"; the date/window inputs start
   from the stored window via `scheduleInputsFrom`
