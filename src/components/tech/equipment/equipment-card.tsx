@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { equipmentTypeLabel } from '@/lib/admin/display-labels';
@@ -51,9 +51,16 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
     setRecovering(false);
   }, [jobId, load, setUnresolved, setRecovering]);
 
+  /** Mount recovery runs once per job (StrictMode runs the effect twice). */
+  const recovery = useRef<{ jobId: string; done: Promise<void> } | null>(null);
   useEffect(() => {
-    void runRecovery();
-  }, [runRecovery, refreshKey]);
+    if (recovery.current?.jobId !== jobId) recovery.current = { jobId, done: runRecovery() };
+  }, [jobId, runRecovery]);
+
+  // A status tap only reloads, after any recovery has finished.
+  useEffect(() => {
+    if (refreshKey > 0) void recovery.current?.done.then(() => load());
+  }, [refreshKey, load]);
 
   /** Reload; for a replace, true once the old unit has left the list (the write landed). */
   const onSaved = useCallback(async (): Promise<boolean> => {
@@ -63,7 +70,7 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
     return replacing !== null && !v.units.some((u) => u.id === replacing.id);
   }, [load, sheet]);
 
-  if (state === 'loading' || state === 'hidden' || (view && !view.canWrite)) return null;
+  if (state === 'loading' || state === 'hidden' || (state === 'error' && !view) || (view && !view.canWrite)) return null;
   const locked = recovering || unresolved > 0;
   const intentId = sheet?.replacing ? ESTIMATE_INTENT.equipmentReplace(sheet.replacing.id) : ESTIMATE_INTENT.equipmentAdd;
 

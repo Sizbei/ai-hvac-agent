@@ -85,6 +85,7 @@ export function EquipmentSheet({
         return;
       }
     }
+    resent.current = true; // a live save must not trigger the restore re-send
     setSaving(true);
     setError(null);
     const r = await send(path, body);
