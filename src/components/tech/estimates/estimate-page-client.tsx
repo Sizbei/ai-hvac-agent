@@ -13,7 +13,7 @@ import {
   type LayerEffect, type LayerEvent, type LayerState,
 } from '@/lib/tech/customer-view-state';
 import { DECLINE_COPY, SOLD_ACTIONS, afterCheck, approvedLine } from '@/lib/tech/estimate-page-copy';
-import { BILLING_LINE, SOLD_COPY, STATUS_CHIP, canSell, soldBillingView, soldOptionOf } from '@/lib/tech/estimate-display';
+import { BILLING_LINE, SOLD_COPY, STATUS_CHIP, canSell, soldBillingView, soldOptionOf, totalsLine } from '@/lib/tech/estimate-display';
 import { ESTIMATE_INTENT, MAY_NOT_HAVE_SAVED, estimateWriteCopy } from '@/lib/tech/estimate-intents';
 import type { TechEstimate, TechEstimateOption, TechEstimatesView } from '@/lib/tech/estimate-view';
 import { CustomerView } from './customer-view';
@@ -52,9 +52,7 @@ function OptionBlock({ o }: { readonly o: TechEstimateOption }) {
           </li>
         ))}
       </ul>
-      <p className={`${MONEY} text-[13px] text-muted-foreground`}>
-        Subtotal {formatCentsExact(o.subtotalCents)} · Tax {formatCentsExact(o.taxCents)} · Total {formatCentsExact(o.totalCents)}
-      </p>
+      <p className={`${MONEY} text-[13px] text-muted-foreground`}>{totalsLine(o)}</p>
     </section>
   );
 }

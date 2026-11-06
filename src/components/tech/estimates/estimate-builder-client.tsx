@@ -13,7 +13,7 @@ import { mintKey } from '@/lib/http/idempotency-codes';
 import { AddItemSheet, type PricebookHit } from '@/components/tech/invoice/add-item-sheet';
 import type { WriteResult } from '@/components/tech/invoice/use-invoice-writes';
 import {
-  DRAFT_KEY, addLine, checkDraft, nextOptionNames, optionFooter, parseDraft, removeLine, serializeDraft, setQuantity, startOptions,
+  DRAFT_KEY, EARLIER_SAVE_WON, addLine, afterSave, checkDraft, nextOptionNames, optionFooter, parseDraft, removeLine, serializeDraft, setQuantity, startOptions,
   type DraftOption,
 } from '@/lib/tech/estimate-builder';
 import { MAX_OPTION_NAME, MAX_OPTIONS, MAX_QUANTITY } from '@/lib/tech/estimate-input';
@@ -50,6 +50,8 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
   /** retry: 'recover' = a reload left the last save unanswered (re-send it); 'save' = this save's answer is unknown. */
   const [message, setMessage] = useState<{ readonly text: string; readonly retry: 'recover' | 'save' | null } | null>(null);
   const create = useEstimateWrite(jobId, ESTIMATE_INTENT.create);
+  /** An earlier, unanswered save was re-sent and landed: the newer edits were not saved (Task 8 parked). */
+  const [earlierWon, setEarlierWon] = useState<{ readonly estimateId: unknown } | null>(null);
   /** The mount recovery, started once per job (StrictMode runs the mount effect twice). */
   const recovery = useRef<{ jobId: string; done: Promise<void> } | null>(null);
 
@@ -136,12 +138,15 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
       return;
     }
     create.settle(r.outcome, false);
-    if (r.outcome === 'success_refetch') {
-      openSaved((r.envelope?.data as { estimateId?: unknown } | undefined)?.estimateId);
+    const landed = afterSave(r.outcome, r.resentOld);
+    const estimateId = r.outcome === 'success_refetch' ? (r.envelope?.data as { estimateId?: unknown } | undefined)?.estimateId : null;
+    if (landed === 'open') {
+      openSaved(estimateId);
       return;
     }
-    if (r.outcome === 'already_saved_refetch') {
-      openSaved(null);
+    if (landed === 'earlier_won') {
+      setSaving(false);
+      setEarlierWon({ estimateId });
       return;
     }
     setSaving(false);
@@ -179,7 +184,7 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
 
   const check = checkDraft(options);
   const taxBps = view.taxBps;
-  const locked = saving || recovering;
+  const locked = saving || recovering || earlierWon !== null;
 
   return (
     <div className="space-y-4 pb-6">
@@ -256,12 +261,19 @@ export function EstimateBuilderClient({ jobId }: { readonly jobId: string }) {
 
       {!check.ok && <p className="text-[15px] text-muted-foreground">{check.reason}</p>}
       {message && <p role="alert" className="text-[15px] text-danger-strong">{message.text}</p>}
-      <Button className="h-12 w-full rounded-xl text-[16px]"
-        // A retry re-sends the OLD body, so it stays tappable even while the edited draft is invalid (review spec m8).
-        disabled={locked || (!message?.retry && (!check.ok || !view.canCreate))}
-        onClick={() => void (message?.retry === 'recover' ? recover() : save())}>
-        {saving || recovering ? 'Saving…' : message?.retry ? 'Try again' : 'Save estimate'}
-      </Button>
+      {earlierWon ? (
+        <div className="space-y-2">
+          <p role="alert" className="rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">{EARLIER_SAVE_WON}</p>
+          <Button className="h-12 w-full rounded-xl text-[16px]" onClick={() => openSaved(earlierWon.estimateId)}>Open the estimate</Button>
+        </div>
+      ) : (
+        <Button className="h-12 w-full rounded-xl text-[16px]"
+          // A retry re-sends the OLD body, so it stays tappable even while the edited draft is invalid (review spec m8).
+          disabled={locked || (!message?.retry && (!check.ok || !view.canCreate))}
+          onClick={() => void (message?.retry === 'recover' ? recover() : save())}>
+          {saving || recovering ? 'Saving…' : message?.retry ? 'Try again' : 'Save estimate'}
+        </Button>
+      )}
 
       {confirmDiscard ? (
         <div className="space-y-2 rounded-xl border border-border p-3">

@@ -7,3 +7,8 @@ export function doneAction(s: { readonly picked: boolean; readonly canRetry: boo
   if (s.picked && s.locked && !s.canRetry) return "wait";
   return s.picked && !s.canRetry ? "add_then_close" : "close";
 }
+
+/** Results are tappable only for the query on screen; older results wait for the new search (final review B P2-3). */
+export function hitsUsable(hitsFor: string | null, q: string): boolean {
+  return hitsFor !== null && hitsFor === q.trim();
+}

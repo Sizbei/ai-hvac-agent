@@ -6,7 +6,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { doneAction } from '@/lib/tech/add-item-done';
+import { doneAction, hitsUsable } from '@/lib/tech/add-item-done';
 import type { WriteResult } from './use-invoice-writes';
 
 export interface PricebookHit {
@@ -46,7 +46,8 @@ export function AddItemSheet({
 }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<readonly PricebookHit[]>([]);
-  const [searching, setSearching] = useState(false);
+  /** The query `hits` answer: older results are not tappable once the query changes. */
+  const [hitsFor, setHitsFor] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [picked, setPicked] = useState<PricebookHit | null>(null);
   const [qty, setQty] = useState(1);
@@ -61,20 +62,18 @@ export function AddItemSheet({
     if (term.length < MIN_CHARS) return;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
-      setSearching(true);
       try {
         const res = await fetch(`/api/tech/pricebook?scope=invoice&q=${encodeURIComponent(term)}`, { signal: ctrl.signal });
         const body = await res.json().catch(() => null);
         if (res.ok && body?.success) {
           setHits(body.data.items as PricebookHit[]);
+          setHitsFor(term);
           setSearchError(null);
         } else {
           setSearchError("Couldn't search the price book. Try again.");
         }
       } catch {
         if (!ctrl.signal.aborted) setSearchError("Couldn't search the price book. Try again.");
-      } finally {
-        if (!ctrl.signal.aborted) setSearching(false);
       }
     }, DEBOUNCE_MS);
     return () => {
@@ -85,12 +84,16 @@ export function AddItemSheet({
 
   function changeQuery(v: string): void {
     setQ(v);
-    if (v.trim().length < MIN_CHARS) setHits([]);
+    if (v.trim().length < MIN_CHARS) {
+      setHits([]);
+      setHitsFor(null);
+    }
   }
 
   function reset(): void {
     setQ('');
     setHits([]);
+    setHitsFor(null);
     setPicked(null);
     setQty(1);
     setMessage(null);
@@ -134,6 +137,7 @@ export function AddItemSheet({
 
   const locked = disabled || adding;
   const short = q.trim().length < MIN_CHARS;
+  const usable = hitsUsable(hitsFor, q);
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o && !adding) { reset(); onClose(); } }}>
@@ -196,8 +200,9 @@ export function AddItemSheet({
             <div className="min-h-0 overflow-y-auto">
               {short ? (
                 <p className="py-2 text-[15px] text-muted-foreground">Type at least 2 letters.</p>
-              ) : searching && hits.length === 0 ? (
-                <p className="py-2 text-[15px] text-muted-foreground">Searching…</p>
+              ) : !usable ? (
+                // Results for an earlier query are hidden until this one answers (final review B P2-3).
+                searchError ? null : <p className="py-2 text-[15px] text-muted-foreground">Searching…</p>
               ) : hits.length === 0 && !searchError ? (
                 <p className="py-2 text-[15px] text-muted-foreground">No matches. Try another name or SKU.</p>
               ) : (

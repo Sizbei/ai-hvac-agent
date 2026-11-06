@@ -11,6 +11,7 @@ import {
   CUSTOMER_COPY, approveConfirmCopy, customerHeading, initialChoice, optionTaxLabel, previewLines, showAllLabel,
 } from '@/lib/tech/estimate-page-copy';
 import { focusTrapTarget } from '@/lib/tech/customer-view-state';
+import { totalsParts } from '@/lib/tech/estimate-display';
 import type { TechEstimate } from '@/lib/tech/estimate-view';
 
 type Screen = 'choose' | 'confirm' | 'sending' | 'checking' | 'success' | 'failed' | 'handback';
@@ -49,11 +50,11 @@ function useModalLayer(): HTMLDivElement {
   return el;
 }
 
-function Total({ label, cents, strong = false }: { readonly label: string; readonly cents: number; readonly strong?: boolean }) {
+function Total({ label, value, strong = false }: { readonly label: string; readonly value: string; readonly strong?: boolean }) {
   return (
     <span className={`flex items-baseline justify-between gap-3 ${strong ? 'text-[17px] font-semibold' : 'text-[15px] text-muted-foreground'}`}>
       <span>{label}</span>
-      <span className={MONEY}>{formatCentsExact(cents)}</span>
+      <span className={MONEY}>{value}</span>
     </span>
   );
 }
@@ -162,9 +163,9 @@ export function CustomerView({
                       ))}
                     </span>
                     <span className="block space-y-0.5 border-t border-border pt-2">
-                      <Total label="Subtotal" cents={o.subtotalCents} />
-                      <Total label={optionTaxLabel(o, taxBps)} cents={o.taxCents} />
-                      <Total label="Total" cents={o.totalCents} strong />
+                      {totalsParts(o, optionTaxLabel(o, taxBps)).map((p, i, all) => (
+                        <Total key={p.label} label={p.label} value={p.value} strong={i === all.length - 1} />
+                      ))}
                     </span>
                   </span>
                 </label>

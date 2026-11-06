@@ -3,10 +3,11 @@
  * naming, lines, totals, the inline save reason and the sessionStorage draft.
  */
 import { computeOptionTotals } from "@/lib/admin/money";
-import { formatCentsExact } from "@/lib/admin/money-format";
 import {
   hasDuplicateNames, MAX_LINES_PER_OPTION, MAX_OPTION_NAME, MAX_OPTIONS, MAX_QUANTITY, type CreateEstimateInput,
 } from "./estimate-input";
+import { totalsLine } from "./estimate-display";
+import type { WriteOutcome } from "./invoice-key-state";
 
 export interface DraftLine {
   readonly key: string;
@@ -65,8 +66,14 @@ export function nextOptionNames(options: readonly DraftOption[], change: OptionC
 const withOption = (options: readonly DraftOption[], key: string, fn: (o: DraftOption) => DraftOption): DraftOption[] =>
   options.map((o) => (o.key === key ? fn(o) : o));
 
+/** A pricebook item already on the option raises that line's quantity (capped) instead of a second line. */
 export function addLine(options: readonly DraftOption[], optionKey: string, line: DraftLine): DraftOption[] {
-  return withOption(options, optionKey, (o) => ({ ...o, lines: [...o.lines, line] }));
+  return withOption(options, optionKey, (o) => {
+    const same = o.lines.find((l) => l.pricebookItemId === line.pricebookItemId);
+    if (!same) return { ...o, lines: [...o.lines, line] };
+    const quantity = Math.min(MAX_QUANTITY, same.quantity + line.quantity);
+    return { ...o, lines: o.lines.map((l) => (l.key === same.key ? { ...l, quantity } : l)) };
+  });
 }
 
 export function removeLine(options: readonly DraftOption[], optionKey: string, lineKey: string): DraftOption[] {
@@ -79,8 +86,19 @@ export function setQuantity(options: readonly DraftOption[], optionKey: string, 
 }
 
 export function optionFooter(lines: readonly DraftLine[], taxBps: number): string {
-  const t = computeOptionTotals(lines, taxBps);
-  return `Subtotal ${formatCentsExact(t.subtotalCents)} · Tax ${formatCentsExact(t.taxCents)} · Total ${formatCentsExact(t.totalCents)}`;
+  return totalsLine(computeOptionTotals(lines, taxBps));
+}
+
+export const EARLIER_SAVE_WON = "Your earlier save went through. Your newer edits weren't saved.";
+
+/**
+ * What the builder does with a save's answer (Task 8 parked): a landed re-send
+ * of the earlier, unanswered body is that earlier estimate, so the newer edits
+ * were not saved and the technician is told before the estimate opens.
+ */
+export function afterSave(outcome: WriteOutcome, resentOld: boolean): "open" | "earlier_won" | "message" {
+  if (outcome !== "success_refetch" && outcome !== "already_saved_refetch") return "message";
+  return resentOld ? "earlier_won" : "open";
 }
 
 export type DraftCheck = { readonly ok: true; readonly body: CreateEstimateInput } | { readonly ok: false; readonly reason: string };

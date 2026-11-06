@@ -104,3 +104,23 @@ export const SOLD_COPY = {
 export function estimatesCardVisible(view: Pick<TechEstimatesView, "requestStatus" | "estimates">): boolean {
   return (BILL_STATUSES as readonly string[]).includes(view.requestStatus) || view.estimates.length > 0;
 }
+
+export interface Totals {
+  readonly subtotalCents: number;
+  readonly taxCents: number;
+  readonly totalCents: number;
+}
+
+/** Subtotal, tax, total as label/value pairs: the customer view's rows. */
+export function totalsParts(t: Totals, taxLabel = "Tax"): readonly { readonly label: string; readonly value: string }[] {
+  return [
+    { label: "Subtotal", value: formatCentsExact(t.subtotalCents) },
+    { label: taxLabel, value: formatCentsExact(t.taxCents) },
+    { label: "Total", value: formatCentsExact(t.totalCents) },
+  ];
+}
+
+/** "Subtotal $250.00 · Tax $20.63 · Total $270.63": the builder and the estimate page. */
+export function totalsLine(t: Totals, taxLabel = "Tax"): string {
+  return totalsParts(t, taxLabel).map((p) => `${p.label} ${p.value}`).join(" · ");
+}

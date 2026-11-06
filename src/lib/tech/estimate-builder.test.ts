@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  addLine, checkDraft, nextOptionNames, optionFooter, parseDraft, removeLine, serializeDraft, setQuantity, startOptions,
-  type DraftOption,
+  EARLIER_SAVE_WON, addLine, afterSave, checkDraft, nextOptionNames, optionFooter, parseDraft, removeLine, serializeDraft, setQuantity,
+  startOptions, type DraftOption,
 } from "./estimate-builder";
 
 const names = (o: readonly DraftOption[]) => o.map((x) => x.name);
@@ -48,6 +48,15 @@ describe("lines and totals", () => {
     expect(o[0]!.lines[0]!.quantity).toBe(1);
     expect(removeLine(o, "a", "l1")[0]!.lines).toEqual([]);
   });
+  it("adding an item already on the option raises its quantity instead of a second line (final review B P2-4)", () => {
+    let o = addLine(startOptions("a"), "a", line("l1", 2));
+    o = addLine(o, "a", line("l2", 3));
+    expect(o[0]!.lines).toHaveLength(1);
+    expect(o[0]!.lines[0]).toMatchObject({ key: "l1", quantity: 5 });
+    expect(addLine(o, "a", line("l3", 998))[0]!.lines[0]!.quantity).toBe(999); // capped
+    const other = { ...line("m1"), pricebookItemId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Motor" };
+    expect(addLine(o, "a", other)[0]!.lines).toHaveLength(2);
+  });
   it("footer: Subtotal · Tax · Total from taxBps", () => {
     expect(optionFooter([line("l1", 2)], 825)).toBe("Subtotal $250.00 · Tax $20.63 · Total $270.63");
     expect(optionFooter([], 825)).toBe("Subtotal $0.00 · Tax $0.00 · Total $0.00");
@@ -87,5 +96,21 @@ describe("draft persistence", () => {
       JSON.stringify({ v: 1, options: [{ key: "a", name: "x", edited: false, lines: [{ key: "l", pricebookItemId: "p", name: "n", unitPriceCents: -1, quantity: 1 }] }] }),
       JSON.stringify({ v: 1, options: [{ key: "a", name: "x", edited: false, lines: [{ key: "l", pricebookItemId: "p", name: "n", unitPriceCents: 1, quantity: 1000 }] }] }),
     ]) expect(parseDraft(raw)).toBeNull();
+  });
+});
+
+describe("save answers (Task 8 parked)", () => {
+  it("this save landed: open the estimate", () => {
+    expect(afterSave("success_refetch", false)).toBe("open");
+    expect(afterSave("already_saved_refetch", false)).toBe("open");
+  });
+  it("the earlier unanswered save was re-sent and landed: say the newer edits weren't saved", () => {
+    expect(afterSave("success_refetch", true)).toBe("earlier_won");
+    expect(afterSave("already_saved_refetch", true)).toBe("earlier_won");
+    expect(EARLIER_SAVE_WON).toBe("Your earlier save went through. Your newer edits weren't saved.");
+  });
+  it("anything else is a message", () => {
+    expect(afterSave("retry_same_key_after_refetch", true)).toBe("message");
+    expect(afterSave("show_message_refetch", false)).toBe("message");
   });
 });

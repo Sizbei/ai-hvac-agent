@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   BILLING_LINE, billingOf, canSell, createBlockedReason, derivedStatus, estimateLabel, estimatesCardVisible,
-  priceSummary, SOLD_COPY, soldBillingView, STATUS_CHIP,
+  priceSummary, SOLD_COPY, soldBillingView, STATUS_CHIP, totalsLine, totalsParts,
 } from "./estimate-display";
 import type { TechEstimate, TechEstimatesView } from "./estimate-view";
 
@@ -67,5 +67,17 @@ describe("estimate display (spec §2, §7.3)", () => {
     expect(estimatesCardVisible({ requestStatus: "en_route", estimates: [] })).toBe(false);
     expect(estimatesCardVisible({ requestStatus: "arrived", estimates: [] })).toBe(true);
     expect(estimatesCardVisible({ requestStatus: "cancelled", estimates: [{} as TechEstimate] })).toBe(true);
+  });
+});
+
+describe("one Subtotal · Tax · Total formatter (final review C m6)", () => {
+  const t = { subtotalCents: 25_000, taxCents: 2_063, totalCents: 27_063 };
+  it("the line for the builder and the estimate page", () => {
+    expect(totalsLine(t)).toBe("Subtotal $250.00 · Tax $20.63 · Total $270.63");
+  });
+  it("the rows for the customer view, with its tax label", () => {
+    expect(totalsParts(t, "Tax (8.25%)")).toEqual([
+      { label: "Subtotal", value: "$250.00" }, { label: "Tax (8.25%)", value: "$20.63" }, { label: "Total", value: "$270.63" },
+    ]);
   });
 });
