@@ -22,6 +22,7 @@ import {
 import {
   authorLabel,
   conversationTitle,
+  shortConversationId,
   customerNameFromMetadata,
   extractedFields,
   messageAuthors,
@@ -362,8 +363,12 @@ export function ConversationDetailContent({
   const customerName = customerNameFromMetadata(detail.metadata);
   const title = conversationTitle({
     customerName,
+    requestCustomerName: detail.requestCustomerName,
     referenceNumber: detail.referenceNumber,
     id: detail.id,
+    channel: detail.channel,
+    preview: detail.messages.find((m) => m.role === 'user')?.content ?? null,
+    startedAt: detail.createdAt,
   });
   const authors = messageAuthors(detail.messages, detail.staffReplyTimes);
   const requestHref = detail.serviceRequestId
@@ -384,13 +389,7 @@ export function ConversationDetailContent({
           <ChannelChip channel={detail.channel} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-              <h2
-                className={
-                  customerName
-                    ? 'font-heading text-lg font-bold tracking-tight break-words'
-                    : 'font-mono text-sm font-bold tabular-nums'
-                }
-              >
+              <h2 className="font-heading text-lg font-bold tracking-tight break-words">
                 {title}
               </h2>
               {detail.needsAction ? (
@@ -406,7 +405,9 @@ export function ConversationDetailContent({
               )}
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {channelLabel(detail.channel)} · {formatStamp(detail.createdAt)}
+              {channelLabel(detail.channel)} · {formatStamp(detail.createdAt)} ·{' '}
+              {/* The short id ⌘K and the inbox search find it by. */}
+              <span className="font-mono tabular-nums">{shortConversationId(detail.id)}</span>
               {detail.referenceNumber && requestHref && (
                 <>
                   {' · '}

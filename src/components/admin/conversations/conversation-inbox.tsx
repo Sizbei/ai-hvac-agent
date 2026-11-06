@@ -27,6 +27,8 @@ import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/admin/relative-time';
 import { conversationTitle } from '@/lib/admin/conversation-display';
 import { isUuid } from '@/lib/validation/uuid';
+import { notifyConversationsChanged } from '@/hooks/use-needs-action-count';
+import { conversationFromSearch, urlWithConversation } from './inbox-history';
 import type { ConversationSummary } from '@/lib/admin/conversation-types';
 
 const ALL_STATUSES = 'all';
@@ -94,12 +96,11 @@ function ConversationRow({
   readonly onRef: (el: HTMLButtonElement | null) => void;
   readonly onSelect: () => void;
 }) {
+  // No start time in the row title: the row's time column already says when,
+  // and the time is what got truncated. The detail header keeps it.
   const title = conversationTitle(conversation);
-  // Second line: the request number when the title is the customer's name.
-  const subtitle =
-    conversation.customerName && conversation.referenceNumber
-      ? conversation.referenceNumber
-      : null;
+  // Second line: the linked request's number.
+  const subtitle = conversation.referenceNumber;
   return (
     <button
       ref={onRef}
@@ -121,14 +122,7 @@ function ConversationRow({
       <ChannelChip channel={conversation.channel} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              'truncate text-[13px] font-medium',
-              !conversation.customerName && 'font-mono tabular-nums',
-            )}
-          >
-            {title}
-          </span>
+          <span className="truncate text-[13px] font-medium">{title}</span>
           <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
             {formatRelativeTime(conversation.lastMessageAt ?? conversation.createdAt)}
           </span>
@@ -181,8 +175,11 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
     c: selectedId ?? '',
   };
   const restoreFromUrl = useCallback((p: Record<string, string>) => {
-    if (p.status && STATUS_VALUES.includes(p.status)) setStatusFilter(p.status);
-    if (p.channel && CHANNEL_TABS.some((t) => t.id === p.channel)) setChannelFilter(p.channel);
+    // "Needs action" is the org-wide queue: a status or channel from the URL
+    // can't narrow it (the button's count is org-wide).
+    const queue = p.action === '1';
+    if (p.status && !queue && STATUS_VALUES.includes(p.status)) setStatusFilter(p.status);
+    if (p.channel && !queue && CHANNEL_TABS.some((t) => t.id === p.channel)) setChannelFilter(p.channel);
     if (p.action === '1') setNeedsActionOnly(true);
     if (p.empty === '1') setIncludeEmpty(true);
     if (p.q) {
@@ -208,7 +205,7 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
 
   const { conversations, total, needsActionCount, isLoading, error, refetch } =
     useAdminConversations({
-      status: statusFilter === ALL_STATUSES ? undefined : statusFilter,
+      status: statusFilter === ALL_STATUSES || needsActionOnly ? undefined : statusFilter,
       channel: channelFilter === ALL_CHANNELS ? undefined : channelFilter,
       search: debouncedSearch || undefined,
       needsAction: needsActionOnly,
@@ -234,18 +231,65 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
     setFocusedIndex(-1);
   }, [conversations]);
 
+  // Phone: opening a conversation pushes a history entry, so Back closes the
+  // sheet instead of leaving the inbox. Desktop keeps replacing the URL.
+  const pushedEntryRef = useRef(false);
   const handleSelect = useCallback((id: string) => {
+    if (!isDesktop && !pushedEntryRef.current) {
+      window.history.pushState(
+        null,
+        '',
+        urlWithConversation(window.location.pathname, window.location.search, id),
+      );
+      pushedEntryRef.current = true;
+    }
     setSelectedId(id);
+  }, [isDesktop]);
+
+  const closeDetail = useCallback(() => {
+    if (pushedEntryRef.current) {
+      // Consume our entry; popstate then clears the selection.
+      pushedEntryRef.current = false;
+      window.history.back();
+      return;
+    }
+    setSelectedId(null);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      pushedEntryRef.current = false;
+      setSelectedId(conversationFromSearch(window.location.search));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const handleDeleted = useCallback(() => {
-    setSelectedId(null);
+    closeDetail();
+    notifyConversationsChanged();
+    void refetch();
+  }, [closeDetail, refetch]);
+
+  const handleChanged = useCallback(() => {
+    notifyConversationsChanged();
     void refetch();
   }, [refetch]);
 
-  const handleChanged = useCallback(() => {
-    void refetch();
-  }, [refetch]);
+  // "Needs action" is the org-wide queue its count describes: turning it on
+  // clears the status and channel; picking a channel tab turns it off.
+  const toggleNeedsAction = useCallback(() => {
+    if (!needsActionOnly) {
+      setStatusFilter(ALL_STATUSES);
+      setChannelFilter(ALL_CHANNELS);
+    }
+    setNeedsActionOnly(!needsActionOnly);
+  }, [needsActionOnly]);
+  const handleChannelChange = useCallback((id: string) => {
+    setChannelFilter(id);
+    if (id !== ALL_CHANNELS) setNeedsActionOnly(false);
+  }, []);
+  const listFailed = Boolean(error) && conversations.length === 0;
 
   // Arrow key / Enter navigation on the list pane (keyboard-first requirement).
   const handleListKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -290,7 +334,7 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
                   aria-label="Filter by channel"
                   tabs={CHANNEL_TABS}
                   activeTab={channelFilter}
-                  onTabChange={setChannelFilter}
+                  onTabChange={handleChannelChange}
                   panelIdPrefix="conversations-panel"
                   className="border-b-0"
                 />
@@ -298,8 +342,13 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
               <Select
                 value={statusFilter}
                 onValueChange={(value) => setStatusFilter(value ?? ALL_STATUSES)}
+                disabled={needsActionOnly}
               >
-                <SelectTrigger aria-label="Filter by status" className="mb-1.5 h-8 w-[130px] shrink-0">
+                <SelectTrigger
+                  aria-label="Filter by status"
+                  title={needsActionOnly ? 'Turn off Needs action to filter by status' : undefined}
+                  className="mb-1.5 h-8 w-[130px] shrink-0"
+                >
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
@@ -317,10 +366,11 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
                 size="sm"
                 variant={needsActionOnly ? 'default' : 'outline'}
                 aria-pressed={needsActionOnly}
-                onClick={() => setNeedsActionOnly((v) => !v)}
+                onClick={toggleNeedsAction}
               >
                 Needs action
-                <span className="font-mono tabular-nums">{needsActionCount}</span>
+                {/* Unknown while the list failed — don't claim 0. */}
+                {!listFailed && <span className="font-mono tabular-nums">{needsActionCount}</span>}
               </Button>
               <Button
                 type="button"
@@ -346,7 +396,7 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
               isLoading && conversations.length > 0 && 'opacity-50 pointer-events-none',
             )}
           >
-            {error && conversations.length === 0 ? (
+            {listFailed ? (
               <ErrorState
                 title="Couldn't load conversations"
                 description="Check your connection and try again."
@@ -403,16 +453,19 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border-strong bg-surface-sunken px-2">
-            <Pager
-              page={safePage}
-              totalPages={totalPages}
-              total={isFirstLoad || (error && conversations.length === 0) ? undefined : total}
-              perPage={PER_PAGE}
-              onPageChange={setPage}
-              showFirstLast
-            />
-          </div>
+          {!listFailed && (
+            <div className="shrink-0 border-t border-border-strong bg-surface-sunken px-2">
+              <Pager
+                page={safePage}
+                totalPages={totalPages}
+                total={isFirstLoad ? undefined : total}
+                perPage={PER_PAGE}
+                onPageChange={setPage}
+                // First/last buttons wrap the range label on a phone.
+                showFirstLast={isDesktop}
+              />
+            </div>
+          )}
         </div>
 
         {/* RIGHT: detail pane (desktop only) */}
@@ -441,7 +494,7 @@ export function ConversationInbox({ canDelete }: ConversationInboxProps) {
       <ConversationDetailSheet
         conversationId={isDesktop ? null : selectedId}
         canDelete={canDelete}
-        onClose={() => setSelectedId(null)}
+        onClose={closeDetail}
         onDeleted={handleDeleted}
         onChanged={handleChanged}
       />
