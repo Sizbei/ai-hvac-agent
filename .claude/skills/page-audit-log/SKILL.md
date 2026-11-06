@@ -23,8 +23,10 @@ Entity filter uses the static `KNOWN_ENTITIES` enum in the page.
 
 **Invariants:**
 - `details` is a JSON string of field **names**, IDs, and enum values only — never
-  PII values (no customer names, emails, addresses). The page renders it verbatim
-  after `JSON.parse`. If `JSON.parse` throws, `formatDetails` returns
+  PII values (no customer names, emails, addresses). The page renders it via
+  `formatAuditDetails` (`src/lib/admin/audit-format.ts`, tested: camelCase
+  keys and field-name values become words, ISO dates become "Oct 6, 2026").
+  If `JSON.parse` throws or the payload isn't an object, it returns
   `'(details unavailable)'` — not the raw string (which could contain a future
   leaked value).
 - `minTableWidth="40rem"` on `DataTableShell` prevents the table columns from
@@ -52,6 +54,10 @@ Entity filter uses the static `KNOWN_ENTITIES` enum in the page.
   interpolate the free-text `name` field — they log `billingPeriod`/`type`
   plus `Object.keys(parsed.data)` (field names only), matching the
   field-names-only invariant.
+
+**Load failure:** the hook clears rows and sets human copy (never the
+server message); the page shows `LoadErrorState` in place of the table and
+hides the entry count.
 
 **Gotchas:**
 - Action filter is populated from the live `actions` array returned by the API

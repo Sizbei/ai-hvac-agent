@@ -83,6 +83,27 @@ Shared UI and shell behaviour:
   staff match by name (plaintext) → `/admin/staff`. Page matches by
   subsequence must start at a word (`nav-search.ts`).
 
+**Focus ring:** Tailwind v4 `outline-none` sets `--tw-outline-style: none`,
+which `focus-visible:outline-2` then reuses, so the ring never draws. Any
+control that pairs them also needs `focus-visible:outline-solid` (done in
+`src/components/ui/button.tsx`, input, select, textarea, switch, scroll-area
+and `admin/ui/section-card.tsx`). Copy that trio, not just `outline-2`.
+
+**Load failures:** a list whose fetch failed must not fall through to its
+empty state. Pick the body with `listViewState` (`src/lib/admin/list-view-state.ts`,
+tested: loading / error / empty / ready; rows on screen stay through a failed
+refetch) and render `LoadErrorState` (`src/components/admin/ui/load-error-state.tsx`,
+human title + Try again) for `error`. Hooks set human copy, never the
+server's `error.message`.
+
+**Unsaved changes:** `src/lib/admin/unsaved-changes.ts` (tested) decides
+dirty (`hasUnsavedChanges`) and which link clicks to hold
+(`shouldHoldLinkClick`). `useUnsavedChangesGuard(dirty)`
+(`src/hooks/use-unsaved-changes-guard.ts`) adds beforeunload plus a
+document capture-phase click hold for in-app links; the page renders a
+`ConfirmDialog` from `pendingHref` / `stay` / `leave`. Dialogs ask on Esc /
+X / Cancel themselves (see the template editor and New request).
+
 **Pickers:** base-ui `<SelectValue />` renders the RAW value (a UUID,
 `__manual__`, `name`). Always pass a formatter:
 `<SelectValue>{(v: unknown) => selectLabel(options, v, 'Placeholder')}</SelectValue>`

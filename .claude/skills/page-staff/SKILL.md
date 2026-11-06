@@ -61,11 +61,18 @@ written by the tech app (`/api/tech/time`, status taps), never here.
 **Seat limit:** one rule for both ways in. `getSeatUsage(orgId)`
 (`src/lib/admin/seats.ts`: active users vs the plan's `maxStaff`) gates
 `createInvite` AND `POST /api/admin/staff` (403 `SEAT_LIMIT_REACHED`), and
-`GET /api/admin/staff` returns `seats` so the page shows "You've used N of M
+Reactivating someone (`PATCH /api/admin/staff/[id]` with `isActive: true`
+on a user who is inactive, checked via `isStaffActive`) gets the same gate
+(route test `src/app/api/admin/staff/[id]/route.test.ts`); an already-active
+user re-sending `isActive: true` is never blocked. `GET /api/admin/staff` returns `seats` so the page shows "You've used N of M
 seats." and disables Invite / Add staff when full (`seat-usage.ts`). Dialog
 errors use `staffErrorMessage` (`staff-errors.ts`, copy by code). Phones get a
 card per person instead of the table; inactive people only offer Timesheets
 and Edit.
+
+**Load failure:** staff and pending invites each show `LoadErrorState`
+(Try again) instead of "Invite your first teammate" / "No pending invites";
+invite revoke errors use `staffErrorMessage`.
 
 **Gotchas:**
 - `canInviteAdmins` prop on `InviteDialog` controls whether `admin` role is

@@ -68,6 +68,20 @@ survive. A VALIDATION_ERROR carries `details.path`; the UI shows
 (`src/lib/admin/settings-errors.ts`), never zod text. After-hours uses hour
 and timezone selects (`src/lib/admin/after-hours-options.ts`).
 
+**Unsaved drafts:** branding, services, business, limits and after-hours
+panels take `onDirtyChange` (via `useReportDirty`) and compare their draft to
+the saved config with `hasUnsavedChanges`. The page puts a dot on each dirty
+tab and, while any is dirty, `useUnsavedChangesGuard` asks "Leave without
+saving?" before a sidebar/in-app link or a reload leaves the page. Back/⌘K
+navigation is not held. Business info also rejects a phone that fails
+`phoneInputError` (shared with the customer forms). Limits reports every bad
+field at once.
+
+**Billing page:** wording comes from `src/lib/admin/billing-copy.ts` (tested:
+feature labels for every plan feature, "Free plan" not "Free · Free", status
+words). Load failure shows `LoadErrorState`; errors are human copy. The page
+header has Back to settings.
+
 **Embed snippet:** keys are stored hashed, so `buildEmbedSnippet`
 (`src/lib/admin/embed-snippet.ts`) fills in only a key created on this page
 in this visit; otherwise it shows `YOUR_PUBLISHABLE_KEY` and hides Copy.

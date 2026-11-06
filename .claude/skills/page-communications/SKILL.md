@@ -35,6 +35,13 @@ for the org are returned in a single request, ordered by `triggerType` then
 `priority`. State lives in local React state; `fetchTemplates` is the shared
 re-fetch callback.
 
+**Load and toggle:** a failed GET shows `LoadErrorState` (never "No
+templates yet") and disables Create; a refetch after a toggle keeps the cards
+on screen, and the toggled card's button shows "Saving…". The editor asks
+"Discard your changes?" on Esc / X / Cancel when the form differs from its
+starting values (`hasUnsavedChanges`); a clean form closes at once. Name is
+the first field, Template ID second.
+
 **Invariants:**
 - Trigger types are the full 15-value `communicationTriggerTypeEnum`
   (schema.ts), enumerated in `COMMUNICATION_TRIGGER_TYPES`

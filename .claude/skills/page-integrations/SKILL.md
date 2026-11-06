@@ -43,6 +43,11 @@ derive each service's status; no writes occur here.
 - `item.configurable && item.manageHref` both required to show the Manage button —
   an item can be configurable but have no href (e.g., partially wired integrations).
 
+**Wording:** the `mock` status badge reads "Test mode"; details say "Test
+mode — no real charges are made" / "Set up" / "Not set up", never "mock",
+"adapter" or "API key". A failed load shows `LoadErrorState`, not "No
+integrations found".
+
 **Gotchas:**
 - `mock` status (yellow) means env vars are present but credentials are not yet
   live/validated — a common state during initial setup.
