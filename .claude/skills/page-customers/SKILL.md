@@ -105,6 +105,22 @@ work logs — real booking history is in `service_requests` via
   gate (it discloses other customers' names). The UI shows the option in the
   overflow menu but the API enforces the gate. The erased row is retained
   (anonymized), financial history kept, blind-index columns nulled.
+- **Erase reaches every chat session of the customer**, not just the
+  directly linked ones: `anonymizeCustomer` takes the union of
+  `customer_sessions.customer_id` and `service_requests.session_id` of their
+  requests. For those sessions it deletes chat uploads (before their
+  messages: `attachments.message_id` FK) and messages, and nulls `metadata`
+  (plaintext name/phone/email/address slots), `summary`, `running_summary`,
+  `next_steps` and the customer link. An `sms:<phone>` token becomes
+  `erased:<session id>` (a later text from that number starts a fresh
+  thread); other tokens carry no PII and stay (the FieldPulse import dedupes
+  on `fp-import-`). All one `db.batch`. Customers erased before this were
+  backfilled by `drizzle/0056_erased_session_scrub.sql`; sessions whose only
+  link was the (already nulled) `customer_id` could not be found by it.
+- After erase AND hard delete, `invalidateCustomerSearchCache(orgId)`
+  (`src/lib/admin/crm-queries.ts`) drops that org's cached search scans on
+  this instance; other instances age out within the 5-minute TTL, and every
+  cache get/set sweeps all expired entries.
 - **Hard delete** (`DELETE /api/admin/customers/[id]`) is ALSO `isSuperAdmin`-only
   — it permanently orphans `invoices.customerId`/`estimates.customerId` (no FK,
   no de-identification), so it is strictly more destructive than erase and must
@@ -133,7 +149,8 @@ work logs — real booking history is in `service_requests` via
   plaintext) is cached per instance in a `CustomerScanCache` keyed by org +
   filters and revalidated every search by a one-row md5 fingerprint of the
   filtered set, so a repeat search costs ~1 round trip instead of re-reading
-  ~800 KB; counts are aggregated for the returned page ids only.
+  ~800 KB; counts are aggregated for the returned page ids only. Build keys
+  with `customerScanKey` so the org-prefix invalidation keeps matching.
 - Erased (`anonymized_at`) rows are hidden with archived ones by default and
   sort last when "Show archived" is on.
 - Labels for issue/note/equipment types come from

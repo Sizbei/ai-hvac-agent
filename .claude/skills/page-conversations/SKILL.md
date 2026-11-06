@@ -50,9 +50,14 @@ escalated rows, 404 otherwise) sets/clears it and audits
 widget open; it is hidden unless `includeEmpty=1` ("Show empty chats"). Nothing
 is deleted.
 
-**Search:** session id, captured metadata (name/phone/email/address), linked
-request number, message text, and — for a phone-shaped query — the digits of
-metadata + SMS token (`phoneDigitsQuery`).
+**Search:** session id, the captured contact keys only (name/phone/email/
+address via `sessionContactMatches`, `src/lib/admin/session-contact-search.ts`
+— never the raw metadata JSON text, which matched key names and internal
+slots), linked request number, message text, and — for a phone-shaped query
+(`phoneDigitsQuery`) — the digits of the `customerPhone` key or of the number
+in an `sms:` token (`sessionPhoneDigitsMatch`; web tokens and CallSids are
+never digit-matched). Erased customers' sessions have no metadata and an
+`erased:<id>` token, so they cannot be found by the person's details.
 
 **Invariants:**
 - `page.tsx` intentionally omits PageShell (no `<h1>` wrapper, full-bleed

@@ -74,7 +74,8 @@ Shared UI and shell behaviour:
   in `nav-items.ts`.
 - ⌘K search (`search-queries.ts`): request results link to
   `/admin/requests?request=<id>` (there is no `/admin/requests/[id]` page);
-  conversations are searched by captured metadata + request number.
+  conversations are searched by the captured contact keys
+  (`sessionContactMatches`, not the raw metadata text) + request number.
 
 **Pickers:** base-ui `<SelectValue />` renders the RAW value (a UUID,
 `__manual__`, `name`). Always pass a formatter:
