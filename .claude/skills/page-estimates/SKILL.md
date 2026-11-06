@@ -81,6 +81,22 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
   `/admin/invoices/<id>?created=1` (banner on the invoice).
 - New line items get uuid **v7** ids so `ORDER BY id` is insertion order
   (older estimates keep random v4 order — no sort column exists).
+- **Round-2 fixes:** the New estimate dialog asks "Discard this estimate?"
+  on Esc / click outside / Cancel once anything was built
+  (`isEstimateDraftDirty`), validates manual line prices with
+  `draftLinePriceError` (strict `parseMoneyInput`), and offers "Open
+  estimate" after creating. List rows carry `optionCount` + `soldOptionId`;
+  an undecided multi-option total reads "up to $X" (`estimateTotalLabel` in
+  `estimate-list-display.ts`) and the Open pipeline sublabel says "highest
+  option"; age is clamped at 0 (`estimateAgeDays`). A failed list or detail
+  load shows `LoadErrorState` — no $0.00 KPI band; the detail tells a 404
+  ("may have been removed") from a failed load (`detailLoadFailure`). The
+  detail carries `invoiceId` (left join on `invoices.estimate_id`) and shows
+  "View invoice" instead of Generate once one exists; `POST
+  /api/admin/invoices` returns `created: false` (200, no audit) for an
+  existing invoice and the page only adds `?created=1` for a real creation.
+  Mark sold asks first. Financing is offered only with a customer
+  (`canOfferFinancing`).
 
 **Gotchas:**
 - `winRatePct` can be null (no closed estimates yet); guard before rendering.
@@ -92,4 +108,5 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
 **Verify changes:** `npx vitest run src/lib/admin/estimate-queries.test.ts
 src/lib/admin/estimate-list-pagination.test.ts
 src/lib/admin/estimate-synced-guards.test.ts src/lib/admin/estimate-value.test.ts
-src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-draft.test.ts` · visual via admin-pages recipe.
+src/lib/admin/estimate-detail.test.ts src/lib/admin/estimate-draft.test.ts
+src/lib/admin/estimate-list-display.test.ts src/lib/admin/detail-load.test.ts` · visual via admin-pages recipe.

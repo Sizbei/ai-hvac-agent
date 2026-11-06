@@ -109,6 +109,15 @@ X / Cancel themselves (see the template editor and New request).
 `<SelectValue>{(v: unknown) => selectLabel(options, v, 'Placeholder')}</SelectValue>`
 (`src/lib/admin/select-label.ts`) — it never returns the raw value.
 
+**Money inputs:** parse every typed dollar amount with `parseMoneyInput`
+(`src/lib/admin/money-format.ts`) — it rejects more than 2 decimals ("Use
+dollars and cents, like 12.50."), never rounds, and builds cents from digits.
+`parseDollarsToCents` (lenient, rounds) is for display previews only. Put
+`noValidate` on the form so the browser's step message doesn't replace ours.
+A failed load renders `LoadErrorState` (Try again) instead of KPI zeros or an
+empty state; a detail page splits 404 from a failed load with
+`detailLoadFailure` (`src/lib/admin/detail-load.ts`).
+
 **PageHeader actions** wrap on phones (`flex-wrap max-w-full`, single
 non-shrinking row from `sm` up) so a primary action is never pushed off a
 390 px screen. Don't re-add `shrink-0`/nowrap below `sm`.

@@ -38,6 +38,16 @@ Search is debounced 300ms. Filters persist to URL (?q=&type=&sort=&inactive=&lab
 
 - Form: cost + markup sets price (`priceFromMarkup`); a blank markup saves
   the one the price implies (`markupFromPrice`) — `src/lib/admin/pricebook-markup.ts`.
+  Typing a price recomputes (or clears) the markup (`markupInputAfterPriceEdit`)
+  so the stored markup never disagrees with the price. Price, member price and
+  cost go through `parseMoneyInput` (more than 2 decimals is an error, never
+  rounded); the form is `noValidate` so our copy shows, not the browser's.
+- A failed items or tax-rates load shows `LoadErrorState` (Try again), never
+  "No pricebook items yet." / "No tax rates configured." (`TaxRatesPanel`
+  `loadFailed` + `onRetry`).
+- Phones: below `sm` the table shows name, price, margin and the expander;
+  type, SKU, member price and the action buttons live in the expanded row
+  (which carries Deactivate on phones).
   `hours` is an INTEGER column (labelled "whole"); half hours need a migration.
 - Empty result with a search/filter active reads "No items match …" with a
   clear action — "No pricebook items yet." only for a truly empty catalog.
@@ -50,7 +60,7 @@ Search is debounced 300ms. Filters persist to URL (?q=&type=&sort=&inactive=&lab
 - 17.5k items means full-table fetches are expensive — the server must always
   paginate; never bypass the `page`/`limit` params.
 
-**Verify changes:** `npx vitest run src/lib/admin/pricebook-list-helpers.test.ts
+**Verify changes:** `npx vitest run src/lib/admin/pricebook-markup.test.ts src/lib/admin/money-format.test.ts src/lib/admin/pricebook-list-helpers.test.ts
 src/lib/admin/pricebook-queries.test.ts` · visual via admin-pages recipe.
 
 **Setup guide:** `?new=1&from=setup` opens the add-item dialog and shows the

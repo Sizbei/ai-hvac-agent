@@ -175,6 +175,23 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Document amount due is red only when past the due date
   (`invoiceDocModel(inv, now).isOverdue`).
 
+**Round-2 fixes (2026-11):**
+- Money inputs (Record payment, refund) use `parseMoneyInput`
+  (`src/lib/admin/money-format.ts`): more than 2 decimals → "Use dollars and
+  cents, like 12.50." — never rounded (1.999 used to record $2.00). Both are
+  real `<form noValidate>`s, so Enter submits. The refund form pre-fills what
+  is left to refund and names it when exceeded.
+- A failed list load hides the SummaryBand and the empty state ("You're all
+  caught up") and shows one `LoadErrorState`; the loading skeleton tiles sit
+  above the filters like the loaded band. The detail tells a 404 from a
+  failed load (`detailLoadFailure`, Try again) and keeps the invoice on
+  screen when a later reload fails.
+- `?created=1` is set only for a real creation (`created: true` from the
+  POST) and is dropped from the URL after the banner shows.
+- Financing panel only with a customer (`canOfferFinancing`).
+- Activity rows: "Payment recorded · $200.00 · Check", "Refund issued · $50.00".
+- Phones: the document drops the unit-price column below `sm`.
+
 **Gotchas:**
 - The SummaryBand is suppressed during initial load (`!isLoading`) to avoid the
   zero-data flash before stats arrive — do not remove the guard.
@@ -183,7 +200,7 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Void is a soft state change (`state='void'`); it can't be undone via the UI;
   the server blocks voiding synced invoices and invoices with payments.
 
-**Verify changes:** `npx vitest run src/lib/admin/invoice-collectible.test.ts
+**Verify changes:** `npx vitest run src/lib/admin/money-format.test.ts src/components/admin/invoices/invoice-activity.test.ts src/app/api/admin/invoices/route.test.ts src/lib/admin/invoice-collectible.test.ts
 src/lib/admin/invoice-list-pagination.test.ts src/lib/admin/invoice-queries.test.ts
 src/lib/admin/invoice-synced-guards.test.ts src/lib/admin/invoice-queries-list.test.ts
 src/lib/communication/send-invoice-reminder.test.ts src/lib/admin/invoice-payment-copy.test.ts

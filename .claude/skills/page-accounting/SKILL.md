@@ -18,15 +18,20 @@ API `src/app/api/admin/accounting/export/route.ts` · export logic
 
 **Data flow:** on mount the panel probes `GET /api/admin/accounting/export`
 without params. 403/401 → renders nothing. 400 VALIDATION_ERROR → authorized,
-shows the form. On download: sends `?from=<ISO>&to=<ISO>&format=csv` where from
-is `T00:00:00.000Z` and to is `T23:59:59.999Z` (full-day inclusive). The server
-streams a CSV blob; the client triggers a synthetic `<a download>` click.
+shows the form. On download: sends `?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv`
+(plain business days). The server reads the org's time zone
+(`getOrgTimeZone`, after-hours settings) and covers whole business days with
+`zonedDayRange` (`src/lib/admin/zoned-date.ts`, DST-correct). A full ISO
+timestamp is still accepted; only its date part is used. The server streams a
+CSV blob; the client triggers a synthetic `<a download>` click.
 
 **Invariants (violate = bug):**
 - The export endpoint is super_admin-gated on the server; the client probe
   pattern is UI hygiene only — never rely on the probe result as the real gate.
-- Date range is always sent as full-day ISO bounds (`T00:00:00.000Z` /
-  `T23:59:59.999Z`) to avoid timezone-edge omissions on the boundary days.
+- Dates are BUSINESS days: the period bounds and every row's Date are in the
+  org's time zone (`dateInZone`), never UTC — an 8 pm Eastern payment on Nov 5
+  is a Nov 5 row (UTC made it Nov 6, and month-end work landed in the wrong
+  month).
 - The probe fires without date params — the server returns 400 VALIDATION_ERROR
   (not 403) for authorized callers with missing params. Only 401/403 means
   unauthorized. Do not break this probe/gate handshake.
@@ -40,7 +45,12 @@ streams a CSV blob; the client triggers a synthetic `<a download>` click.
   `Date,Type,Account,Reference,Memo,Amount,Import`, one row per transaction,
   NO `#` comment rows and NO subtotal rows. Reference = full row id; memo uses
   the app's `#XXXXXXXX` refs (never customer names — ids-only PII stance).
-  Refunds are negative; $0 labor rows are dropped. The `Import` column is the
+  Refunds are negative; $0 labor rows are dropped. An invoice posts its
+  SUBTOTAL to Sales Revenue and its tax on a separate `tax` row to Sales Tax
+  Payable (tax is owed, not earned). Rows are sorted by date within each
+  section (native first, then mirrored). Refund memos name the invoice
+  ("Refund on invoice #X", payment ref only when the payment has no invoice).
+  The `Import` column is the
   double-count guard: native "Yes", mirrored "No — already in FieldPulse" /
   "No — already in HCP" (source-accurate; payment mirrors are always
   FieldPulse since HCP has no payment mirror).
@@ -54,5 +64,5 @@ streams a CSV blob; the client triggers a synthetic `<a download>` click.
 - Error messages come from `json.error?.message`; non-JSON error bodies fall
   back to "Could not generate the export." — preserve this fallback.
 
-**Verify changes:** `npx vitest run src/lib/admin/accounting-export.test.ts`
+**Verify changes:** `npx vitest run src/lib/admin/accounting-export.test.ts src/lib/admin/zoned-date.test.ts src/app/api/admin/accounting/export/route.test.ts`
 · visual via admin-pages recipe (log in as super_admin to see the panel).

@@ -38,6 +38,20 @@ shareable links. Search is debounced 300 ms.
 
 - Track material pre-fills unit cost from the pricebook item's `costCents`
   (materials carry `costCents`) unless a cost was already typed.
+- **Track material never overwrites a stock row.** `POST /api/admin/inventory`
+  without `update` is insert-only (`createInventoryItem`, `ON CONFLICT DO
+  NOTHING`) and answers 409 `ALREADY_TRACKED` for a tracked material; Edit
+  stock sends `update: true` (`updateInventoryItem` writes only the fields
+  sent, 404 when untracked). `GET` returns `trackedPricebookItemIds` (every
+  tracked id, not just the page) and the page leaves those out of the Track
+  material picker. Add mode sends only filled-in fields. Tests:
+  `src/app/api/admin/inventory/route.test.ts`, `inventory-queries.test.ts`.
+- A failed load renders one `LoadErrorState` (Try again) in place of the
+  table AND the purchase-order panel — never "No materials tracked".
+- Receive asks first (ConfirmDialog; it adds stock, no undo). Track, Edit,
+  New PO, Mark ordered and Receive show a saved notice.
+- Phones: reorder point and location columns are hidden below `sm`; New PO
+  puts the material picker on its own row.
 
 **Gotchas:**
 - The `usePricebook({ limit: 20000 })` call is intentionally large — it powers
@@ -45,6 +59,7 @@ shareable links. Search is debounced 300 ms.
 - `materials` array is derived from pricebook items via `useMemo` — do not move
   the filter into `usePricebook`.
 
-**Verify changes:** visual via the admin-pages recipe at `/admin/inventory` ·
+**Verify changes:** `npx vitest run src/app/api/admin/inventory src/lib/admin/inventory-queries.test.ts`
+· visual via the admin-pages recipe at `/admin/inventory` ·
 test "Below reorder only" toggle and search debounce. `npx vitest run
 src/app/api/admin/inventory` if API tests exist.
