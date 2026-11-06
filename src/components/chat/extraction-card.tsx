@@ -1,9 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { sentenceCase, urgencyLabel } from '@/lib/chat/summary-labels';
+import {
+  sentenceCase,
+  urgencyLabel,
+  compactSummary,
+  ISSUE_TYPE_OPTIONS,
+} from '@/lib/chat/summary-labels';
 import { motion } from 'motion/react';
-import { ClipboardCheck, Pencil, Check, X } from 'lucide-react';
+import { ClipboardCheck, Pencil, Check, X, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -15,6 +20,7 @@ import {
   CardFooter,
 } from '@/components/ui/card';
 import { ANIMATION } from '@/lib/design-tokens';
+import { cn } from '@/lib/utils';
 import { SKIP_SENTINEL } from '@/lib/ai/chat-slots';
 import type { ExtractionResult } from '@/lib/ai/extraction-schema';
 
@@ -117,6 +123,54 @@ function EditableFieldRow({ label, value, onSave }: EditableFieldRowProps) {
   );
 }
 
+interface IssueTypeRowProps {
+  readonly value: string;
+  readonly onSave: (next: string) => void;
+}
+
+/** Issue type with an Edit that reopens it as a picker (round-2 UX N-P0-1). */
+function IssueTypeRow({ value, onSave }: IssueTypeRowProps) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-medium text-muted-foreground">Issue type</span>
+      {editing ? (
+        <select
+          autoFocus
+          aria-label="Issue type"
+          value={value}
+          onChange={(e) => {
+            onSave(e.target.value);
+            setEditing(false);
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+          }}
+          className="h-11 rounded-md border border-border-input bg-surface-raised px-2 text-base text-foreground md:text-sm"
+        >
+          {ISSUE_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm">{sentenceCase(value)}</span>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="relative before:absolute before:-inset-2 before:content-[''] inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+            aria-label="Edit issue type"
+          >
+            <Pencil className="size-3" />
+            Edit
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface FieldRowProps {
   readonly label: string;
   readonly children: React.ReactNode;
@@ -134,6 +188,9 @@ function FieldRow({ label, children }: FieldRowProps) {
 export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
   // Local editable copy so inline corrections are applied before the dialog opens.
   const [edits, setEdits] = useState<Partial<ExtractionResult>>({});
+  // Phones show a one-line summary until opened, so the card doesn't bury the
+  // transcript (it took ~520 of 844 px). From sm up it's always open.
+  const [expanded, setExpanded] = useState(false);
 
   function field<K extends keyof ExtractionResult>(key: K): ExtractionResult[K] {
     return (key in edits ? edits[key] : extraction[key]) as ExtractionResult[K];
@@ -167,12 +224,32 @@ export function ExtractionCard({ extraction, onConfirm }: ExtractionCardProps) {
             <ClipboardCheck className="size-4 text-marker" />
             Service request summary
           </CardTitle>
+          {!expanded && (
+            <p className="text-sm text-muted-foreground sm:hidden">
+              {compactSummary({ issueType, urgency, address })}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="inline-flex min-h-11 items-center gap-1 self-start justify-self-start text-sm font-medium text-foreground underline-offset-4 hover:underline sm:hidden"
+          >
+            {expanded ? 'Hide details' : 'Review details'}
+            <ChevronDown
+              className={cn('size-4 transition-transform', expanded && 'rotate-180')}
+              aria-hidden="true"
+            />
+          </button>
         </CardHeader>
-        <CardContent className="grid gap-3">
+        <CardContent
+          className={cn(
+            'gap-3',
+            expanded ? 'grid max-h-[40dvh] overflow-y-auto sm:max-h-none' : 'hidden sm:grid',
+          )}
+        >
           {issueType && (
-            <FieldRow label="Issue type">
-              {sentenceCase(issueType)}
-            </FieldRow>
+            <IssueTypeRow value={issueType} onSave={save('issueType')} />
           )}
           {urgency && (
             <FieldRow label="Urgency">
