@@ -161,7 +161,10 @@ function buildLoader(appOrigin: string): string {
 
     btn.addEventListener("click", function () { setOpen(!open); });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && open) setOpen(false);
+      if (e.key === "Escape" && open) {
+        setOpen(false);
+        try { btn.focus(); } catch (err) {}
+      }
     });
     // Close requests from our own iframe (its header X, or Esc pressed while
     // focus is inside it). Only trust our origin + our iframe's window.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateDecisionCopy } from "./estimate-decision";
+import { estimateDecisionCopy, approveBlockedHint } from "./estimate-decision";
 
 describe("estimateDecisionCopy", () => {
   it("sold: a receipt with option, price, signer and date", () => {
@@ -50,5 +50,14 @@ describe("estimateDecisionCopy", () => {
       });
       expect(`${c.title} ${c.body}`).not.toMatch(/decided/i);
     }
+  });
+});
+
+describe("approveBlockedHint", () => {
+  it("says what is missing, and nothing once ready", () => {
+    expect(approveBlockedHint(false, false)).toBe("Choose an option and type your name to approve.");
+    expect(approveBlockedHint(false, true)).toBe("Choose an option to approve.");
+    expect(approveBlockedHint(true, false)).toBe("Type your full name to approve.");
+    expect(approveBlockedHint(true, true)).toBeNull();
   });
 });

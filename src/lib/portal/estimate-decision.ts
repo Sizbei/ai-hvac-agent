@@ -49,3 +49,17 @@ export function estimateDecisionCopy(input: EstimateDecisionInput): EstimateDeci
     body: "It's no longer open for approval. Please contact us with any questions.",
   };
 }
+
+/**
+ * Why "Approve & sign" is still disabled, shown under it (null once ready).
+ * The button used to sit greyed out with no hint (round-2 UX P2-7).
+ */
+export function approveBlockedHint(
+  optionChosen: boolean,
+  signatureOk: boolean,
+): string | null {
+  if (!optionChosen && !signatureOk) return "Choose an option and type your name to approve.";
+  if (!optionChosen) return "Choose an option to approve.";
+  if (!signatureOk) return "Type your full name to approve.";
+  return null;
+}

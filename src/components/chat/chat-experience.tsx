@@ -243,7 +243,9 @@ export function ChatExperience({
       <MessageList
         messages={messages}
         isStreaming={isStreaming}
-        showFeedback
+        // No "Was this helpful?" on a closed chat (e.g. under a gas emergency).
+        showFeedback={!isTerminal}
+        companyName={companyName}
       />
 
       {showEmptyReply && (

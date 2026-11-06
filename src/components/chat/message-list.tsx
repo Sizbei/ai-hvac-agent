@@ -12,9 +12,16 @@ interface MessageListProps {
   readonly isStreaming: boolean;
   /** Enable the 👍/👎 control under assistant answers. */
   readonly showFeedback?: boolean;
+  /** The org's name for the typing indicator. */
+  readonly companyName?: string | null;
 }
 
-export function MessageList({ messages, isStreaming, showFeedback }: MessageListProps) {
+export function MessageList({
+  messages,
+  isStreaming,
+  showFeedback,
+  companyName,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastAssistantRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +79,7 @@ export function MessageList({ messages, isStreaming, showFeedback }: MessageList
             </div>
           );
         })}
-        {showTypingIndicator && <TypingIndicator />}
+        {showTypingIndicator && <TypingIndicator name={companyName} />}
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { approveBlockedHint } from '@/lib/portal/estimate-decision';
 
 export interface ApproveOption {
   readonly id: string;
@@ -38,6 +39,7 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
 
   const signatureOk = signatureName.trim().length >= MIN_SIGNATURE_LENGTH;
   const chosen = options.find((o) => o.id === optionId) ?? null;
+  const blockedHint = approveBlockedHint(Boolean(optionId), signatureOk);
 
   async function handleSubmit(): Promise<void> {
     if (!optionId || !signatureOk) return;
@@ -153,6 +155,11 @@ export function ApproveForm({ token, options }: ApproveFormProps) {
       >
         {isSubmitting ? 'Submitting…' : 'Approve & sign'}
       </Button>
+      {blockedHint && !isSubmitting && (
+        <p className="text-center text-[13px] text-muted-foreground" aria-live="polite">
+          {blockedHint}
+        </p>
+      )}
     </div>
   );
 }

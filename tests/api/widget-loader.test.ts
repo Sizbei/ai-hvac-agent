@@ -87,4 +87,10 @@ describe("GET /widget.js (embed loader)", () => {
     expect(body).toContain("e.origin !== APP");
     expect(body).toContain("e.source !== iframe.contentWindow");
   });
+
+  it("returns focus to the launcher on every close path (X message and host Esc)", async () => {
+    const body = await GET(req()).text();
+    // One focus() for the iframe's close message, one for Esc on the host page.
+    expect(body.match(/btn\.focus\(\)/g)?.length).toBe(2);
+  });
 });

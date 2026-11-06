@@ -3,11 +3,11 @@
 import { motion, useReducedMotion } from 'motion/react';
 
 /**
- * "HVAC Assistant is typing…" indicator. Only mounted while the LLM-fallback
+ * "<Company> is typing…" indicator (falls back to "Typing…" with no brand). Only mounted while the LLM-fallback
  * response is streaming — deterministic answers return instantly, so we never
  * fake latency on canned replies. Animation pauses under reduced-motion.
  */
-export function TypingIndicator() {
+export function TypingIndicator({ name }: { readonly name?: string | null }) {
   const reduceMotion = useReducedMotion();
 
   return (
@@ -31,7 +31,7 @@ export function TypingIndicator() {
         </div>
       </div>
       <span className="px-1 text-[11px] text-muted-foreground">
-        HVAC Assistant is typing…
+        {name ? `${name} is typing…` : 'Typing…'}
       </span>
     </div>
   );
