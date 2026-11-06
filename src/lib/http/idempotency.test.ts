@@ -460,7 +460,7 @@ describe("toResponse", () => {
 describe("idempotency-codes", () => {
   it("STORED_CODES is exactly the deterministic set, shared with the client", () => {
     expect([...STORED_CODES].sort()).toEqual(
-      ["ALREADY_BILLED", "INVALID_INPUT", "INVOICE_LOCKED", "INVOICE_VOIDED", "ITEM_NOT_FOUND", "NO_LINES", "SEND_FAILED", "VALIDATION_ERROR"],
+      ["ALREADY_BILLED", "ALREADY_DECIDED", "EQUIPMENT_RETIRED", "ESTIMATE_EXPIRED", "INVALID_INPUT", "INVALID_OPTION", "INVOICE_CHANGED", "INVOICE_LOCKED", "INVOICE_VOIDED", "ITEM_NOT_FOUND", "NO_LINES", "SEND_FAILED", "VALIDATION_ERROR"],
     );
     expect(CLIENT_SPENT_CODES).toBe(STORED_CODES);
   });

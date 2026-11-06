@@ -6,7 +6,10 @@
 
 /** Error codes whose response is deterministic for a given request, so the
  * winner stores it (`done`) and a retry with the same key replays it.
- * SEND_FAILED is stored because a pay-link message may already have gone out. */
+ * SEND_FAILED is stored because a pay-link message may already have gone out.
+ * M3c adds the estimate and equipment terminal codes (spec §4) and INVOICE_CHANGED
+ * (plan ruling 11: the bill's derived invoice was paid or voided, so the next try
+ * needs a new key). */
 export const STORED_CODES: ReadonlySet<string> = new Set([
   "INVOICE_LOCKED",
   "NO_LINES",
@@ -16,6 +19,11 @@ export const STORED_CODES: ReadonlySet<string> = new Set([
   "INVALID_INPUT",
   "VALIDATION_ERROR",
   "SEND_FAILED",
+  "ALREADY_DECIDED",
+  "ESTIMATE_EXPIRED",
+  "INVALID_OPTION",
+  "EQUIPMENT_RETIRED",
+  "INVOICE_CHANGED",
 ]);
 
 /** On the client a stored code means "this key is spent": mint a new one. */
