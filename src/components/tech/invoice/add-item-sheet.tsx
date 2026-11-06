@@ -6,6 +6,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { doneAction } from '@/lib/tech/add-item-done';
 import type { WriteResult } from './use-invoice-writes';
 
 export interface PricebookHit {
@@ -97,8 +98,8 @@ export function AddItemSheet({
     setCanRetry(false);
   }
 
-  async function add(retrying = false): Promise<void> {
-    if (!picked) return;
+  async function add(retrying = false): Promise<WriteResult['status'] | null> {
+    if (!picked) return null;
     setAdding(true);
     setMessage(null);
     setCanRetry(false);
@@ -115,6 +116,20 @@ export function AddItemSheet({
     } else if (r.message) {
       setMessage({ text: r.message, error: r.status !== 'pending' });
     }
+    return r.status;
+  }
+
+  /** Done adds the pending pick (with its quantity) before closing; an add that did not land keeps the sheet open. */
+  async function done(): Promise<void> {
+    const action = doneAction({ picked: picked !== null, canRetry, adding });
+    if (action === 'wait') return;
+    if (action === 'add_then_close') {
+      const status = await add();
+      // 'dropped': add() already reset and closed the sheet — never close twice.
+      if (status !== 'done') return;
+    }
+    reset();
+    onClose();
   }
 
   const locked = disabled || adding;
@@ -213,7 +228,7 @@ export function AddItemSheet({
               {message.text}
             </p>
           )}
-          <Button variant="outline" className="h-12 w-full rounded-xl text-[16px]" disabled={adding} onClick={() => { reset(); onClose(); }}>
+          <Button variant="outline" className="h-12 w-full rounded-xl text-[16px]" disabled={adding} onClick={() => void done()}>
             Done
           </Button>
         </div>
