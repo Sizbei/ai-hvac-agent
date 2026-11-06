@@ -25,6 +25,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/tech-guide.test.ts",
   // Hold → schedule next visit: office placement vs the technician's phone (one throwaway org).
   "tests/integration/hold-next-visit.test.ts",
+  // M3c sell on site: estimates, bill once, equipment against the dev DB (two throwaway orgs).
+  "tests/integration/field-estimate.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the
