@@ -4,7 +4,7 @@
  * org and the parent customer so a mismatched (customerId, equipmentId) pair —
  * or a cross-tenant id — can never touch another customer's record.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerEquipment } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -47,7 +47,8 @@ export interface RecordEquipmentInput {
  * de-duplicated by equipment TYPE: if the customer already has a unit of that
  * type we enrich the existing row with any newly-learned make/install date
  * (never overwriting a known value with null) rather than inserting a duplicate;
- * otherwise we insert a new row. Org + customer scoped. Returns the row id and
+ * otherwise we insert a new row. Retired units (replaced in the field) are
+ * ignored. Org + customer scoped. Returns the row id and
  * whether it was created or updated.
  */
 export async function recordCustomerEquipment(
@@ -69,6 +70,7 @@ export async function recordCustomerEquipment(
         and(
           eq(customerEquipment.customerId, customerId),
           eq(customerEquipment.equipmentType, input.equipmentType),
+          isNull(customerEquipment.retiredAt),
         )!,
       ),
     )

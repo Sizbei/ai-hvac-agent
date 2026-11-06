@@ -78,6 +78,10 @@ export interface EquipmentRecord {
   readonly locationInHome: string | null;
   readonly notes: string | null;
   readonly fieldpulseAssetId: string | null;
+  /** M3c: set when a newer unit replaced this one (listed last, muted). */
+  readonly retiredAt: string | null;
+  /** The replacing unit, only while it still exists. */
+  readonly replacedByEquipmentId: string | null;
 }
 
 export interface ServiceHistoryRecord {

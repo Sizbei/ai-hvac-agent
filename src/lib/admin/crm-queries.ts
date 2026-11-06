@@ -62,6 +62,7 @@ import type {
   UpdateCustomerInput,
   UpdateCustomerResult,
 } from "./crm-types";
+import { equipmentRecords, liveEquipmentCount } from "./crm-equipment-records";
 
 function safeDecrypt(ciphertext: string | null): string | null {
   if (!ciphertext) return null;
@@ -172,7 +173,7 @@ export async function getCustomers(
 
   // The three count aggregates, shared by both query paths.
   const aggCols = {
-    equipmentCount: sql<number>`count(distinct ${customerEquipment.id})::int`,
+    equipmentCount: sql<number>`count(distinct ${customerEquipment.id}) filter (where ${customerEquipment.retiredAt} is null)::int`,
     requestCount: sql<number>`count(distinct ${serviceRequests.id})::int`,
     lastServiceDate: sql<string | null>`max(${serviceRequests.completedAt}) filter (where ${serviceRequests.completedAt} is not null)::text`,
   };
@@ -505,7 +506,7 @@ export async function getCustomerById(
     propertyType: row.propertyType,
     propertySqft: row.propertySqft,
     notes: row.notes,
-    equipmentCount: equipmentRows.length,
+    equipmentCount: liveEquipmentCount(equipmentRows),
     requestCount: requestCountRows[0]?.value ?? 0,
     lastServiceDate: lastServiceRows[0]?.value ?? null,
     customerType: row.customerType,
@@ -520,20 +521,7 @@ export async function getCustomerById(
     billingAddress: safeDecrypt(row.billingAddressEncrypted ?? null),
     fieldpulseData: (row.fieldpulseData as Record<string, unknown> | null) ?? null,
     createdAt: row.createdAt.toISOString(),
-    equipment: equipmentRows.map((e) => ({
-      id: e.id,
-      equipmentType: e.equipmentType,
-      make: e.make,
-      model: e.model,
-      serialNumber: e.serialNumber,
-      installDate: e.installDate?.toISOString() ?? null,
-      warrantyExpiration: e.warrantyExpiration?.toISOString() ?? null,
-      warrantyType: e.warrantyType,
-      warrantyProvider: e.warrantyProvider,
-      locationInHome: e.locationInHome,
-      notes: e.notes,
-      fieldpulseAssetId: e.fieldpulseAssetId ?? null,
-    })),
+    equipment: equipmentRecords(equipmentRows),
     serviceHistory: historyRows.map((h) => ({
       id: h.id,
       serviceRequestId: h.serviceRequestId,

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { selectResult, insertSpy, updateSpy } = vi.hoisted(() => ({
+const { selectResult, insertSpy, updateSpy, whereSpy } = vi.hoisted(() => ({
   selectResult: { value: [] as unknown[] },
+  whereSpy: vi.fn(),
   insertSpy: vi.fn(),
   updateSpy: vi.fn(),
 }));
@@ -10,7 +11,10 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => ({ limit: () => Promise.resolve(selectResult.value) }),
+        where: (w: unknown) => {
+          whereSpy(w);
+          return { limit: () => Promise.resolve(selectResult.value) };
+        },
       }),
     }),
     insert: () => ({
@@ -34,6 +38,7 @@ vi.mock("@/lib/db/schema", () => ({
     equipmentType: "eq.equipmentType",
     make: "eq.make",
     installDate: "eq.installDate",
+    retiredAt: "eq.retiredAt",
     organizationId: "eq.org",
   },
 }));
@@ -43,6 +48,7 @@ vi.mock("@/lib/db/tenant", () => ({
 vi.mock("drizzle-orm", () => ({
   and: (...a: unknown[]) => a,
   eq: (...a: unknown[]) => a,
+  isNull: (...a: unknown[]) => ["isNull", ...a],
 }));
 
 import { recordCustomerEquipment } from "./crm-equipment-queries";
@@ -55,6 +61,7 @@ describe("recordCustomerEquipment", () => {
     selectResult.value = [];
     insertSpy.mockReset();
     updateSpy.mockReset();
+    whereSpy.mockReset();
   });
 
   it("inserts a new equipment row when the customer has none of that type", async () => {
@@ -100,5 +107,10 @@ describe("recordCustomerEquipment", () => {
     expect(r.created).toBe(false);
     // Nothing new to fill → no update issued.
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("ignores retired units when looking for a unit of the same type (M3c)", async () => {
+    await recordCustomerEquipment(ORG, CUST, { equipmentType: "ac", make: "Carrier", installDate: null });
+    expect(JSON.stringify(whereSpy.mock.calls[0]![0])).toContain("eq.retiredAt");
   });
 });
