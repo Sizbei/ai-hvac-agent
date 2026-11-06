@@ -111,3 +111,15 @@ export function nextStepIdForExtraction(
   if (!extraction) return null;
   return nextTriageStep(extractionToTriageSlots(extraction))?.id ?? null;
 }
+
+/**
+ * The question of the triage step currently pending (null when intake is
+ * complete or there's no extraction yet). Used by the chat's provider-down
+ * fallback to keep the intake moving without the model.
+ */
+export function nextStepQuestionForExtraction(
+  extraction: ExtractionResult | null,
+): string | null {
+  if (!extraction) return null;
+  return nextTriageStep(extractionToTriageSlots(extraction))?.question ?? null;
+}

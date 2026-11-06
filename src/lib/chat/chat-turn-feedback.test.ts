@@ -4,6 +4,7 @@ import {
   sessionStartErrorCopy,
   isEmptyReply,
   emptyReplyFallback,
+  isQuestionMessage,
 } from "./chat-turn-feedback";
 
 const envelope = (code: string, message = "raw server text") =>
@@ -59,11 +60,46 @@ describe("isEmptyReply", () => {
 });
 
 describe("emptyReplyFallback", () => {
-  it("offers the org phone when known, otherwise a retry", () => {
+  it("a question with no known issue: sorry + booking offer + call", () => {
     expect(emptyReplyFallback("423-555-0100")).toBe(
-      "Sorry, I couldn't answer that. You can call us at 423-555-0100, or try again.",
+      "Sorry, I couldn't answer that. I can still book a visit for you. Tap the closest option below, or call us at 423-555-0100.",
     );
-    expect(emptyReplyFallback(null)).toBe("Sorry, I couldn't answer that. Please try again.");
-    expect(emptyReplyFallback("   ")).toBe("Sorry, I couldn't answer that. Please try again.");
+    expect(
+      emptyReplyFallback(null, { lastUserMessage: "Do you service Kingsport?" }),
+    ).toBe(
+      "Sorry, I couldn't answer that. I can still book a visit for you. Tap the closest option below.",
+    );
+    expect(emptyReplyFallback("   ")).not.toMatch(/call us/);
+  });
+
+  it("a problem report never says it couldn't answer (N-P1-4)", () => {
+    const copy = emptyReplyFallback("(423) 555-0142", {
+      lastUserMessage: "My heat pump is making a loud grinding noise",
+    });
+    expect(copy).toBe(
+      "I can still get a technician out. Tap the closest option below, or call us at (423) 555-0142.",
+    );
+    expect(copy).not.toMatch(/couldn't answer/);
+  });
+
+  it("issue known: continues the intake with the pending question", () => {
+    expect(
+      emptyReplyFallback("423-555-0100", {
+        lastUserMessage: "how much will this cost?",
+        nextQuestion: "What's the service address where you'd like the technician to come?",
+      }),
+    ).toBe(
+      "Sorry, I couldn't answer that. I can still book a visit for you. What's the service address where you'd like the technician to come?",
+    );
+  });
+});
+
+describe("isQuestionMessage", () => {
+  it("spots questions by mark or lead word", () => {
+    expect(isQuestionMessage("are you open sunday")).toBe(true);
+    expect(isQuestionMessage("How do I reset it")).toBe(true);
+    expect(isQuestionMessage("it's leaking?")).toBe(true);
+    expect(isQuestionMessage("My AC is leaking water")).toBe(false);
+    expect(isQuestionMessage("Isaac here, furnace is out")).toBe(false);
   });
 });

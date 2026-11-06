@@ -15,6 +15,7 @@ import {
 import {
   chipsForExtraction,
   nextStepIdForExtraction,
+  nextStepQuestionForExtraction,
 } from '@/lib/ai/triage-from-extraction';
 import { AddressAutocomplete } from '@/components/chat/address-autocomplete';
 import { ExtractionPills } from '@/components/chat/extraction-pills';
@@ -29,12 +30,7 @@ import { ConnectionStatus } from '@/components/streaming/streaming-states';
 import { ChatEndPanel } from '@/components/chat/chat-end-panel';
 import { chatEndActions } from '@/lib/chat/chat-end-state';
 import { emptyReplyFallback, isEmptyReply } from '@/lib/chat/chat-turn-feedback';
-
-const ISSUE_SUGGESTIONS: readonly Suggestion[] = [
-  { label: 'AC not cooling', message: 'My air conditioner is running but not cooling — it just blows warm air.' },
-  { label: 'No heat', message: "My furnace is running but the house isn't getting warm." },
-  { label: 'Thermostat issue', message: 'My thermostat display is blank / not responding.' },
-];
+import { ISSUE_SUGGESTIONS } from '@/lib/chat/issue-suggestions';
 
 interface ChatExperienceProps {
   /** "page" centers a max-width panel (hosted /chat); "embed" fills the iframe. */
@@ -254,7 +250,13 @@ export function ChatExperience({
         <div className="px-3 pb-2" role="status">
           <div className="rounded-lg border border-border-strong bg-surface p-3">
             <p className="text-[15px] text-foreground">
-              {emptyReplyFallback(endActions.phone)}
+              {emptyReplyFallback(endActions.phone, {
+                lastUserMessage:
+                  messages.findLast((m) => m.role === 'user')?.content ?? null,
+                nextQuestion: extraction?.issueType
+                  ? nextStepQuestionForExtraction(extraction)
+                  : null,
+              })}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <Button variant="outline" className="h-11" onClick={retryLastMessage}>
@@ -330,7 +332,9 @@ export function ChatExperience({
         !isStreaming &&
         !isTerminal &&
         status !== 'extracting' &&
-        lastMessageIsAssistant && (
+        // After a failed turn too: the chips keep the intake moving without
+        // the model (the fallback copy says "tap the closest option below").
+        (lastMessageIsAssistant || showEmptyReply) && (
           <SuggestedReplies
             suggestions={triageChips}
             onSelect={sendMessage}

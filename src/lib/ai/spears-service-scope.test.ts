@@ -112,6 +112,11 @@ describe("Spears commercial service lines route to a repair intake", () => {
       expect(v.intentId).not.toBe("meta-non-hvac-redirect");
     });
   }
+  it("the HVAC 'Not heating' chip starts intake without the model", () => {
+    const v = routeMessage("Our HVAC system is running but not heating.");
+    expect(v.action).toBe("COLLECT_INFO");
+    expect(v.issueType).toBe("heating_not_working");
+  });
 });
 
 describe("quick-reply chip messages route to a repair intake (not redirect)", () => {
@@ -120,7 +125,7 @@ describe("quick-reply chip messages route to a repair intake (not redirect)", ()
   // Keep in sync with the GROUPS there.
   const CHIP_MESSAGES: readonly string[] = [
     "Our HVAC system is running but not cooling — it's just blowing warm air.",
-    "Our HVAC system is running but not putting out any heat.",
+    "Our HVAC system is running but not heating.",
     "Our walk-in cooler is not holding temperature / not cooling.",
     "Our reach-in freezer is not freezing / not staying cold.",
     "Our commercial ice machine has stopped making ice.",

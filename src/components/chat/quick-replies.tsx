@@ -40,7 +40,7 @@ const GROUPS: readonly QuickReplyGroup[] = [
     color: 'border-border-input bg-surface-raised text-foreground hover:bg-accent',
     replies: [
       { text: 'Not cooling', message: 'Our HVAC system is running but not cooling — it\'s just blowing warm air.' },
-      { text: 'Not heating', message: 'Our HVAC system is running but not putting out any heat.' },
+      { text: 'Not heating', message: 'Our HVAC system is running but not heating.' },
       { text: 'Won\'t turn on', message: 'Our HVAC unit won\'t turn on at all — nothing happens at the thermostat.' },
       { text: 'Making noise / leaking', message: 'Our HVAC unit is making a loud noise / leaking water.' },
     ],

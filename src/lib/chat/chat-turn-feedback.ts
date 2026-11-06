@@ -105,9 +105,44 @@ export function isEmptyReply(messages: readonly ChatTurnLike[]): boolean {
   return messages.slice(0, -1).some((m) => m.role === "user");
 }
 
-export function emptyReplyFallback(phone: string | null | undefined): string {
+export interface EmptyReplyContext {
+  /** The customer's message that got no reply. */
+  readonly lastUserMessage?: string | null;
+  /** The pending intake question, when the issue is already known. */
+  readonly nextQuestion?: string | null;
+}
+
+const QUESTION_LEAD =
+  /^(?:how|what|whats|what's|why|when|where|who|which|can|could|do|does|did|is|are|should|will|would|may)\b/i;
+
+/** True when the message reads as a question rather than a problem report. */
+export function isQuestionMessage(message: string): boolean {
+  const t = message.trim();
+  return t.endsWith("?") || QUESTION_LEAD.test(t);
+}
+
+/**
+ * Copy for a turn that ended with no reply (the model call failed). It never
+ * dead-ends: the deterministic intake still works without the model, so the
+ * copy points at it (round-2 UX N-P1-4).
+ * - issue known, a step pending → "I can still book a visit for you." + that
+ *   step's question (the server captures the answer without the model);
+ * - a problem report → "I can still get a technician out." + the issue chips;
+ * - a question → "Sorry, I couldn't answer that." + the booking offer.
+ */
+export function emptyReplyFallback(
+  phone: string | null | undefined,
+  ctx: EmptyReplyContext = {},
+): string {
   const display = phone?.trim();
-  return display
-    ? `Sorry, I couldn't answer that. You can call us at ${display}, or try again.`
-    : "Sorry, I couldn't answer that. Please try again.";
+  const orCall = display ? `, or call us at ${display}` : "";
+  const nextQuestion = ctx.nextQuestion?.trim();
+  if (nextQuestion) {
+    return `Sorry, I couldn't answer that. I can still book a visit for you. ${nextQuestion}`;
+  }
+  const last = ctx.lastUserMessage?.trim() ?? "";
+  if (last && !isQuestionMessage(last)) {
+    return `I can still get a technician out. Tap the closest option below${orCall}.`;
+  }
+  return `Sorry, I couldn't answer that. I can still book a visit for you. Tap the closest option below${orCall}.`;
 }

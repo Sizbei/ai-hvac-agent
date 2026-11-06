@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractionToTriageSlots,
   chipsForExtraction,
+  nextStepQuestionForExtraction,
 } from "./triage-from-extraction";
 import type { ExtractionResult } from "./extraction-schema";
 
@@ -139,5 +140,17 @@ describe("chipsForExtraction", () => {
       }),
     );
     expect(chips).toEqual([]);
+  });
+});
+
+describe("nextStepQuestionForExtraction", () => {
+  it("is null with no extraction", () => {
+    expect(nextStepQuestionForExtraction(null)).toBeNull();
+  });
+  it("returns the pending step's question once the issue is known", () => {
+    const q = nextStepQuestionForExtraction(
+      emptyExtraction({ issueType: "cooling_not_working" }),
+    );
+    expect(q).toBe("Is the system completely down, or is it still partly working?");
   });
 });
