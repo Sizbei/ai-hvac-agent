@@ -185,7 +185,7 @@ export function InventoryFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form noValidate onSubmit={handleSubmit} className="space-y-4">
           {!isEditMode && (
             <div className="space-y-2">
               <Label htmlFor="inv-material">Material</Label>
