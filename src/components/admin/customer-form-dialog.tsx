@@ -7,7 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { phoneInputError, saveErrorMessage } from '@/lib/admin/customer-validation';
+import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import {
+  isCustomerFormDirty,
+  phoneInputError,
+  saveErrorMessage,
+} from '@/lib/admin/customer-validation';
 
 /** The existing customer a duplicate email/phone clashed with (ids only). */
 interface ExistingCustomer {
@@ -37,6 +42,33 @@ export function CustomerFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<ExistingCustomer | null>(null);
   const submittingRef = useRef(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+
+  const resetFields = (): void => {
+    setName('');
+    setPhone('');
+    setEmail('');
+    setAddress('');
+    setPropertyType('');
+    setError(null);
+    setExisting(null);
+  };
+
+  // Esc, the X, the backdrop and Cancel ask first when something was typed.
+  const requestClose = (): void => {
+    if (submittingRef.current) return;
+    if (isCustomerFormDirty([name, phone, email, address, propertyType])) {
+      setDiscardOpen(true);
+      return;
+    }
+    onOpenChange(false);
+  };
+
+  const discard = (): void => {
+    setDiscardOpen(false);
+    resetFields();
+    onOpenChange(false);
+  };
 
   // Editing any field clears the previous attempt's error so it can't sit next
   // to a field that is already fixed.
@@ -82,11 +114,7 @@ export function CustomerFormDialog({
 
         const json = await res.json().catch(() => null);
         if (res.ok && json?.success) {
-          setName('');
-          setPhone('');
-          setEmail('');
-          setAddress('');
-          setPropertyType('');
+          resetFields();
           onSuccess();
         } else {
           setError(saveErrorMessage(res.status, json, SAVE_FAILED));
@@ -106,7 +134,7 @@ export function CustomerFormDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o && submittingRef.current) return; onOpenChange(o); }}>
+    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : requestClose())}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add customer</DialogTitle>
@@ -187,7 +215,7 @@ export function CustomerFormDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
             >
               Cancel
             </Button>
@@ -197,6 +225,15 @@ export function CustomerFormDialog({
           </div>
         </form>
       </DialogContent>
+      <ConfirmDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard this customer?"
+        description="What you’ve entered will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={discard}
+      />
     </Dialog>
   );
 }

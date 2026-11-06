@@ -42,3 +42,11 @@ export function saveErrorMessage(
   }
   return fallback;
 }
+
+/**
+ * Whether the Add customer form holds anything typed — closing it then asks
+ * before discarding (same rule as New request). Whitespace alone is clean.
+ */
+export function isCustomerFormDirty(fields: readonly string[]): boolean {
+  return fields.some((v) => v.trim() !== "");
+}

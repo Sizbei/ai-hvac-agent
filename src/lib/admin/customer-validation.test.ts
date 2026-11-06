@@ -51,3 +51,16 @@ describe("saveErrorMessage", () => {
     expect(saveErrorMessage(400, {}, fallback)).toBe(fallback);
   });
 });
+
+import { isCustomerFormDirty } from "./customer-validation";
+
+describe("isCustomerFormDirty (ask before discarding Add customer)", () => {
+  it("an empty or whitespace-only form is clean", () => {
+    expect(isCustomerFormDirty(["", "", "", "", ""])).toBe(false);
+    expect(isCustomerFormDirty(["  ", "", "\t", "", ""])).toBe(false);
+  });
+  it("any typed field makes it dirty", () => {
+    expect(isCustomerFormDirty(["Ann", "", "", "", ""])).toBe(true);
+    expect(isCustomerFormDirty(["", "", "", "", "Commercial"])).toBe(true);
+  });
+});
