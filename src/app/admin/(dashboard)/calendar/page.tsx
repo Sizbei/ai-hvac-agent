@@ -1,5 +1,6 @@
 'use client';
 
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -201,6 +202,8 @@ export default function CalendarPage() {
   }
 
   const activeError = isAgenda ? agendaError : isMonth ? monthError : error;
+  // Day/week with nothing loaded for this range: the error replaces the grid.
+  const dayWeekFailed = !isAgenda && !isMonth && error !== null && calendar === null && !isLoading;
   const stepLabel = isMonth ? 'month' : view === 'week' ? 'week' : 'day';
 
   return (
@@ -269,10 +272,20 @@ export default function CalendarPage() {
         panelIdPrefix="calendar-panel"
       />
 
-      {activeError && (
+      {activeError && !dayWeekFailed && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{activeError}</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            {activeError}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void (isAgenda ? refetchAgenda() : isMonth ? refetchMonth() : refetch())}
+            >
+              Try again
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -305,6 +318,9 @@ export default function CalendarPage() {
             onSelect={setSelectedRequestId}
             onPickDay={pickDay}
           />
+        ) : dayWeekFailed ? (
+          // Nothing loaded for this range: say so, never "Nothing to place".
+          <LoadErrorState title="Couldn’t load the calendar." onRetry={refetch} />
         ) : (
           <InteractiveSchedulingCalendar
             calendar={calendar}

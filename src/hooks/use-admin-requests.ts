@@ -51,7 +51,12 @@ export function useAdminRequests(
   );
   const [total, setTotal] = useState(() => requestsCache.get(key)?.data.total ?? 0);
   const [isLoading, setIsLoading] = useState(() => requestsCache.get(key) === null);
-  const [error, setError] = useState<string | null>(null);
+  // The error belongs to the filter/page it happened on: a new filter starts clean.
+  const [errorFor, setErrorFor] = useState<{ readonly key: string; readonly message: string } | null>(null);
+  const error = errorFor?.key === key ? errorFor.message : null;
+  // Which filter/page the rows on screen came from. A failed load for another
+  // one must not leave those rows under the new filter (round-2 P1-5).
+  const rowsKeyRef = useRef<string | null>(requestsCache.get(key) ? key : null);
 
   // Latest-wins run counter: a filter change mid-poll supersedes the in-flight
   // fetch instead of being dropped (the old isFetchingRef drop-guard stranded it).
@@ -65,12 +70,23 @@ export function useAdminRequests(
     if (bust) requestsCache.invalidate(key);
 
     const run = ++runRef.current;
+    // Human copy only (never the server's message). Rows from this same
+    // filter stay on screen; rows from another filter are cleared.
+    const failed = () => {
+      setErrorFor({ key, message: 'Couldn’t load requests.' });
+      if (rowsKeyRef.current !== key) {
+        prevDataRef.current = null;
+        setRequests([]);
+        setTotal(0);
+      }
+    };
 
     const cached = requestsCache.get(key);
     const hasCachedData = cached !== null;
     if (hasCachedData) {
       setRequests(cached.data.requests);
       setTotal(cached.data.total);
+      rowsKeyRef.current = key;
     } else {
       setIsLoading(true);
     }
@@ -91,12 +107,7 @@ export function useAdminRequests(
       if (run !== runRef.current) return; // superseded by a newer fetch
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch requests' },
-        }));
-        if (run === runRef.current && !hasCachedData) {
-          setError(body?.error?.message ?? 'Failed to fetch requests');
-        }
+        if (run === runRef.current && !hasCachedData) failed();
         return;
       }
 
@@ -118,7 +129,8 @@ export function useAdminRequests(
           setRequests(body.data.requests);
           setTotal(body.data.total);
         }
-        setError(null);
+        rowsKeyRef.current = key;
+        setErrorFor(null);
         requestsCache.set(key, {
           requests: body.data.requests,
           total: body.data.total,
@@ -126,9 +138,7 @@ export function useAdminRequests(
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      if (run === runRef.current && !hasCachedData) {
-        setError('Could not connect to server. Please try again.');
-      }
+      if (run === runRef.current && !hasCachedData) failed();
     } finally {
       if (run === runRef.current) setIsLoading(false);
     }

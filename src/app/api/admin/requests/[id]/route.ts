@@ -119,7 +119,7 @@ export async function GET(
     return successResponse(detail);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch request detail");
-    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+    return errorResponse("Couldn’t load this request. Please try again.", "INTERNAL_ERROR", 500);
   }
 }
 
@@ -391,7 +391,7 @@ export async function PATCH(
       return errorResponse("This job changed. Refresh and try again.", "STALE", 409);
     }
     logger.error({ error }, "Failed to update request");
-    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+    return errorResponse("Couldn’t update the request. Please try again.", "INTERNAL_ERROR", 500);
   }
 }
 
@@ -465,6 +465,6 @@ export async function POST(
     return successResponse(result.note, 201);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to add request note");
-    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+    return errorResponse("Couldn’t add the note. Please try again.", "INTERNAL_ERROR", 500);
   }
 }

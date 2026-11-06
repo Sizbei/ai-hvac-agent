@@ -60,11 +60,9 @@ export function useSchedulingCalendar(
       const res = await adminFetch(url);
       if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
-        const body = await res.json().catch(() => ({
-          error: { message: 'Failed to load calendar' },
-        }));
+        // Human copy, never the server's message.
         if (isMountedRef.current && run === runRef.current) {
-          setError(body?.error?.message ?? 'Failed to load calendar');
+          setError('Couldn’t load the calendar.');
         }
         return;
       }
@@ -85,7 +83,7 @@ export function useSchedulingCalendar(
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
       if (isMountedRef.current && run === runRef.current) {
-        setError('Could not connect to server. Please try again.');
+        setError('Couldn’t load the calendar.');
       }
     }
   }, [date, view, enabled, includeCompleted]);

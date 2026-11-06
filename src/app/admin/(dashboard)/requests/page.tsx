@@ -1,5 +1,7 @@
 'use client';
 
+import { listViewState } from '@/lib/admin/list-view-state';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { useState, useEffect, useCallback } from 'react';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
@@ -108,7 +110,9 @@ export default function AdminRequestsPage() {
         title="Service requests"
         actions={
           <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">{total} total</span>
+            {!(error && requests.length === 0) && (
+              <span className="text-sm text-muted-foreground">{total} total</span>
+            )}
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-1.5 size-4" />
               New request
@@ -119,10 +123,15 @@ export default function AdminRequestsPage() {
 
       {fromSetup && <BackToGuideBanner stepId="book_first_request" event={bannerEvent} />}
 
-      {error && (
+      {error && requests.length > 0 && (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            Couldn’t refresh requests. Showing the last list that loaded.
+            <Button type="button" size="sm" variant="outline" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -151,6 +160,10 @@ export default function AdminRequestsPage() {
         </div>
       </div>
 
+      {listViewState({ loading: isLoading, failed: error !== null, count: requests.length }) === 'error' ? (
+        <LoadErrorState title="Couldn’t load requests." onRetry={refetch} />
+      ) : (
+      <>
       <RequestTable
         requests={requests}
         isLoading={isLoading}
@@ -176,6 +189,8 @@ export default function AdminRequestsPage() {
         onPageChange={setPage}
         showFirstLast
       />
+      </>
+      )}
 
       <RequestCreateDialog
         open={createOpen}

@@ -46,6 +46,7 @@ import type {
 import { CalendarClock, ChevronDown, ChevronRight } from 'lucide-react';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { WindowPicker, useAvailability, type WindowPickerValue } from '@/components/admin/window-picker';
 import {
   Dialog,
@@ -706,6 +707,8 @@ export function RequestDetailSheet({
   const [detail, setDetail] = useState<AdminRequestDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // Bumped by the load error's Try again.
+  const [detailReload, setDetailReload] = useState(0);
 
   const [technicians, setTechnicians] = useState<readonly TechnicianRecord[]>([]);
   const techniciansLoadedRef = useRef(false);
@@ -897,11 +900,13 @@ export function RequestDetailSheet({
         const res = await fetch(`/api/admin/requests/${requestId}`);
         if (cancelled) return;
         if (!res.ok) {
-          const body = await res.json().catch(() => ({
-            error: { message: 'Failed to load request details' },
-          }));
           if (cancelled) return;
-          setDetailError(body?.error?.message ?? 'Failed to load request details');
+          // Human copy, never the server's message.
+          setDetailError(
+            res.status === 404
+              ? 'This request no longer exists or isn’t in your organization.'
+              : 'Couldn’t load this request.',
+          );
           return;
         }
         const body = (await res.json()) as {
@@ -924,7 +929,7 @@ export function RequestDetailSheet({
           }
         }
       } catch {
-        if (!cancelled) setDetailError('Could not connect to server.');
+        if (!cancelled) setDetailError('Couldn’t load this request.');
       } finally {
         if (!cancelled) setIsLoadingDetail(false);
       }
@@ -934,7 +939,7 @@ export function RequestDetailSheet({
     return () => {
       cancelled = true;
     };
-  }, [requestId]);
+  }, [requestId, detailReload]);
 
   // Fetch advisory top-3 technician suggestions when the request changes.
   // Fail-open: any error leaves suggestions empty so the card simply hides — it
@@ -1088,8 +1093,12 @@ export function RequestDetailSheet({
             <Skeleton className="h-32 w-full" />
           </div>
         ) : detailError ? (
-          <div className="p-4">
-            <p role="alert" className="text-sm text-destructive">{detailError}</p>
+          <div className="p-4 pt-12">
+            <SheetTitle className="sr-only">Request</SheetTitle>
+            <LoadErrorState
+              title={detailError}
+              onRetry={() => setDetailReload((n) => n + 1)}
+            />
           </div>
         ) : detail ? (
           <>

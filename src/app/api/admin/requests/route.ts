@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch admin requests");
-    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+    return errorResponse("Couldn’t load requests. Please try again.", "INTERNAL_ERROR", 500);
   }
 }
 
@@ -209,6 +209,6 @@ export async function POST(request: NextRequest) {
     );
   } catch (error: unknown) {
     logger.error({ error }, "Failed to create admin request");
-    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+    return errorResponse("Couldn’t save the request. Please try again.", "INTERNAL_ERROR", 500);
   }
 }
