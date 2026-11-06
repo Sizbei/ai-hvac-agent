@@ -9,6 +9,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
+import { EstimatesCard } from '@/components/tech/estimates/estimates-card';
+import { EquipmentCard } from '@/components/tech/equipment/equipment-card';
+import { materialOverlapWarning, soldPricebookItemIds } from '@/lib/tech/material-overlap';
+import type { TechEstimatesView } from '@/lib/tech/estimate-view';
 import { TechJobSummary, type SummaryLoaded } from '@/components/tech/tech-job-summary';
 import { SignaturePad } from '@/components/tech/signature-pad';
 import { JobTimeCard } from '@/components/tech/job-time-card';
@@ -140,6 +144,10 @@ export function TechJobDetailClient({
 
   // Status timeline (read-only history of this job's transitions).
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  // A status tap can open or close selling and equipment: both cards refetch on it.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [estimatesView, setEstimatesView] = useState<TechEstimatesView | null>(null);
+  const onEstimatesLoaded = useCallback((v: TechEstimatesView | null) => setEstimatesView(v), []);
 
   const loadMaterials = useCallback(async (): Promise<void> => {
     try {
@@ -401,6 +409,7 @@ export function TechJobDetailClient({
 
   const unbilledParts = isLoading ? 0 : materials.filter((m) => !m.onInvoice).length;
   const lateWarning = lateMaterialWarning(invoiceState);
+  const overlapWarning = materialOverlapWarning(soldPricebookItemIds(estimatesView), selectedItemId);
 
   const filteredCatalog = search.trim()
     ? catalog.filter((c) =>
@@ -445,8 +454,10 @@ export function TechJobDetailClient({
           // A status tap opens or closes the job clock: reload both.
           void loadTimeline();
           void loadTimesheet();
+          setRefreshKey((k) => k + 1);
         }}
       />
+      <EstimatesCard jobId={id} refreshKey={refreshKey} onLoaded={onEstimatesLoaded} />
 
       {loadError && (
         <div
@@ -565,6 +576,11 @@ export function TechJobDetailClient({
                 {lateWarning}
               </p>
             )}
+            {overlapWarning && (
+              <p className="rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px] text-foreground">
+                {overlapWarning}
+              </p>
+            )}
             <div className="flex items-center gap-2">
               <Input
                 aria-label="Quantity"
@@ -591,6 +607,8 @@ export function TechJobDetailClient({
           )}
         </CardContent>
       </Card>
+
+      <EquipmentCard jobId={id} refreshKey={refreshKey} />
 
       {/* On-site note (saved notes go to the office; a late note on a closed job is fine) */}
       {known && (

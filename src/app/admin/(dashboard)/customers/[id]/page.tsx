@@ -61,6 +61,7 @@ import { PortalLinkCard } from '@/components/admin/portal-link-card';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
+import { replacedOnLabel } from '@/lib/admin/crm-equipment-records';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import {
   equipmentTypeLabel,
@@ -631,7 +632,7 @@ export default function CustomerDetailPage({
       <SectionCard
         title="Equipment"
         icon={Wrench}
-        count={customer.equipment.length}
+        count={customer.equipmentCount}
         action={
           <Button size="sm" variant="outline" onClick={handleAddEquipment}>
             <Plus className="mr-1 size-3" />
@@ -648,7 +649,8 @@ export default function CustomerDetailPage({
             {customer.equipment.map((eq) => (
               <div
                 key={eq.id}
-                className="rounded-lg border bg-muted/20 p-3"
+                id={`equipment-${eq.id}`}
+                className={`rounded-lg border bg-muted/20 p-3 ${eq.retiredAt ? 'opacity-60' : ''}`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="flex items-center gap-1.5 text-sm font-medium">
@@ -693,6 +695,19 @@ export default function CustomerDetailPage({
                   {[eq.make, eq.model].filter(Boolean).join(' ') || 'No details'}
                   {eq.serialNumber ? ` — S/N: ${eq.serialNumber}` : ''}
                 </p>
+                {eq.retiredAt && (
+                  <p className="text-xs text-muted-foreground">
+                    {replacedOnLabel(eq.retiredAt)}
+                    {eq.replacedByEquipmentId && (
+                      <>
+                        {' · '}
+                        <a href={`#equipment-${eq.replacedByEquipmentId}`} className="text-link underline-offset-2 hover:underline">
+                          See the replacement
+                        </a>
+                      </>
+                    )}
+                  </p>
+                )}
                 {eq.locationInHome && (
                   <p className="text-xs text-muted-foreground">
                     Location: {eq.locationInHome}
