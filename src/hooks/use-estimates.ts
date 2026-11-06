@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
+import { fetchGate, responseApplies } from '@/lib/admin/keyed-fetch';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
 export interface EstimateListItem {
@@ -106,7 +107,13 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
   const [isLoading, setIsLoading] = useState(() => estimatesCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
   // Dedup: prevent concurrent fetches for the same key (e.g. StrictMode double-mount).
-  const isFetchingRef = useRef(false);
+  // Keyed, so a `?bucket=` deep link restored while the default bucket's first
+  // fetch is in flight still fetches (Task 7 parked).
+  const inFlightKeyRef = useRef<string | null>(null);
+  const currentKeyRef = useRef(key);
+  useEffect(() => {
+    currentKeyRef.current = key;
+  }, [key]);
 
   const fetchAll = useCallback(
     async ({ bust = false }: { bust?: boolean } = {}): Promise<void> => {
@@ -123,14 +130,14 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
 
       // Bail if another fetch is already in flight (unless busting) — guard the
       // network request only, never the synchronous cache-hit path above.
-      if (!bust && isFetchingRef.current) return;
+      if (fetchGate({ inFlightKey: inFlightKeyRef.current, key, bust }) === 'skip') return;
 
-      isFetchingRef.current = true;
+      inFlightKeyRef.current = key;
       setIsLoading(true);
       try {
         const res = await adminFetch(`/api/admin/estimates${buildQuery(params)}`);
         if (!res.ok) {
-          setError('Failed to load estimates');
+          if (responseApplies(key, currentKeyRef.current)) setError('Failed to load estimates');
           return;
         }
         const body = (await res.json()) as {
@@ -139,6 +146,8 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
         };
         if (body.success) {
           estimatesCache.set(key, body.data);
+          // A late answer for an older key (the default bucket) never replaces the current rows.
+          if (!responseApplies(key, currentKeyRef.current)) return;
           setEstimates(body.data.estimates);
           setTotal(body.data.total);
           setStats(body.data.stats ?? null);
@@ -148,8 +157,8 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
         if (err instanceof AdminAuthRedirectError) return;
         setError('Could not connect to server. Please try again.');
       } finally {
-        isFetchingRef.current = false;
-        setIsLoading(false);
+        if (inFlightKeyRef.current === key) inFlightKeyRef.current = null;
+        if (responseApplies(key, currentKeyRef.current)) setIsLoading(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -140,7 +140,7 @@ work logs — real booking history is in `service_requests` via
   lives in `service_requests`; the section is hidden when empty.
 - Audit log details contain only field names/ids/counts — no PII.
 
-**Retired units (M3c):** a unit replaced in the field has `retired_at` + `replaced_by_equipment_id`; the profile lists it last, muted, 'Replaced <date> · See the replacement' (link only while the replacement exists, `equipmentRecords`); the equipment count (profile and directory) counts live units only; chat-intake dedupe (`recordCustomerEquipment`) ignores retired units.
+**Retired units (M3c):** a unit replaced in the field has `retired_at` + `replaced_by_equipment_id`; the profile lists it last, muted, 'Replaced <date> · See the replacement' (link only while the replacement exists, `equipmentRecords`); the equipment count (profile and directory) counts live units only; chat-intake dedupe (`recordCustomerEquipment`) ignores retired units. A retired unit is read-only: no Edit, Delete keeps its confirm (`equipmentRowActions`). The row's detail line puts an Other unit's description (`notes`) first (`equipmentDetailsLine`).
 
 **Gotchas:**
 - Contacts (name/phone/email/address) are encrypted at rest; `crm-queries.ts`

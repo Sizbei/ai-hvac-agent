@@ -4,6 +4,7 @@
  * count covers live units only. Pure.
  */
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
+import { unitDescription } from "@/lib/tech/equipment-display";
 import type { EquipmentRecord } from "./crm-types";
 
 export interface EquipmentRowLike {
@@ -42,4 +43,16 @@ export function liveEquipmentCount(rows: readonly { readonly retiredAt?: Date | 
 
 export function replacedOnLabel(iso: string, timeZone: string = BUSINESS_BASE_LOCATION.timezone): string {
   return `Replaced ${new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" }).format(new Date(iso))}`;
+}
+
+/** The row's detail line: an Other unit's description first, then make/model and serial; else "No details". */
+export function equipmentDetailsLine(eq: Pick<EquipmentRecord, "equipmentType" | "notes" | "make" | "model" | "serialNumber">): string {
+  const makeModel = [eq.make, eq.model].filter(Boolean).join(" ");
+  const head = [unitDescription(eq), makeModel || null].filter(Boolean).join(" · ");
+  return `${head || "No details"}${eq.serialNumber ? ` — S/N: ${eq.serialNumber}` : ""}`;
+}
+
+/** A retired (replaced) unit is history: no Edit; Delete stays behind its confirm (Task 10 parked). */
+export function equipmentRowActions(eq: Pick<EquipmentRecord, "retiredAt">): { readonly edit: boolean; readonly delete: boolean } {
+  return { edit: !eq.retiredAt, delete: true };
 }

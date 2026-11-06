@@ -61,7 +61,7 @@ import { PortalLinkCard } from '@/components/admin/portal-link-card';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { EquipmentRecord } from '@/lib/admin/crm-types';
-import { replacedOnLabel } from '@/lib/admin/crm-equipment-records';
+import { equipmentDetailsLine, equipmentRowActions, replacedOnLabel } from '@/lib/admin/crm-equipment-records';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import {
   equipmentTypeLabel,
@@ -672,14 +672,17 @@ export default function CustomerDetailPage({
                         {warrantyStatusLabel(eq.warrantyExpiration)}
                       </Badge>
                     )}
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => handleEditEquipment(eq)}
-                      aria-label="Edit equipment"
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
+                    {/* A replaced unit is history: no Edit; Delete keeps its confirm. */}
+                    {equipmentRowActions(eq).edit && (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => handleEditEquipment(eq)}
+                        aria-label="Edit equipment"
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                    )}
                     <Button
                       size="icon-sm"
                       variant="ghost"
@@ -691,9 +694,8 @@ export default function CustomerDetailPage({
                     </Button>
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {[eq.make, eq.model].filter(Boolean).join(' ') || 'No details'}
-                  {eq.serialNumber ? ` — S/N: ${eq.serialNumber}` : ''}
+                <p className="mt-1 text-xs text-muted-foreground break-words">
+                  {equipmentDetailsLine(eq)}
                 </p>
                 {eq.retiredAt && (
                   <p className="text-xs text-muted-foreground">

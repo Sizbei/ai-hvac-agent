@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { equipmentRecords, liveEquipmentCount, replacedOnLabel, type EquipmentRowLike } from "./crm-equipment-records";
+import {
+  equipmentDetailsLine, equipmentRecords, equipmentRowActions, liveEquipmentCount, replacedOnLabel, type EquipmentRowLike,
+} from "./crm-equipment-records";
 
 const row = (id: string, over: Partial<EquipmentRowLike> = {}): EquipmentRowLike => ({
   id, equipmentType: "ac", make: null, model: null, serialNumber: null, installDate: null, warrantyExpiration: null,
@@ -24,5 +26,22 @@ describe("office equipment list (spec §2)", () => {
   it("office retired label in the business timezone", () => {
     expect(replacedOnLabel("2026-11-06T17:00:00.000Z")).toBe("Replaced Nov 6, 2026");
     expect(replacedOnLabel("2026-11-07T03:00:00.000Z")).toBe("Replaced Nov 6, 2026"); // 22:00 Eastern
+  });
+});
+
+describe("office equipment row (final review B P1-3, Task 10 parked)", () => {
+  const rec = (over: Partial<EquipmentRowLike>) => equipmentRecords([row("u1", over)])[0]!;
+  it("an Other unit reads its description instead of 'No details'", () => {
+    expect(equipmentDetailsLine(rec({ equipmentType: "other", notes: "Whole-home dehumidifier" }))).toBe("Whole-home dehumidifier");
+    expect(equipmentDetailsLine(rec({ equipmentType: "other", make: "Aprilaire", notes: "Whole-home dehumidifier" })))
+      .toBe("Whole-home dehumidifier · Aprilaire");
+  });
+  it("make, model and serial as before; nothing at all reads 'No details'", () => {
+    expect(equipmentDetailsLine(rec({ make: "Carrier", model: "24ACC6", serialNumber: "S1" }))).toBe("Carrier 24ACC6 — S/N: S1");
+    expect(equipmentDetailsLine(rec({}))).toBe("No details");
+  });
+  it("a retired unit is read-only: no Edit, Delete stays behind its confirm", () => {
+    expect(equipmentRowActions(rec({ retiredAt: new Date("2026-11-06T15:00:00Z") }))).toEqual({ edit: false, delete: true });
+    expect(equipmentRowActions(rec({}))).toEqual({ edit: true, delete: true });
   });
 });

@@ -22,7 +22,7 @@ import {
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
 import { computeOptionTotals, lineTotalCents } from "./money";
-import { jobBilledSql } from "./estimate-billing-sql";
+import { billingInvoiceIdSql, jobBilledSql } from "./estimate-billing-sql";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -641,6 +641,8 @@ export interface EstimateDetailView {
   readonly fieldpulseData: Record<string, unknown> | null;
   /** The invoice generated from this estimate (one per estimate), or null. */
   readonly invoiceId: string | null;
+  /** With no office invoice: the job's invoice holding the sold option's lines (M3c field bill), else null. */
+  readonly jobInvoiceId: string | null;
 }
 
 /**
@@ -745,6 +747,8 @@ export async function getEstimateDetailById(
       soldByName: users.name,
       nameEncrypted: customers.nameEncrypted,
       invoiceId: invoices.id,
+      // M3c final wave (read-only): the invoice that bills it, office half first, else the job's invoice.
+      billingInvoiceId: sql<string | null>`${billingInvoiceIdSql(organizationId, sql`${estimates.id}`)}`,
     })
     .from(estimates)
     // Org-scope the join too (defense in depth).
@@ -774,7 +778,7 @@ export async function getEstimateDetailById(
 
   if (!est) return null;
 
-  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, soldVia, soldByName, ...header } = est;
+  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, billingInvoiceId, soldVia, soldByName, ...header } = est;
   // Only pre-M3c office rows need the audit log; since M3c sold_by names the admin.
   const markedSoldBy =
     est.signatureName === ADMIN_SIGNATURE && soldVia == null ? await findMarkedSoldBy(organizationId, est.id) : null;
@@ -791,6 +795,8 @@ export async function getEstimateDetailById(
     fieldpulseStatusName: fieldpulseStatusName ?? null,
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
     invoiceId: invoiceId ?? null,
+    // Billed on the job's invoice: no office invoice, but the sold lines sit on a job invoice.
+    jobInvoiceId: invoiceId ? null : billingInvoiceId ?? null,
   };
 }
 

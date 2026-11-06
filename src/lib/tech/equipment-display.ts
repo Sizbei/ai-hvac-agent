@@ -25,6 +25,12 @@ export function unitDetails(u: Pick<TechEquipmentUnit, "make" | "model" | "seria
   return [u.make, u.model, u.serialNumber ? `S/N ${u.serialNumber}` : null].filter(Boolean).join(" · ");
 }
 
+/** The "Describe it" text of an Other unit, shown under its type (final review B P1-3); null otherwise. */
+export function unitDescription(u: Pick<TechEquipmentUnit, "equipmentType" | "notes">): string | null {
+  const d = u.equipmentType === "other" ? u.notes?.trim() ?? "" : "";
+  return d === "" ? null : d;
+}
+
 export function replaceHeading(u: Pick<TechEquipmentUnit, "make" | "equipmentType">): string {
   return `Replacing ${u.make ? `${u.make} ` : ""}${equipmentTypeLabel(u.equipmentType).toLowerCase()}`;
 }

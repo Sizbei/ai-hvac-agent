@@ -27,6 +27,7 @@ import { canOfferFinancing } from '@/lib/admin/invoice-payment-copy';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
 import { approvalLines } from '@/lib/admin/estimate-approval-copy';
+import { businessDay, businessWhen, estimateInvoiceCard } from '@/lib/admin/estimate-detail-display';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { rollUpMargin, hasUncostedLines, UNCOSTED_MARGIN_NOTE } from '@/lib/admin/margin';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
@@ -71,6 +72,8 @@ interface EstimateDetail {
   readonly fieldpulseData: Record<string, unknown> | null;
   /** The invoice generated from this estimate, if any. */
   readonly invoiceId: string | null;
+  /** With no office invoice: the job's invoice holding the sold lines (M3c field bill). */
+  readonly jobInvoiceId: string | null;
 }
 
 /** "Furnace replacement", else "Estimate for Trevor Nunn", else "Estimate". */
@@ -84,9 +87,6 @@ function formatDay(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
 
 export default function EstimateDetailPage({
   params,
@@ -263,6 +263,7 @@ export default function EstimateDetailPage({
 
   const isOpen = estimate.status === 'open';
   const isSynced = estimate.syncedSource === 'fieldpulse';
+  const invoiceCard = estimateInvoiceCard(estimate);
 
   return (
     <PageShell>
@@ -271,7 +272,7 @@ export default function EstimateDetailPage({
         back={{ href: '/admin/estimates', label: 'Back to estimates' }}
         subtitle={[
           estimate.title && estimate.customerName ? estimate.customerName : null,
-          `Created ${formatDay(estimate.createdAt)}`,
+          `Created ${businessDay(estimate.createdAt)}`,
           estimate.dueDate ? `Due ${formatDay(estimate.dueDate)}` : null,
         ]
           .filter(Boolean)
@@ -409,8 +410,8 @@ export default function EstimateDetailPage({
                 markedSoldBy: estimate.markedSoldBy,
                 signedAt: estimate.signedAt,
               },
-              formatWhen,
-              formatDay,
+              businessWhen,
+              businessDay,
             ).map((line, i) => (
               <p key={i}>
                 {line.map((seg, j) =>
@@ -434,15 +435,16 @@ export default function EstimateDetailPage({
                 {markedNotice}
               </p>
             )}
-            {estimate.invoiceId ? (
+            {invoiceCard.kind !== 'generate' ? (
               <>
+                {/* Already billed (office or the job's invoice): no Generate (final review B P2-1). */}
                 <p className="text-sm text-muted-foreground">
-                  The invoice for the sold option is ready.
+                  {invoiceCard.kind === 'job' ? "On the job's invoice" : 'Invoice created'}
                 </p>
                 <Button
                   size="sm"
                   variant="outline"
-                  render={<Link href={`/admin/invoices/${estimate.invoiceId}`} />}
+                  render={<Link href={`/admin/invoices/${invoiceCard.invoiceId}`} />}
                 >
                   <Receipt className="mr-2 size-4" />
                   View invoice

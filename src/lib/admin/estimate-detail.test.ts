@@ -72,3 +72,20 @@ describe("getEstimateDetailById — who sold it (M3c)", () => {
     expect(db.select).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("getEstimateDetailById — billed on the job's invoice (final review B P2-1)", () => {
+  it("no office invoice: the job invoice holding the sold lines is jobInvoiceId", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "Pat Probe", soldVia: "field", billingInvoiceId: "job-inv" }], []]);
+    const d = await getEstimateDetailById("org-1", "est-1");
+    expect(d).toMatchObject({ invoiceId: null, jobInvoiceId: "job-inv" });
+    expect(Object.keys(vi.mocked(db.select).mock.calls[0]![0] as object)).toContain("billingInvoiceId");
+  });
+  it("an office invoice wins: jobInvoiceId is null", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "Pat Probe", invoiceId: "office-inv", billingInvoiceId: "office-inv" }], []]);
+    expect(await getEstimateDetailById("org-1", "est-1")).toMatchObject({ invoiceId: "office-inv", jobInvoiceId: null });
+  });
+  it("not billed: both null", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "Pat Probe", billingInvoiceId: null }], []]);
+    expect(await getEstimateDetailById("org-1", "est-1")).toMatchObject({ invoiceId: null, jobInvoiceId: null });
+  });
+});

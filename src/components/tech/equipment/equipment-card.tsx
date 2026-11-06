@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { equipmentTypeLabel } from '@/lib/admin/display-labels';
-import { EQUIPMENT_COPY, unitDetails } from '@/lib/tech/equipment-display';
+import { EQUIPMENT_COPY, unitDescription, unitDetails } from '@/lib/tech/equipment-display';
 import { ESTIMATE_INTENT, MAY_NOT_HAVE_SAVED } from '@/lib/tech/estimate-intents';
 import type { TechEquipmentUnit, TechEquipmentView } from '@/lib/tech/equipment-input';
 import { recoverEstimateIntents } from '@/components/tech/estimates/recover-intents';
@@ -99,6 +99,7 @@ export function EquipmentCard({ jobId, refreshKey }: { readonly jobId: string; r
                   <li key={u.id} className="flex min-h-14 items-center gap-2 py-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-[15px] font-medium">{equipmentTypeLabel(u.equipmentType)}</p>
+                      {unitDescription(u) && <p className="text-[15px] break-words">{unitDescription(u)}</p>}
                       {unitDetails(u) && <p className="text-[13px] text-muted-foreground break-words">{unitDetails(u)}</p>}
                     </div>
                     {u.managedExternally ? (
