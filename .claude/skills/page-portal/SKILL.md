@@ -82,7 +82,9 @@ Review checks `status === 'responded'` to show the already-recorded state.
   sold, the sold option + signer + date; a reopened sold link shows the
   `estimateDecisionCopy` receipt (`src/lib/portal/estimate-decision.ts`,
   pure; "(admin)" signer is hidden). The approve form pre-selects only a
-  single option and needs a 2+ character signature. Invalid portal /
+  single option and needs a 2+ character signature; while "Approve & sign"
+  is disabled, `approveBlockedHint` (same module) says what is missing.
+  Invalid portal /
   estimate / review tokens share "This link isn't valid".
 
 **Gotchas:**

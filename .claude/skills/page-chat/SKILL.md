@@ -68,21 +68,53 @@ shows an inline confirmation instead of navigating.
 **Closed-chat and failure UX (customer must never hit a dead end):**
 - `chatEndActions({status, urgency, phone})` decides what a non-active chat
   offers. Escalated → persistent panel (emergency when the polled extraction's
-  urgency is `emergency`, else hand-off) with the org phone as `tel:`; with no
-  phone, the emergency panel shows `EMERGENCY_GENERIC_GUIDANCE`. "Talk to a
+  urgency is `emergency`, else hand-off) with the org phone as `tel:`. The
+  emergency panel ALWAYS shows `EMERGENCY_GENERIC_GUIDANCE` ("If you smell
+  gas, leave now and call 911 or your gas company from outside." — a UI
+  constant, not frozen prompt text) first, then "Once you're safe, call us
+  at …" and the call button; keep both. The panel body never repeats the
+  input note. "Talk to a
   human" becomes "Call us" (tel) or focuses the panel — never disabled while
   escalated. The input is hidden in terminal states and the reason
   (`inputNote`) shows above "Start a new conversation" — the chat route still
   refuses messages for escalated sessions (`isTerminalState`), so the
   deterministic escalation's "what's the address/phone?" ask is answered by
   calling, not typing.
+- Resume: `src/lib/chat/session-resume.ts` (pure) — `shouldResumeSession`
+  rehydrates `chatting` / `extracting` / `escalated` sessions with a
+  transcript, and `parseResumedExtraction` restores the metadata slots, so a
+  reloaded or reopened emergency keeps its panel (the escalation path
+  persists `urgency: emergency` into metadata). Submitted / abandoned /
+  confirmed start fresh.
 - GET and POST `/api/session` return `companyName` + `companyPhone` (from
   `getRouterConfig`, memoized). The header falls back to "Chat with us",
   never another org's name; the escalation dialog shows only the org's phone.
 - Empty reply (HTTP 200, no text — e.g. the provider errored and `streamText`
-  ended empty): `isEmptyReply` → `emptyReplyFallback` bubble with Try again
-  (`regenerate()`) / Call. Blank assistant bubbles are not rendered. Fixed in
-  the UI on purpose: `guarded-stream.ts` stays untouched.
+  ended empty): `isEmptyReply` → `emptyReplyFallback(phone, {lastUserMessage,
+  nextQuestion})` bubble with Try again (`regenerate()`) / Call, plus the
+  chips. It never dead-ends: issue known → "I can still book a visit for
+  you." + the pending triage question (`nextStepQuestionForExtraction`); a
+  problem report → "I can still get a technician out. Tap the closest
+  option below…"; a question → "Sorry, I couldn't answer that." + the
+  booking offer. Blank assistant bubbles are not rendered. Fixed in the UI
+  on purpose: `guarded-stream.ts` stays untouched.
+- Issue chips (`src/lib/chat/issue-suggestions.ts`) and the home-screen
+  quick replies must each hit a deterministic COLLECT_INFO intent so the
+  intake works with the model down — `issue-suggestions.test.ts` and
+  `spears-service-scope.test.ts` pin that. Re-probe `routeMessage` before
+  rewording a chip.
+- Summary card (`src/components/chat/extraction-card.tsx`): on phones it is
+  one line (`compactSummary`) + Review details + Confirm; opened, details
+  scroll inside 40dvh. From `sm` up it is always open. Issue type has an
+  Edit that reopens it as a picker (`ISSUE_TYPE_OPTIONS`); the confirm route
+  validates the enum.
+- Name capture: `detect-correction.ts` rejects a reply made only of
+  acknowledgement filler (`isFillerReply`: "ok sure", "yes that's right",
+  "thanks") at the name step and after an "i'm …" cue. Every word must be
+  filler, so names like Will / Grace / Ty pass.
+- Router: `heating-blowing-cold` carries AC negation guards (ac, a/c, air
+  conditioner/conditioning, cooling); "AC stopped / not blowing cold air"
+  routes to `cooling-not-cooling`.
 - Failed sends: the AI SDK's `error.message` is the raw JSON envelope — always
   map through `chatErrorCopy` (restart for NO_SESSION/terminal, retry
   otherwise). Session start errors use `sessionStartErrorCopy(status)`.
