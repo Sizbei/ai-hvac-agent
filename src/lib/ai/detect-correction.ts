@@ -132,6 +132,8 @@ export function extractNameFromCue(message: string): string | null {
   }
   if (kept.length === 0) return null;
   candidate = kept.join(" ");
+  // "i'm good" / "i'm fine thank you" is a pleasantry, not a name.
+  if (isFillerReply(candidate)) return null;
 
   return candidate.length > 0 ? candidate : null;
 }
@@ -152,13 +154,43 @@ const NON_NAME_REFUSAL =
 const NON_NAME_LEAD =
   /^(?:what|whats|who|whom|whose|why|how|when|where|which|tell\s+me|show\s+me|help\s+me|i\s+need\s+help|i\s+want)\b/i;
 
-/** True when a name-step reply is a refusal, command, or question — not a name. */
+// Acknowledgement filler. A reply made ONLY of these words ("ok sure", "yes
+// that's right", "thanks") is the customer agreeing, not giving a name; it was
+// being saved as "Ok Sure" / "Yes That's Right" (round-2 UX N-P1-1). Every word
+// must be filler, so a real name that happens to be a word ("Grace", "Will",
+// "Mary Good") still passes.
+const FILLER_WORDS: ReadonlySet<string> = new Set([
+  "ok", "okay", "k", "kk", "sure", "yes", "yeah", "yea", "yep", "yup", "ya",
+  "no", "nope", "nah", "thanks", "thank", "thx", "you", "that", "thats",
+  "that's", "is", "it", "its", "it's", "right", "correct", "fine", "alright",
+  "cool", "great", "good", "perfect", "sounds", "got", "hi", "hello",
+  "hey", "please", "done", "all", "set", "absolutely", "definitely", "of",
+  "course", "do", "go", "ahead", "same", "as", "above", "before",
+]);
+
+/** True when every word of the reply is acknowledgement filler (see above). */
+export function isFillerReply(rawMessage: string): boolean {
+  const words = rawMessage
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/[.!?,;:]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+  return words.length > 0 && words.every((w) => FILLER_WORDS.has(w));
+}
+
+/** True when a name-step reply is a refusal, command, question or filler — not a name. */
 function isNonNameReply(rawMessage: string): boolean {
   const raw = rawMessage.trim();
   if (raw.endsWith("?")) return true; // a name never ends in a question mark
   const t = raw.toLowerCase().replace(/[.!?,]+$/, "").trim();
   if (t.length === 0) return false;
-  return NON_NAME_TOKENS.has(t) || NON_NAME_REFUSAL.test(t) || NON_NAME_LEAD.test(t);
+  return (
+    NON_NAME_TOKENS.has(t) ||
+    NON_NAME_REFUSAL.test(t) ||
+    NON_NAME_LEAD.test(t) ||
+    isFillerReply(t)
+  );
 }
 
 /**

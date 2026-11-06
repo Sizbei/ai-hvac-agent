@@ -3,6 +3,7 @@ import {
   detectCorrection,
   extractNameFromCue,
   nameFromDirectAnswer,
+  isFillerReply,
   hasCorrectionCue,
   correctionFieldLabel,
 } from "./detect-correction";
@@ -177,5 +178,42 @@ describe("hasCorrectionCue / correctionFieldLabel", () => {
     expect(correctionFieldLabel("name")).toBe("name");
     expect(correctionFieldLabel("address")).toBe("address");
     expect(correctionFieldLabel("email")).toBe("email");
+  });
+});
+
+describe("filler replies are never a name (round-2 UX N-P1-1)", () => {
+  it.each([
+    "ok",
+    "ok sure",
+    "Ok sure.",
+    "yes",
+    "yes that's right",
+    "Yes, that’s right",
+    "sure",
+    "no",
+    "thanks",
+    "thank you",
+    "okay sounds good",
+    "yep that's correct",
+    "go ahead",
+  ])("rejects %j at the name step", (reply) => {
+    expect(isFillerReply(reply)).toBe(true);
+    expect(nameFromDirectAnswer(reply)).toBeNull();
+    expect(detectCorrection(reply, "name")).toBeNull();
+  });
+
+  it("keeps real names, including ones that are also words", () => {
+    expect(nameFromDirectAnswer("Dana Whitfield")).toBe("Dana Whitfield");
+    expect(nameFromDirectAnswer("Will")).toBe("Will");
+    expect(nameFromDirectAnswer("Grace")).toBe("Grace");
+    expect(nameFromDirectAnswer("Mary Good")).toBe("Mary Good");
+    expect(nameFromDirectAnswer("Ty Cobb")).toBe("Ty Cobb");
+    expect(isFillerReply("Sure Patel")).toBe(false);
+  });
+
+  it("a pleasantry after a cue is not a name", () => {
+    expect(extractNameFromCue("i'm good thanks")).toBeNull();
+    expect(extractNameFromCue("I'm fine")).toBeNull();
+    expect(extractNameFromCue("my name is Dana Whitfield")).toBe("Dana Whitfield");
   });
 });
