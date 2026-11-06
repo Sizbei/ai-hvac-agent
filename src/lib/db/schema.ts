@@ -2897,6 +2897,10 @@ export const estimates = pgTable(
     signatureName: text("signature_name"),
     signatureIp: text("signature_ip"),
     soldOptionId: uuid("sold_option_id"),
+    // M3c: who sold it (the selling technician for 'field', the admin for 'office'; NULL for 'portal' and old rows).
+    soldBy: uuid("sold_by").references(() => users.id, { onDelete: "set null" }),
+    // M3c: 'portal' | 'office' | 'field'; NULL on rows sold before M3c.
+    soldVia: text("sold_via"),
     fieldpulseEstimateId: text("fieldpulse_estimate_id"),
     fieldpulseStatusName: text("fieldpulse_status_name"),
     // ── FieldPulse field-parity P1 promotions ──
@@ -2918,6 +2922,7 @@ export const estimates = pgTable(
     uniqueIndex("estimates_org_fieldpulse_estimate_id_unique")
       .on(table.organizationId, table.fieldpulseEstimateId)
       .where(sql`${table.fieldpulseEstimateId} IS NOT NULL`),
+    check("estimates_sold_via_check", sql`${table.soldVia} IN ('portal','office','field')`),
   ],
 );
 
@@ -3075,8 +3080,21 @@ export const invoiceLineItems = pgTable(
     jobMaterialId: uuid("job_material_id").references(() => jobMaterials.id, {
       onDelete: "set null",
     }),
+    // M3c: set on lines copied from a sold estimate's option (field bill and office
+    // Generate). NO ACTION: deleting a billed estimate line fails, so billed(eid)
+    // stays armed; an org-delete cascade removes both sides in one statement.
+    estimateLineItemId: uuid("estimate_line_item_id"),
   },
-  (table) => [index("invoice_line_items_invoice_idx").on(table.invoiceId)],
+  (table) => [
+    index("invoice_line_items_invoice_idx").on(table.invoiceId),
+    index("invoice_line_items_estimate_line_idx").on(table.estimateLineItemId),
+    // Explicit name: drizzle's default (66 chars) exceeds Postgres' 63-char identifier limit.
+    foreignKey({
+      name: "invoice_line_items_estimate_line_fk",
+      columns: [table.estimateLineItemId],
+      foreignColumns: [estimateLineItems.id],
+    }),
+  ],
 );
 
 // 35. payments — a charge against an invoice (provider-agnostic seam).
