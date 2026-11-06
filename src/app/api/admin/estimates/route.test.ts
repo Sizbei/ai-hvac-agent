@@ -47,7 +47,7 @@ vi.mock("@/lib/communication/money-triggers", () => ({
 }));
 
 import { NextRequest } from "next/server";
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const SESSION = {
   userId: "u-1",
@@ -173,5 +173,15 @@ describe("POST /api/admin/estimates — Restimates-3 money-column caps", () => {
     );
     expect(res.status).toBe(400);
     expect(createEstimate).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/admin/estimates — Sold, not invoiced (M3c)", () => {
+  it("passes bucket=not_invoiced through", async () => {
+    listEstimates.mockResolvedValue({ estimates: [], total: 0 });
+    getEstimatePipelineStats.mockResolvedValue({});
+    const res = await GET(new NextRequest("https://app.example.com/api/admin/estimates?bucket=not_invoiced"));
+    expect(res.status).toBe(200);
+    expect(listEstimates).toHaveBeenCalledWith("org-1", expect.objectContaining({ bucket: "not_invoiced" }));
   });
 });

@@ -26,6 +26,7 @@ import { detailLoadFailure, type DetailLoadFailure } from '@/lib/admin/detail-lo
 import { canOfferFinancing } from '@/lib/admin/invoice-payment-copy';
 import { EstimateStatusBadge } from '@/components/admin/estimates/estimate-status-badge';
 import { FinancingPanel } from '@/components/admin/financing/financing-panel';
+import { approvalLines } from '@/lib/admin/estimate-approval-copy';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { rollUpMargin, hasUncostedLines, UNCOSTED_MARGIN_NOTE } from '@/lib/admin/margin';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
@@ -65,6 +66,8 @@ interface EstimateDetail {
   readonly title: string | null;
   readonly customerName: string | null;
   readonly markedSoldBy: string | null;
+  readonly soldVia: string | null;
+  readonly soldByName: string | null;
   readonly fieldpulseData: Record<string, unknown> | null;
   /** The invoice generated from this estimate, if any. */
   readonly invoiceId: string | null;
@@ -79,6 +82,10 @@ function estimateHeading(title: string | null, customerName: string | null): str
 /** "Nov 5, 2026" — the same day format the invoice document uses. */
 function formatDay(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatWhen(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 export default function EstimateDetailPage({
@@ -393,27 +400,24 @@ export default function EstimateDetailPage({
           <CardHeader>
             <CardTitle className="text-base">Approval</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {estimate.signatureName === '(admin)' ? (
-              <>
-                Marked sold in the office
-                {estimate.markedSoldBy && (
-                  <>
-                    {' '}by{' '}
-                    <span className="font-medium text-foreground">{estimate.markedSoldBy}</span>
-                  </>
-                )}{' '}
-                on {formatDay(estimate.signedAt)}.
-              </>
-            ) : (
-              <>
-                Signed by{' '}
-                <span className="font-medium text-foreground">
-                  {estimate.signatureName ?? 'customer'}
-                </span>{' '}
-                on {formatDay(estimate.signedAt)}.
-              </>
-            )}
+          <CardContent className="space-y-1 text-sm text-muted-foreground">
+            {approvalLines(
+              {
+                soldVia: estimate.soldVia,
+                signatureName: estimate.signatureName,
+                soldByName: estimate.soldByName,
+                markedSoldBy: estimate.markedSoldBy,
+                signedAt: estimate.signedAt,
+              },
+              formatWhen,
+              formatDay,
+            ).map((line, i) => (
+              <p key={i}>
+                {line.map((seg, j) =>
+                  seg.strong ? <span key={j} className="font-medium text-foreground">{seg.text}</span> : <span key={j}>{seg.text}</span>,
+                )}
+              </p>
+            ))}
           </CardContent>
         </Card>
       )}

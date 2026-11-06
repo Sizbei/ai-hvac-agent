@@ -81,6 +81,7 @@ export async function PATCH(
       session.organizationId,
       id,
       parsed.data.optionId,
+      session.userId,
     );
 
     if (!result.ok) {

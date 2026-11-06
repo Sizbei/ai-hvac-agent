@@ -35,7 +35,7 @@ import { useAdminPageTitle } from '@/components/admin/org-name-context';
 // ── constants ──────────────────────────────────────────────────────────────────
 
 const PER_PAGE = 50;
-type Bucket = 'open' | 'won' | 'lost' | 'draft';
+type Bucket = 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
 
 // ── local FPS status pill ──────────────────────────────────────────────────────
 // EstimateStatusBadge renders native enum values only; fps names (Sent, Estimate,
@@ -140,19 +140,23 @@ const TABS: ReadonlyArray<TabDef> = [
   { value: 'won',   label: 'Won' },
   { value: 'lost',  label: 'Lost' },
   { value: 'draft', label: 'Draft' },
+  { value: 'not_invoiced', label: 'Sold, not invoiced' },
   { value: null,    label: 'All' },
 ];
 
-function tabCount(stats: EstimatePipelineStats | null, bucket: Bucket | null): number {
-  if (!stats) return 0;
+/** The pipeline stats have no "not invoiced" bucket: that tab shows no count or total. */
+type StatBucket = Exclude<Bucket, 'not_invoiced'>;
+
+function tabCount(stats: EstimatePipelineStats | null, bucket: Bucket | null): number | undefined {
+  if (!stats || bucket === 'not_invoiced') return undefined;
   if (bucket === null) return stats.openCount + stats.wonCount + stats.lostCount + stats.draftCount;
-  return stats[`${bucket}Count`];
+  return stats[`${bucket as StatBucket}Count`];
 }
 
-function tabCents(stats: EstimatePipelineStats | null, bucket: Bucket | null): number {
-  if (!stats) return 0;
+function tabCents(stats: EstimatePipelineStats | null, bucket: Bucket | null): number | undefined {
+  if (!stats || bucket === 'not_invoiced') return undefined;
   if (bucket === null) return stats.openCents + stats.wonCents + stats.lostCents + stats.draftCents;
-  return stats[`${bucket}Cents`];
+  return stats[`${bucket as StatBucket}Cents`];
 }
 
 function emptyMessage(bucket: Bucket | null): string {
@@ -160,6 +164,7 @@ function emptyMessage(bucket: Bucket | null): string {
   if (bucket === 'won')   return 'No won estimates yet.';
   if (bucket === 'lost')  return 'No lost estimates.';
   if (bucket === 'draft') return 'No draft estimates.';
+  if (bucket === 'not_invoiced') return 'No sold estimates are waiting for an invoice.';
   return 'No estimates yet. Create one to send a customer a proposal.';
 }
 
@@ -190,7 +195,7 @@ export default function EstimatesPage() {
     q: search,
   };
   const restoreFiltersFromUrl = useCallback((p: Record<string, string>) => {
-    const buckets: readonly string[] = ['open', 'won', 'lost', 'draft'];
+    const buckets: readonly string[] = ['open', 'won', 'lost', 'draft', 'not_invoiced'];
     if (p.bucket) {
       if (buckets.includes(p.bucket)) setActiveBucket(p.bucket as Bucket);
       else if (p.bucket === 'all') setActiveBucket(null);
@@ -285,13 +290,14 @@ export default function EstimatesPage() {
         <SegmentedControl<string>
           className="w-max"
           aria-label="Filter estimates by status"
-          options={TABS.map((tab) => ({
-            value: tab.value ?? 'all',
-            label: stats
-              ? `${tab.label} · ${formatCentsExact(tabCents(stats, tab.value))}`
-              : tab.label,
-            badge: stats ? tabCount(stats, tab.value) : undefined,
-          }))}
+          options={TABS.map((tab) => {
+            const cents = tabCents(stats, tab.value);
+            return {
+              value: tab.value ?? 'all',
+              label: cents === undefined ? tab.label : `${tab.label} · ${formatCentsExact(cents)}`,
+              badge: tabCount(stats, tab.value),
+            };
+          })}
           value={activeBucket ?? 'all'}
           onChange={(v) => switchTab(v === 'all' ? null : (v as Bucket))}
         />

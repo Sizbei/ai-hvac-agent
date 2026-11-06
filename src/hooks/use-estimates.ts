@@ -42,7 +42,7 @@ export interface EstimatePipelineStats {
 export interface UseEstimatesParams {
   readonly page?: number;
   readonly limit?: number;
-  readonly bucket?: 'open' | 'won' | 'lost' | 'draft';
+  readonly bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
   readonly customerId?: string;
   readonly serviceRequestId?: string;
   readonly search?: string;

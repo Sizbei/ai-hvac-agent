@@ -94,8 +94,8 @@ export async function GET(request: NextRequest) {
 
     // Whitelist bucket — invalid values silently drop to undefined (no 400; the
     // scoped section passes no bucket and must continue to work).
-    const VALID_BUCKETS = new Set(['open', 'won', 'lost', 'draft'] as const);
-    type ValidBucket = 'open' | 'won' | 'lost' | 'draft';
+    const VALID_BUCKETS = new Set(['open', 'won', 'lost', 'draft', 'not_invoiced'] as const);
+    type ValidBucket = 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
     const rawBucket = sp.get('bucket');
     const bucket: ValidBucket | undefined =
       rawBucket && VALID_BUCKETS.has(rawBucket as ValidBucket)

@@ -245,6 +245,15 @@ describe('listEstimates', () => {
     expect(wheres.some((w) => w.includes('won'))).toBe(true);
   });
 
+  it("bucket=not_invoiced: sold, native, no invoice of any state, not job-billed (M3c)", async () => {
+    queuePage();
+    await listEstimates(ORG, { bucket: "not_invoiced" });
+    const wheres = captured.map((c) => JSON.stringify(c.where ?? ""));
+    expect(wheres.some((w) => w.includes("NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id ="))).toBe(true);
+    expect(wheres.some((w) => w.includes("jbx.estimate_line_item_id IN"))).toBe(true);
+    expect(wheres.some((w) => w.includes("'sold'::estimate_status"))).toBe(true);
+  });
+
   it('count and rows queries share tenant org with bucket filter', async () => {
     queuePage();
     await listEstimates(ORG, { bucket: 'open' });

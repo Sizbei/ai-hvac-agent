@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   createEstimate,
   markEstimateSold,
+  approveEstimate,
   getEstimateForApproval,
   expireOverdueEstimates,
   regenerateApprovalToken,
@@ -231,5 +232,24 @@ describe("regenerateApprovalToken", () => {
     // longer matches, so a lookup by the old token would find nothing.
     expect(storedHash).toBe(hash(token2));
     expect(storedHash).not.toBe(hash(token1));
+  });
+});
+
+describe("sold_via / sold_by (M3c spec §3)", () => {
+  it("markEstimateSold writes sold_via='office' and the admin id", async () => {
+    mockSelectSeq([[{ id: "est-1", status: "open", fieldpulseEstimateId: null }], [{ id: "opt-1" }]]);
+    const set = vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: "est-1" }]) })) }));
+    vi.mocked(db.update).mockReturnValueOnce({ set } as never);
+    expect(await markEstimateSold(ORG, "est-1", "opt-1", "admin-1")).toEqual({ ok: true, estimateId: "est-1" });
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "sold", soldVia: "office", soldBy: "admin-1", signatureName: "(admin)" }));
+  });
+
+  it("approveEstimate (portal) writes sold_via='portal' and no seller", async () => {
+    mockSelectSeq([[{ id: "est-1", organizationId: ORG, status: "open", expiresAt: null }], [{ id: "opt-1" }]]);
+    const set = vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: "est-1" }]) })) }));
+    vi.mocked(db.update).mockReturnValueOnce({ set } as never);
+    expect(await approveEstimate({ token: "t", optionId: "opt-1", signatureName: "Pat", signatureIp: "1.2.3.4" }))
+      .toEqual({ ok: true, estimateId: "est-1" });
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "sold", soldVia: "portal", soldBy: null, signatureName: "Pat", signatureIp: "1.2.3.4" }));
   });
 });

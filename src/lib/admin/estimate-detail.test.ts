@@ -57,3 +57,18 @@ describe("getEstimateDetailById — people", () => {
     expect((await getEstimateDetailById("org-1", "est-1"))?.invoiceId).toBeNull();
   });
 });
+
+describe("getEstimateDetailById — who sold it (M3c)", () => {
+  it("a field sale carries sold_via and the technician's name, and skips the audit lookup", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "Pat Probe", soldVia: "field", soldByName: "Sam Tech" }], []]);
+    const d = await getEstimateDetailById("org-1", "est-1");
+    expect(d).toMatchObject({ soldVia: "field", soldByName: "Sam Tech", markedSoldBy: null });
+    expect(db.select).toHaveBeenCalledTimes(2); // header + options only
+  });
+  it("an office sale since M3c names the admin from sold_by, not the audit log", async () => {
+    mockSelectSeq([[{ ...HEADER, signatureName: "(admin)", soldVia: "office", soldByName: "Raymond" }], []]);
+    const d = await getEstimateDetailById("org-1", "est-1");
+    expect(d).toMatchObject({ soldVia: "office", soldByName: "Raymond", markedSoldBy: null });
+    expect(db.select).toHaveBeenCalledTimes(2);
+  });
+});

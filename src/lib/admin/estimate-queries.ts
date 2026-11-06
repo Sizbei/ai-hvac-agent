@@ -22,6 +22,7 @@ import {
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
 import { computeOptionTotals, lineTotalCents } from "./money";
+import { jobBilledSql } from "./estimate-billing-sql";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -208,6 +209,8 @@ export async function approveEstimate(params: {
       signedAt: now,
       signatureName: params.signatureName.slice(0, 200),
       signatureIp: params.signatureIp,
+      soldVia: "portal",
+      soldBy: null,
       updatedAt: now,
     })
     .where(and(eq(estimates.id, est.id), eq(estimates.status, "open"), isNull(estimates.fieldpulseEstimateId)))
@@ -456,7 +459,7 @@ export async function listEstimates(
     readonly limit?: number;
     readonly customerId?: string;
     readonly serviceRequestId?: string;
-    readonly bucket?: 'open' | 'won' | 'lost' | 'draft';
+    readonly bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
     readonly search?: string;
   } = {},
 ): Promise<{ estimates: EstimateListRow[]; total: number }> {
@@ -468,7 +471,14 @@ export async function listEstimates(
   const extraConditions: SQL[] = [];
   if (opts.customerId) extraConditions.push(eq(estimates.customerId, opts.customerId));
   if (opts.serviceRequestId) extraConditions.push(eq(estimates.serviceRequestId, opts.serviceRequestId));
-  if (opts.bucket) {
+  if (opts.bucket === 'not_invoiced') {
+    // Sold, not invoiced (M3c spec §2): native sold, no invoice of ANY state born
+    // from it (a voided office invoice means the office handled it, like
+    // Generate), and not on the job's invoice.
+    extraConditions.push(sql`(${estimates.status} = 'sold'::estimate_status AND ${estimates.fieldpulseEstimateId} IS NULL
+      AND NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id = ${organizationId}::uuid AND ni.estimate_id = ${estimates.id})
+      AND NOT ${jobBilledSql(organizationId, sql`${estimates.id}`)})`);
+  } else if (opts.bucket) {
     extraConditions.push(sql`(${BUCKET_CASE_SQL}) = ${opts.bucket}`);
   }
 
@@ -623,6 +633,10 @@ export interface EstimateDetailView {
   readonly customerName: string | null;
   /** Staff member who marked it sold in the office (from the audit log); null otherwise. */
   readonly markedSoldBy: string | null;
+  /** 'portal' | 'office' | 'field'; null on rows sold before M3c. */
+  readonly soldVia: string | null;
+  /** The selling technician (field) or admin (office); null when unknown or deleted. */
+  readonly soldByName: string | null;
   /** FieldPulse spillover data for the detail panel; null when not a FP estimate or empty. */
   readonly fieldpulseData: Record<string, unknown> | null;
   /** The invoice generated from this estimate (one per estimate), or null. */
@@ -727,6 +741,8 @@ export async function getEstimateDetailById(
       fieldpulseStatusName: estimates.fieldpulseStatusName,
       title: estimates.title,
       fieldpulseData: estimates.fieldpulseData,
+      soldVia: estimates.soldVia,
+      soldByName: users.name,
       nameEncrypted: customers.nameEncrypted,
       invoiceId: invoices.id,
     })
@@ -748,20 +764,28 @@ export async function getEstimateDetailById(
         eq(invoices.organizationId, organizationId),
       ),
     )
+    // M3c: who sold it (technician for field, admin for office).
+    .leftJoin(
+      users,
+      and(eq(users.id, estimates.soldBy), eq(users.organizationId, organizationId)),
+    )
     .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
     .limit(1);
 
   if (!est) return null;
 
-  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, ...header } = est;
+  const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, soldVia, soldByName, ...header } = est;
+  // Only pre-M3c office rows need the audit log; since M3c sold_by names the admin.
   const markedSoldBy =
-    est.signatureName === ADMIN_SIGNATURE ? await findMarkedSoldBy(organizationId, est.id) : null;
+    est.signatureName === ADMIN_SIGNATURE && soldVia == null ? await findMarkedSoldBy(organizationId, est.id) : null;
   // Admin detail: include snapshotted cost so the UI can show margin.
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return {
     ...header,
     customerName: safeDecryptName(nameEncrypted ?? null),
     markedSoldBy,
+    soldVia: soldVia ?? null,
+    soldByName: soldByName ?? null,
     options,
     syncedSource: fieldpulseEstimateId != null ? "fieldpulse" : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
@@ -804,6 +828,7 @@ export async function markEstimateSold(
   organizationId: string,
   id: string,
   optionId: string,
+  soldBy: string | null = null,
   now: Date = new Date(),
 ): Promise<ApproveEstimateResult> {
   const [est] = await db
@@ -837,6 +862,8 @@ export async function markEstimateSold(
       soldOptionId: optionId,
       signedAt: now,
       signatureName: ADMIN_SIGNATURE,
+      soldVia: "office",
+      soldBy,
       updatedAt: now,
     })
     .where(
