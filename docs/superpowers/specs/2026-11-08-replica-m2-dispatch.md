@@ -185,8 +185,11 @@ body id is re-read under the session org inside the write. Every FieldPulse refu
   and its existing `pushJobToFieldpulse` are untouched (§11).
 
 ### 5.2 Window resolution (`src/lib/admin/move-window.ts`, pure, client and server)
-- **Drop band** = the band under the pointer: `collisionDetection={pointerWithin}`; a drop not over any
-  droppable does nothing.
+- **Drop band** = the band under the pointer: `pointerWithin`, falling back to `rectIntersection` when the
+  pointer is over no droppable (a lane gap). Task 0 proved the fallback is needed: with plain `pointerWithin` a
+  card dragged from Unscheduled stops auto-scrolling while the pointer rests in an 8 px lane gap. A drop
+  released in a gap therefore lands on the band the card overlaps most; the window prompt still guards a band
+  change. A drop over nothing at all does nothing.
 - `currentWindowKind(start, end)` → `band` | `anytime` | `custom` | `none`.
 - `covers(current, D, B)` = the current window, on day `D` with the same wall-clock times, overlaps band
   `B` (half-open).
@@ -385,10 +388,10 @@ completed/cancelled request), `laneRole`. Day view adds `blocks` (`listShiftsInR
   Unscheduled 288 + gap 16 (`draggable-unscheduled-panel.tsx:125`) − board `p-3` and border 26 − axis 56 +
   gap 8 = 766 px of lanes at 224 + 8: **Unassigned plus two technician lanes are fully visible**, the third
   shows 70 px, the rest scroll. Lane headers get `tabIndex={-1}` (focus targets).
-- `DndContext autoScroll={{ threshold: { x: 0.06, y: 0.2 }, acceleration: 5 }}`: the horizontal zone
+- `DndContext autoScroll={{ threshold: { x: 0.04, y: 0.2 }, acceleration: 3 }}` (Task 0 retuned from 0.06 / 5; passed twice): the horizontal zone
   shrinks from dnd-kit's default 0.2 of the scroller (153 px of 766, which covers the right half of the
-  second technician lane, `@dnd-kit/core` `getScrollDirectionAndSpeed`) to 46 px, inside the 70 px peek of
-  the third lane, and the speed halves from the default 10. Task 0 confirms or retunes these values.
+  second technician lane, `@dnd-kit/core` `getScrollDirectionAndSpeed`) to about 31 px, inside the 70 px peek of
+  the third lane, at 0.3 of the default speed.
 
 ### 7.3 Blocks
 `lane-blocks.tsx`, between the bands and the cards in z-order (`placeJobInLane`), non-interactive: a

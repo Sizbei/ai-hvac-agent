@@ -387,7 +387,7 @@ with
 
 ```tsx
       collisionDetection={pointerWithin}
-      autoScroll={{ threshold: { x: 0.06, y: 0.2 }, acceleration: 5 }}
+      autoScroll={{ threshold: { x: 0.04, y: 0.2 }, acceleration: 3 }}
 ```
 
 In the same file, `DayView`'s body: replace
@@ -8453,9 +8453,11 @@ import {
   DragOverlay,
   PointerSensor,
   pointerWithin,
+  rectIntersection,
   useSensor,
   useSensors,
   type Announcements,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
@@ -8546,8 +8548,13 @@ const GRID_HOURS = CALENDAR_END_HOUR - CALENDAR_START_HOUR;
 const GRID_PX = GRID_HOURS * HOUR_PX;
 const MIN_CARD_PX = 28;
 const PINNED_CARD_PX = 44;
-/** Spec §7.2 (Task 0 proved or retuned these): a 46 px edge zone at 766 px, half dnd-kit's speed. */
-const AUTO_SCROLL = { threshold: { x: 0.06, y: 0.2 }, acceleration: 5 } as const;
+/** Spec §7.2 (Task 0 retuned these): a ~31 px edge zone at 766 px, 0.3 of dnd-kit's speed. */
+const AUTO_SCROLL = { threshold: { x: 0.04, y: 0.2 }, acceleration: 3 } as const;
+/** Spec §5.2: the band under the pointer, else the overlapped band (Task 0: keeps auto-scroll alive in a lane gap). */
+const dropCollision: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  return hits.length > 0 ? hits : rectIntersection(args);
+};
 
 interface PositionedJob {
   readonly job: DashboardRequest;
@@ -9266,7 +9273,7 @@ export function InteractiveSchedulingCalendar({
     <DndContext
       accessibility={{ announcements, screenReaderInstructions: { draggable: SR_INSTRUCTIONS } }}
       sensors={sensors}
-      collisionDetection={pointerWithin}
+      collisionDetection={dropCollision}
       autoScroll={AUTO_SCROLL}
       modifiers={[restrictToWindowEdges]}
       onDragStart={handleDragStart}
@@ -12414,8 +12421,8 @@ Then insert this section right before the `**Verify changes:**` line:
 **Dispatch (M2):** the board moves requests through ONE route,
 `POST /api/admin/requests/[id]/move` (`moveVisit`, `src/lib/admin/visit-move.ts`);
 `POST …/reschedule`, `use-reschedule-job.ts` and `@dnd-kit/sortable` are gone.
-- Drop flow (`handleDragEnd`): `collisionDetection={pointerWithin}`; the drop
-  band is the band under the pointer, a drop over nothing does nothing.
+- Drop flow (`handleDragEnd`): `pointerWithin`, falling back to `rectIntersection`
+  in a lane gap (Task 0); a drop over nothing does nothing.
   `promptPlan` (`src/lib/admin/move-window.ts`): no window → use the band;
   the window (moved onto the drop day) covers the band → keep (same lane and
   day → nothing is sent; "Still <range>. Use Move… to change the window." when
@@ -12450,8 +12457,8 @@ Then insert this section right before the `**Verify changes:**` line:
   the date stepper's label. Base UI dialogs use `finalFocus={false}`.
 - Layout: the time axis sits outside the lanes scroller (`data-lanes-scroller`);
   at 1440 with the sidebar expanded the scroller is 766 px: Unassigned plus two
-  technician lanes are fully visible. `autoScroll={{ threshold: { x: 0.06, y:
-  0.2 }, acceleration: 5 }}` (values proved by the Task 0 drag spike; the
+  technician lanes are fully visible. `autoScroll={{ threshold: { x: 0.04, y:
+  0.2 }, acceleration: 3 }}` (values proved by the Task 0 drag spike; the
   default 0.2 slid the board on a drop into the second technician lane).
 - Interactive only at ≥ 1024 px with `(pointer: fine)` (`boardInteractive`);
   otherwise no sensors, notice "Dragging needs a computer. Use Move… on a

@@ -336,3 +336,7 @@ count sits in the INSERT's WHERE after the lock), version checks sound, `autoScr
   Unscheduled), else the existing STALE banner line (§7.4, §8); integration (n3).
 
 Not changed: features.csv row 97's note "drag it back to reverse" describes an ordinary move, not Undo.
+
+## Task 0 drag spike (implementation, 2026-11-08)
+
+Check (b), Unscheduled to an off-screen lane, failed with plain `pointerWithin`. When the pointer rests in the 8 px gap between lanes, dnd-kit finds no droppable and picks scroll containers from the dragged card. A card from Unscheduled is outside the lanes scroller, so auto-scroll stalls. Fix, proved twice on all five checks: use `pointerWithin`, falling back to `rectIntersection` in a gap, with `autoScroll` threshold x 0.04 and acceleration 3 (retuned from 0.06 and 5). A control run with plain `pointerWithin` at the final values failed (b) again. Lead ruling: accepted. A drop released in a gap lands on the band the card overlaps most, and the window prompt still guards a band change. Applied to spec §5.2, §7.2 and plan Tasks 9b and 11b.
