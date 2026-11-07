@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { estimateHref, estimateTotal, membershipLines, pastJobLine, SITE_COPY, unaddressedLine } from '@/lib/tech/site-display';
@@ -64,7 +64,7 @@ export function SitePageClient({ jobId }: { readonly jobId: string }) {
                   <ul className="space-y-2">
                     {view.openEstimates.map((e) => {
                       const row = (
-                        <span className="block space-y-0.5">
+                        <span className="block min-w-0 flex-1 space-y-0.5">
                           <span className="block text-[15px]">{e.label}</span>
                           <span className="flex flex-wrap items-center gap-1.5">
                             <span className="font-mono text-[14px] tabular-nums">{estimateTotal(e)}</span>
@@ -76,7 +76,12 @@ export function SitePageClient({ jobId }: { readonly jobId: string }) {
                       const href = estimateHref(jobId, e, view.isLead);
                       return (
                         <li key={e.id}>
-                          {href ? <Link href={href} className="block min-h-11 active:bg-accent">{row}</Link> : row}
+                          {href ? (
+                            <Link href={href} className="flex min-h-11 items-center gap-2 py-2 active:bg-accent">
+                              {row}
+                              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                            </Link>
+                          ) : row}
                         </li>
                       );
                     })}
@@ -97,8 +102,8 @@ export function SitePageClient({ jobId }: { readonly jobId: string }) {
                     <p className="text-muted-foreground">No visits due.</p>
                   ) : (
                     <ul className="space-y-1">
-                      {m.upcoming.map((u) => (
-                        <li key={u.text} className="flex flex-wrap items-center gap-1.5">
+                      {m.upcoming.map((u, i) => (
+                        <li key={`${i}-${u.text}`} className="flex flex-wrap items-center gap-1.5">
                           {u.text}{u.thisJob && <span className={CHIP}>This job</span>}
                         </li>
                       ))}

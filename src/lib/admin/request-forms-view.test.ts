@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { missingLine, reopenDescription, submissionChip, visitLabel, whoWhen } from "./request-forms-view";
+import { missingLine, REOPEN_ANSWERS_REMOVED, REOPEN_STALE, reopenDescription, submissionChip, visitLabel, whoWhen } from "./request-forms-view";
 
 describe("office Forms section copy (spec §7.5)", () => {
   it("visit label: ended or nothing", () => {
@@ -22,5 +22,9 @@ describe("office Forms section copy (spec §7.5)", () => {
     expect(missingLine("Maintenance checklist", "completed")).toEqual({ text: "Required, not submitted: Maintenance checklist", warning: true });
     expect(reopenDescription(true)).toBe("The technician can change the answers and submit again.");
     expect(reopenDescription(false)).toBe("The technician can change the answers and submit again. No technician is on this visit any more.");
+  });
+  it("reopen refusals reuse the route copy", () => {
+    expect(REOPEN_STALE).toBe("Someone else changed this form. Reload to see the latest.");
+    expect(REOPEN_ANSWERS_REMOVED).toBe("These answers were removed.");
   });
 });

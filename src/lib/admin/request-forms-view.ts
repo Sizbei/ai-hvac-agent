@@ -1,6 +1,7 @@
 /** Office Forms section copy (M3d spec §7.5). Pure, client-safe; dates in the business timezone. */
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import type { OfficeSubmission } from "@/lib/admin/form-queries";
+import { FORM_OFFICE_COPY } from "@/lib/admin/form-route-copy";
 
 const TZ = BUSINESS_BASE_LOCATION.timezone;
 
@@ -8,7 +9,8 @@ export const REOPEN_TITLE = "Reopen this form?";
 /** The dialog's description; with the title it reads as spec §7.5's sentence. */
 export const REOPEN_COPY = "The technician can change the answers and submit again.";
 export const REOPEN_NO_TECH = "No technician is on this visit any more.";
-export const REOPEN_STALE = "Someone else changed this form. Reload to see the latest.";
+export const REOPEN_STALE = FORM_OFFICE_COPY.REOPEN_STALE;
+export const REOPEN_ANSWERS_REMOVED = FORM_OFFICE_COPY.ANSWERS_REMOVED;
 export const UNREADABLE = "These answers can't be shown.";
 
 export function visitLabel(s: Pick<OfficeSubmission, "appointmentNumber" | "visitState">): string {

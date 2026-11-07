@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { answerText } from '@/lib/forms/form-values';
 import type { OfficeSubmission, RequestForms } from '@/lib/admin/form-queries';
 import {
-  missingLine, REOPEN_STALE, REOPEN_TITLE, reopenDescription, submissionChip, visitLabel, whoWhen,
+  missingLine, REOPEN_ANSWERS_REMOVED, REOPEN_STALE, REOPEN_TITLE, reopenDescription, submissionChip, visitLabel, whoWhen,
 } from '@/lib/admin/request-forms-view';
 
 /**
@@ -65,7 +65,13 @@ export function RequestFormsSection({
         setTarget(null);
         await load();
       } else {
-        setReopenError(body?.error?.code === 'STALE' ? REOPEN_STALE : "Couldn't reopen the form. Please try again.");
+        const code = body?.error?.code;
+        if (code === 'STALE' || code === 'ANSWERS_REMOVED') {
+          setReopenError(code === 'STALE' ? REOPEN_STALE : REOPEN_ANSWERS_REMOVED);
+          void load(); // the next Reopen sends the fresh revision
+        } else {
+          setReopenError("Couldn't reopen the form. Please try again.");
+        }
       }
     } catch {
       setReopenError("Couldn't reopen the form. Please try again.");

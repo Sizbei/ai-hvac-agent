@@ -104,8 +104,14 @@ export function JobPhotosCard({ jobId, readOnly }: { readonly jobId: string; rea
     e.target.value = '';
     if (!file) return;
     setUploading(true);
-    const prepared = await preparePhoto(file, quality);
-    setUploading(false);
+    let prepared: Awaited<ReturnType<typeof preparePhoto>>;
+    try {
+      prepared = await preparePhoto(file, quality);
+    } catch {
+      prepared = { ok: false };
+    } finally {
+      setUploading(false);
+    }
     if (!prepared.ok) {
       setStatus({ text: PHOTO_CANT_PREPARE, error: true });
       return;
@@ -117,6 +123,10 @@ export function JobPhotosCard({ jobId, readOnly }: { readonly jobId: string; rea
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setStatus({ text: FILE_UPLOAD_FAILED, error: true });
+      return;
+    }
     if (file.size > TECH_UPLOAD_LIMIT_BYTES) {
       setStatus({ text: FILE_TOO_LARGE_COPY, error: true });
       return;
@@ -137,7 +147,7 @@ export function JobPhotosCard({ jobId, readOnly }: { readonly jobId: string; rea
           <>
             <p className="flex items-center gap-2 text-[15px]">
               Quality: {QUALITY_LABEL[quality]} ·
-              <button type="button" className="h-11 px-1 text-link" onClick={() => setQualityOpen((o) => !o)}>Change</button>
+              <button type="button" className="h-11 px-1 text-link" aria-expanded={qualityOpen} onClick={() => setQualityOpen((o) => !o)}>Change</button>
             </p>
             {qualityOpen && (
               <fieldset className="space-y-1">
