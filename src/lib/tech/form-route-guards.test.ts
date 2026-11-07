@@ -9,7 +9,7 @@ vi.mock("@/lib/session-csrf", () => ({ isSameOriginRequest: () => true }));
 vi.mock("@/lib/tech/ownership", async (orig) => ({ ...(await orig<typeof import("@/lib/tech/ownership")>()), findReadableJob: h.findReadableJob }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: vi.fn(), getPricebookItemById: vi.fn() }));
 
-import { findSubmitReplay, techFormFront, techFormGate } from "./form-route-guards";
+import { findSubmitReplay, formGateFail, techFormFront, techFormGate } from "./form-route-guards";
 import { resetRateLimitStore } from "@/lib/rate-limit";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -78,6 +78,15 @@ describe("techFormGate", () => {
         expect((await r.response.json()).error.code).toBe(code);
       }
     }
+  });
+
+  it("formGateFail reads the gates for the session's org and user, the lowercased visit and the form", async () => {
+    h.execute.mockResolvedValueOnce({ rows: [gates()] });
+    expect(await formGateFail(SESSION, RID, FORM, AID.toUpperCase())).toBeNull();
+    expect(h.findReadableJob).toHaveBeenCalledWith(ORG, ME, RID);
+    const { params } = new PgDialect().sqlToQuery(h.execute.mock.calls[0]![0] as never);
+    expect(params).toEqual(expect.arrayContaining([ORG, AID, ME, FORM]));
+    expect(params).not.toContain(AID.toUpperCase());
   });
 
   it("passes an on-site technician on the visit", async () => {

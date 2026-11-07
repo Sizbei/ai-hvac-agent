@@ -46,7 +46,10 @@ describe("GET /api/tech/jobs/[id]/site (spec §7.6)", () => {
   it("the payload has no key like phone, email, description, address or signature", async () => {
     h.getSiteView.mockResolvedValueOnce({ kind: "ok", view: VIEW });
     const res = await get();
-    const keys = keysDeep(await res.json());
+    const payload = await res.json();
+    expect(h.getSiteView).toHaveBeenCalledWith("o", "u", RID);
+    expect(payload.data.isLead).toBe(true);
+    const keys = keysDeep(payload);
     // Substring rule (spec §9); the spec's own `unaddressedCount` is the one allowed key (lead ruling 12).
     expect(keys.filter((k) => k !== "unaddressedcount" && /phone|email|description|address|signature/.test(k))).toEqual([]);
     expect(keys).toContain("unaddressedcount");

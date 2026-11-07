@@ -75,6 +75,7 @@ describe("GET …/forms and …/forms/[formId]", () => {
     expect((await list(AID)).status).toBe(404);
     h.getJobForms.mockResolvedValueOnce({ kind: "ok", view: { visitId: AID, forms: [] } });
     expect(await json(await list(AID))).toEqual({ success: true, data: { visitId: AID, forms: [] } });
+    expect(h.getJobForms).toHaveBeenLastCalledWith(ORG, U, RID, AID);
   });
 
   it("one form: a foreign form id is 404; archived with no row is 409 FORM_ARCHIVED", async () => {
@@ -85,6 +86,7 @@ describe("GET …/forms and …/forms/[formId]", () => {
     const a = await one();
     expect(a.status).toBe(409);
     expect((await json(a)).error?.code).toBe("FORM_ARCHIVED");
+    expect(h.getJobForm).toHaveBeenLastCalledWith(ORG, U, RID, FORM, AID);
   });
 });
 
@@ -100,6 +102,10 @@ describe("PUT …/draft (spec §4.2)", () => {
     h.save.mockResolvedValueOnce({ ok: true, submissionId: "s", revision: 1, savedAt: "t", created: true });
     expect((await put(body({ saveId: SAVE }))).status).toBe(201);
     expect(h.gate).toHaveBeenCalledWith({ userId: U, organizationId: ORG }, RID, FORM, AID);
+    const actor = { organizationId: ORG, requestId: RID, techUserId: U };
+    const input = expect.objectContaining({ formId: FORM, saveId: SAVE, appointmentId: AID });
+    expect(h.replay).toHaveBeenLastCalledWith(actor, input);
+    expect(h.save).toHaveBeenLastCalledWith(actor, input);
     h.save.mockResolvedValueOnce({ ok: true, submissionId: "s", revision: 2, savedAt: "t", created: false });
     const r = await put(body({ saveId: SAVE, baseRevision: 1 }));
     expect([r.status, (await json(r)).data]).toEqual([200, { submissionId: "s", revision: 2, savedAt: "t" }]);

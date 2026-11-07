@@ -78,6 +78,7 @@ describe("GET/PATCH /api/admin/settings/forms/[id]", () => {
   it("definition PATCH audits form_updated with version and fieldCount; archive audits form_archived", async () => {
     h.updateForm.mockResolvedValueOnce({ ok: true, version: 3 });
     expect(await json(await patch({ version: 2, definition: DEF }))).toEqual({ success: true, data: { version: 3 } });
+    expect(h.updateForm).toHaveBeenCalledWith(ORG, FID, { version: 2, definition: DEF });
     expect(h.logAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "form_updated", details: JSON.stringify({ formId: FID, version: 3, fieldCount: 1 }) }));
     h.updateForm.mockResolvedValueOnce({ ok: true, version: 4 });
     await patch({ version: 3, active: false });

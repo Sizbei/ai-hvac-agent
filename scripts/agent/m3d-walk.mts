@@ -102,7 +102,8 @@ async function remove(org: string): Promise<void> {
   if (org === DEFAULT_ORG) throw new Error("refusing the default org");
   const [q] = await run(sql`SELECT count(*)::int AS n FROM communication_jobs WHERE organization_id = ${org}`);
   if (Number(q!.n) !== 0) throw new Error(`the walk queued ${String(q!.n)} communication job(s)`);
-  await run(sql`DELETE FROM organizations WHERE id = ${org} AND name LIKE 'Probe Org M3d Walk %'`);
+  const deleted = await run(sql`DELETE FROM organizations WHERE id = ${org} AND name LIKE 'Probe Org M3d Walk %' RETURNING id`);
+  if (deleted.length !== 1) throw new Error(`no walk org ${org} was deleted`);
   console.log(JSON.stringify({ deleted: org }));
 }
 

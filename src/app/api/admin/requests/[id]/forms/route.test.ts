@@ -44,6 +44,7 @@ describe("POST …/reopen (spec §5.5)", () => {
   it("changed → audit form_reopened with ids; already a draft → changed:false, no audit", async () => {
     h.reopen.mockResolvedValueOnce({ ok: true, revision: 5, changed: true, formId: "f", appointmentId: "a" });
     expect(await json(await reopen({ revision: 4 }))).toEqual({ success: true, data: { revision: 5, changed: true } });
+    expect(h.reopen).toHaveBeenCalledWith(ORG, RID, SID, 4);
     expect(h.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "form_reopened", entityId: SID, details: JSON.stringify({ formId: "f", appointmentId: "a" }) }));
     h.reopen.mockResolvedValueOnce({ ok: true, revision: 5, changed: false, formId: "f", appointmentId: "a" });
     expect((await json(await reopen({ revision: 4 }))).data).toEqual({ revision: 5, changed: false });
