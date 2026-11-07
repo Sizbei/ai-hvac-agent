@@ -18,7 +18,7 @@ import { mintKey } from '@/lib/http/idempotency-codes';
 import { FORM_LIMITS } from '@/lib/forms/form-schema';
 import { FORM_OFFICE_COPY } from '@/lib/admin/form-route-copy';
 import {
-  addField, afterReplay, builderErrors, firstSaveOutcome, fromDefinition, moveField, newBuilderForm, removeField, restoreField,
+  addField, builderErrors, firstSaveOutcome, fromDefinition, moveField, newBuilderForm, removeField, restoreField,
   sameDefinition, toDefinition, visibleErrors, type BuilderField, type BuilderForm,
 } from '@/lib/admin/form-builder';
 import type { FormRecord } from '@/lib/admin/form-queries';
@@ -27,6 +27,10 @@ import type { JobTypeRecord } from '@/lib/admin/job-type-types';
 const SAVE_FAILED = "Couldn't save the form. Please try again.";
 const SAVE_FIRST = 'Save or discard your changes first.';
 const UNDO_MS = 5000;
+
+const focusSoon = (id: string): void => {
+  requestAnimationFrame(() => document.getElementById(id)?.focus());
+};
 
 const REFUSAL_COPY: Record<string, string> = {
   NAME_TAKEN: FORM_OFFICE_COPY.NAME_TAKEN,
@@ -63,6 +67,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
   const [showAll, setShowAll] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [headerMessage, setHeaderMessage] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [undo, setUndo] = useState<{ field: BuilderField; at: number } | null>(null);
@@ -81,6 +86,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     setShowAll(false);
     setStale(false);
     setMessage(null);
+    setHeaderMessage(null);
   }, []);
 
   const loadRow = useCallback(async (id: string): Promise<{ form: FormRecord; submissionCount: number } | null> => {
@@ -119,6 +125,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     setDraft(next);
     setTouched((t) => (t.has(target) ? t : new Set([...t, target])));
     setMessage(null);
+    setStale(false);
   };
   const editField = (index: number, next: BuilderField) => {
     if (!draft) return;
@@ -133,6 +140,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     }
     setSaving(true);
     setMessage(null);
+    setStale(false);
     const def = toDefinition(draft);
     try {
       // A replay whose GET failed left the id without a version: read the row before PATCHing.
@@ -165,8 +173,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
           setFormId(out.id);
           window.history.replaceState(null, '', `/admin/settings/forms/${out.id}`);
           if (row) {
-            const next = afterReplay(def, { ...toDefinition(fromDefinition(row.form)), version: row.form.version });
-            setVersion(next.version);
+            setVersion(row.form.version);
             setLoaded(fromDefinition(row.form));
             setSubmissionCount(row.submissionCount);
           } else {
@@ -197,14 +204,28 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
   }
 
   async function setArchived(nextActive: boolean): Promise<void> {
-    if (!formId || version === null) return;
+    if (!formId) return;
     if (dirty) {
-      setMessage(SAVE_FIRST);
+      setHeaderMessage(SAVE_FIRST);
       return;
     }
     setSaving(true);
+    setStale(false);
+    setHeaderMessage(null);
+    // A replay whose GET failed left the id without a version: read the row first.
+    let base = version;
+    if (base === null) {
+      const row = await loadRow(formId);
+      if (!row) {
+        setSaving(false);
+        setArchiveOpen(false);
+        setHeaderMessage(SAVE_FAILED);
+        return;
+      }
+      base = row.form.version;
+    }
     const r = await call(`/api/admin/settings/forms/${formId}`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version, active: nextActive }),
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: base, active: nextActive }),
     });
     setSaving(false);
     setArchiveOpen(false);
@@ -216,13 +237,25 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     }
     const code = errorCode(r.body);
     if (code === 'STALE') setStale(true);
-    setMessage((code && REFUSAL_COPY[code]) ?? SAVE_FAILED);
+    setHeaderMessage((code && REFUSAL_COPY[code]) ?? SAVE_FAILED);
   }
 
   async function reload(): Promise<void> {
     if (!formId) return;
     const row = await loadRow(formId);
     if (row) applyRow(row);
+  }
+
+  // Moving a row remounts nothing but drops focus; put it back on the same button (or its twin at either end).
+  function move(index: number, dir: -1 | 1): void {
+    if (!draft) return;
+    edit('form', { ...draft, fields: moveField(draft.fields, index, dir) });
+    const id = draft.fields[index]!.id;
+    const to = index + dir;
+    const same = dir === -1 ? `move-up-${id}` : `move-down-${id}`;
+    const other = dir === -1 ? `move-down-${id}` : `move-up-${id}`;
+    const atEnd = dir === -1 ? to === 0 : to === draft.fields.length - 1;
+    focusSoon(atEnd ? other : same);
   }
 
   function remove(index: number): void {
@@ -233,6 +266,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     setUndo(r.removed);
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS);
+    focusSoon('undo-removed');
   }
 
   if (loadFailed) {
@@ -266,11 +300,18 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
         title={draft.name.trim() || 'New form'}
         back={{ href: '/admin/settings?tab=forms', label: 'Back to forms' }}
         actions={formId && (
-          <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => (active ? (dirty ? setMessage(SAVE_FIRST) : setArchiveOpen(true)) : void setArchived(true))}>
+          <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => (active ? (dirty ? setHeaderMessage(SAVE_FIRST) : setArchiveOpen(true)) : void setArchived(true))}>
             {active ? 'Archive' : 'Restore'}
           </Button>
         )}
       />
+
+      {headerMessage && (
+        <p role="alert" className="text-sm text-destructive">
+          {headerMessage}{' '}
+          {stale && <Button type="button" size="sm" variant="ghost" onClick={() => void reload()}>Reload</Button>}
+        </p>
+      )}
 
       <SectionCard title="Form">
         <div id="form-header" className="space-y-4 p-4">
@@ -285,11 +326,11 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
           <fieldset className="space-y-2 text-sm">
             <legend className="font-medium">Applies to</legend>
             <label className="flex items-center gap-2">
-              <input type="radio" name="applies" checked={draft.appliesTo === 'all'} onChange={() => edit('form', { ...draft, appliesTo: 'all' })} />
+              <input type="radio" className="size-4 accent-primary" name="applies" checked={draft.appliesTo === 'all'} onChange={() => edit('form', { ...draft, appliesTo: 'all' })} />
               All requests
             </label>
             <label className="flex items-center gap-2">
-              <input type="radio" name="applies" checked={draft.appliesTo === 'some'} onChange={() => edit('form', { ...draft, appliesTo: 'some' })} />
+              <input type="radio" className="size-4 accent-primary" name="applies" checked={draft.appliesTo === 'some'} onChange={() => edit('form', { ...draft, appliesTo: 'some' })} />
               Some job types
             </label>
             {draft.appliesTo === 'some' && (
@@ -299,7 +340,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
                 <div className="grid gap-1 pl-6 sm:grid-cols-2">
                   {[...activeTypes, ...archivedPicked].map((j) => (
                     <label key={j.id} className="flex items-center gap-2">
-                      <input type="checkbox" checked={draft.jobTypeIds.includes(j.id)} onChange={(e) => toggleJobType(j.id, e.target.checked)} />
+                      <input type="checkbox" className="size-4 accent-primary" checked={draft.jobTypeIds.includes(j.id)} onChange={(e) => toggleJobType(j.id, e.target.checked)} />
                       {j.active ? j.name : `${j.name} (archived)`}
                     </label>
                   ))}
@@ -308,10 +349,10 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
             )}
           </fieldset>
           <label className="flex items-start gap-2 text-sm">
-            <Switch checked={draft.required} onCheckedChange={(v) => edit('form', { ...draft, required: v })} aria-label="Required form" />
+            <Switch checked={draft.required} onCheckedChange={(v) => edit('form', { ...draft, required: v })} aria-labelledby="required-form-label" aria-describedby="required-form-help" />
             <span>
-              Required form
-              <span className="block text-xs text-muted-foreground">
+              <span id="required-form-label">Required form</span>
+              <span id="required-form-help" className="block text-xs text-muted-foreground">
                 Technicians see this form as Required and are reminded before closing out. Nothing is blocked.
               </span>
             </span>
@@ -334,7 +375,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
               canAdd={draft.fields.length < FORM_LIMITS.maxFields}
               errors={shown.filter((e) => e.target === f.id).map((e) => e.message)}
               onChange={(next) => editField(i, next)}
-              onMove={(dir) => edit('form', { ...draft, fields: moveField(draft.fields, i, dir) })}
+              onMove={(dir) => move(i, dir)}
               onAddBelow={() => edit('form', { ...draft, fields: addField(draft.fields, i) })}
               onRemove={() => remove(i)}
             />
@@ -344,7 +385,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
           {undo && (
             <p role="status" className="flex items-center gap-2 text-sm">
               Question removed.
-              <Button type="button" size="sm" variant="ghost" onClick={() => { setDraft({ ...draft, fields: restoreField(draft.fields, undo) }); setUndo(null); }}>
+              <Button id="undo-removed" type="button" size="sm" variant="ghost" onClick={() => { setDraft({ ...draft, fields: restoreField(draft.fields, undo) }); setUndo(null); }}>
                 Undo
               </Button>
             </p>
@@ -359,7 +400,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
       <div className="space-y-2">
         {submissionCount > 0 && <p className="text-sm text-muted-foreground">Forms already started keep the earlier version.</p>}
         {shown.length > 0 && (
-          <div role="alert" className="text-sm">
+          <div aria-live="polite" className="text-sm">
             <p className="font-medium">Fix these to save:</p>
             <ul className="list-disc pl-5">
               {shown.map((e) => (
@@ -377,14 +418,12 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
           </p>
         )}
         <div className="flex flex-wrap gap-2">
-          {/* A tap on the disabled Save shows every reason (disabled buttons get no clicks). */}
-          <div onClick={() => (errors.length > 0 ? setShowAll(true) : undefined)}>
-            <Button type="button" disabled={saving || errors.length > 0 || !dirty} onClick={() => void save()}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
+          {/* aria-disabled, not disabled: Save stays focusable and a press shows every reason (save() sets showAll). */}
+          <Button type="button" disabled={saving} aria-disabled={errors.length > 0 || !dirty} className="aria-disabled:opacity-50" onClick={() => void save()}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
           {formId && dirty && loaded && (
-            <Button type="button" variant="outline" disabled={saving} onClick={() => { setDraft(loaded); setTouched(new Set()); setShowAll(false); setMessage(null); }}>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => { setDraft(loaded); setTouched(new Set()); setShowAll(false); setMessage(null); setUndo(null); }}>
               Discard changes
             </Button>
           )}

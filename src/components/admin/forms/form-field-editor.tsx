@@ -58,13 +58,13 @@ export function FormFieldEditor({
           </SelectContent>
         </Select>
         <div className="ml-auto flex items-center gap-1">
-          <Button type="button" size="sm" variant="ghost" aria-label="Move up" disabled={index === 0} onClick={() => onMove(-1)}>
+          <Button type="button" size="sm" variant="ghost" id={`move-up-${field.id}`} aria-label={`Move question ${index + 1} up`} disabled={index === 0} onClick={() => onMove(-1)}>
             <ArrowUp className="size-4" />
           </Button>
-          <Button type="button" size="sm" variant="ghost" aria-label="Move down" disabled={index === count - 1} onClick={() => onMove(1)}>
+          <Button type="button" size="sm" variant="ghost" id={`move-down-${field.id}`} aria-label={`Move question ${index + 1} down`} disabled={index === count - 1} onClick={() => onMove(1)}>
             <ArrowDown className="size-4" />
           </Button>
-          <Button type="button" size="sm" variant="ghost" aria-label="Remove" onClick={onRemove}>
+          <Button type="button" size="sm" variant="ghost" aria-label={`Remove question ${index + 1}`} onClick={onRemove}>
             <Trash2 className="size-4" />
           </Button>
         </div>
@@ -75,17 +75,17 @@ export function FormFieldEditor({
 
       {!isHeading && (
         <label className="flex items-center gap-2 text-sm">
-          <Switch checked={field.required} onCheckedChange={(v) => set({ required: v })} aria-label="Required" />
+          <Switch checked={field.required} onCheckedChange={(v) => set({ required: v })} />
           Required
         </label>
       )}
 
       {field.type === 'yes_no' && (
         <label className="flex items-start gap-2 text-sm">
-          <Switch checked={field.allowNa} onCheckedChange={(v) => set({ allowNa: v })} aria-label="Allow N/A" />
+          <Switch checked={field.allowNa} onCheckedChange={(v) => set({ allowNa: v })} aria-labelledby={`na-label-${field.id}`} aria-describedby={`na-help-${field.id}`} />
           <span>
-            Allow N/A
-            <span className="block text-xs text-muted-foreground">Use N/A for items that don&apos;t apply to every system.</span>
+            <span id={`na-label-${field.id}`}>Allow N/A</span>
+            <span id={`na-help-${field.id}`} className="block text-xs text-muted-foreground">Use N/A for items that don&apos;t apply to every system.</span>
           </span>
         </label>
       )}
