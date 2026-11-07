@@ -88,7 +88,7 @@ export function carryValues(fields: readonly FormField[], values: FormValues): F
 
 /** Answers the carry dropped, for "Not saved: …". */
 export function droppedByCarry(before: FormValues, after: FormValues): string[] {
-  return Object.keys(before).filter((id) => !(id in after));
+  return Object.keys(before).filter((id) => !Object.hasOwn(after, id));
 }
 
 /**
@@ -103,8 +103,31 @@ export function mergeDraft(base: FormValues, mine: Changes, theirs: FormValues):
     else out[id] = v;
   }
   const keys = new Set([...Object.keys(base), ...Object.keys(theirs)]);
-  const foreignChange = [...keys].some((k) => !(k in mine) && base[k] !== theirs[k]);
+  const foreignChange = [...keys].some((k) => !Object.hasOwn(mine, k) && base[k] !== theirs[k]);
   return { values: out, foreignChange };
+}
+
+/** Canonical JSON equality of two answers; null and absent are the same. */
+export const sameAnswer = (a: FieldValue | null | undefined, b: FieldValue | null | undefined): boolean =>
+  JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/**
+ * Leave-time field-wise merge (lead ruling R1(b), refines spec §4.2): a changed
+ * field applies only where the stored value still equals the client's base
+ * (a missing base = absent). A field a colleague changed is skipped, never
+ * overwritten. A field already holding the client's value is neither (a retry).
+ */
+export function fieldWiseMerge(stored: FormValues, changes: Changes, bases: Changes): { apply: Changes; skipped: string[] } {
+  const apply: Record<string, FieldValue | null> = {};
+  const skipped: string[] = [];
+  for (const [id, v] of Object.entries(changes)) {
+    const cur = Object.hasOwn(stored, id) ? stored[id] : null;
+    if (sameAnswer(cur, v)) continue;
+    const base = Object.hasOwn(bases, id) ? bases[id] : null;
+    if (sameAnswer(cur, base)) apply[id] = v;
+    else skipped.push(id);
+  }
+  return { apply, skipped };
 }
 
 export type NumberInputState =

@@ -108,9 +108,11 @@ export function blindIndex(normalizedValue: string): string {
  * form submit's answers with "hvac-form-changes-v1" so the stored request hash
  * can't be dictionary-attacked back to answers and never shares the contact
  * blind-index domain. Unlike blindIndex it takes any string, empty included.
+ * The blind-index label itself is refused, so no caller can mint contact tokens.
  */
 export function macHex(label: string, value: string): string {
   if (!label || label.includes("\0")) throw new Error("macHex label must be non-empty and NUL-free");
+  if (label === BLIND_INDEX_DOMAIN) throw new Error("macHex label is reserved");
   return createHmac("sha256", getEncryptionKey())
     .update(label)
     .update("\0")

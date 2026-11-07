@@ -4,6 +4,12 @@
  * FIRST, before the gates, so a retry of a landed write answers 200 even after
  * the visit ended — and the revision gate refuses anything else as STALE. 201
  * on the first write (the row was created), 200 after. No audit.
+ *
+ * Leave-time saves (lead ruling R1(b)): body `{ ...draft, leave?: true,
+ * bases?: { [fieldId]: value | null } }` (`bases` only with `leave`, keys a
+ * subset of `changes`). When the revision moved, the writer merges field-wise
+ * instead of answering STALE and the answer is 200 `{ submissionId, revision,
+ * savedAt, skipped: string[] }` (the fields a colleague changed, kept as theirs).
  */
 import type { NextRequest } from "next/server";
 import { errorResponse, successResponse } from "@/lib/api-response";
@@ -31,7 +37,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!gate.ok) return gate.response;
     const r = await saveFormDraft(actor, { ...body.data, formId });
     if (!r.ok) return formReasonResponse(r);
-    return successResponse({ submissionId: r.submissionId, revision: r.revision, savedAt: r.savedAt }, r.created ? 201 : 200);
+    const saved = { submissionId: r.submissionId, revision: r.revision, savedAt: r.savedAt };
+    if (r.skipped !== undefined) return successResponse({ ...saved, skipped: [...r.skipped] }, 200);
+    return successResponse(saved, r.created ? 201 : 200);
   } catch (error) {
     logger.error({ code: errorCode(error) }, "Failed to save form draft");
     return errorResponse("Something went wrong. Try again.", "INTERNAL_ERROR", 500);

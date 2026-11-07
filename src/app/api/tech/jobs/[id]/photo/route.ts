@@ -20,6 +20,7 @@ import {
   getStorageClient,
   generateStorageKey,
   ADMIN_DOCUMENT_MIME_TYPES,
+  verifyMagicBytes,
 } from "@/lib/storage/r2-client";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -27,6 +28,8 @@ import { logger } from "@/lib/logger";
 import { isUuid } from "@/lib/validation/uuid";
 
 export const runtime = "nodejs";
+
+const INVALID_FILE_COPY = "Invalid file. Allowed: JPEG, PNG, WEBP, HEIC, or PDF (max 4 MB).";
 export const dynamic = "force-dynamic";
 
 export async function POST(
@@ -70,11 +73,12 @@ export async function POST(
       ADMIN_DOCUMENT_MIME_TYPES,
     );
     if (!validatedMime) {
-      return errorResponse(
-        "Invalid file. Allowed: JPEG, PNG, WEBP, HEIC, or PDF (max 4 MB).",
-        "INVALID_INPUT",
-        400,
-      );
+      return errorResponse(INVALID_FILE_COPY, "INVALID_INPUT", 400);
+    }
+    // Bytes that don't match the declared type are a bad file, not a server
+    // fault (uploadFile would otherwise throw and answer 500).
+    if (!verifyMagicBytes(await file.arrayBuffer(), validatedMime)) {
+      return errorResponse(INVALID_FILE_COPY, "INVALID_INPUT", 400);
     }
 
     // Verify ownership BEFORE uploading so a non-assignee can't write to storage.
@@ -89,18 +93,27 @@ export async function POST(
     const storageKey = generateStorageKey(session.organizationId, id, file.name);
     await storageClient.uploadFile(file, storageKey, validatedMime);
 
-    const result = await addJobPhoto(session.organizationId, session.userId, id, {
-      filename: file.name,
-      mimeType: validatedMime,
-      size: file.size,
-      storageKey,
-    });
+    const deleteOrphan = () =>
+      storageClient.deleteFile(storageKey).catch(() => {
+        logger.warn({ storageKey, serviceRequestId: id }, "orphan upload delete failed");
+      });
+    let result: Awaited<ReturnType<typeof addJobPhoto>>;
+    try {
+      result = await addJobPhoto(session.organizationId, session.userId, id, {
+        filename: file.name,
+        mimeType: validatedMime,
+        size: file.size,
+        storageKey,
+      });
+    } catch (e) {
+      // No attachments row points at the object, so erase could never reach it.
+      await deleteOrphan();
+      throw e;
+    }
     if (!result.ok) {
       // Race: the job was reassigned, or its customer erased, between the
       // ownership check and the write. Clean up the orphaned upload first.
-      await storageClient.deleteFile(storageKey).catch(() => {
-        logger.warn({ storageKey, serviceRequestId: id }, "orphan upload delete failed");
-      });
+      await deleteOrphan();
       if (result.reason === "stale") {
         return errorResponse("This job changed. Try again.", "STALE", 409);
       }

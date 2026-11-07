@@ -92,7 +92,7 @@ const fieldSchema = z.discriminatedUnion("type", [
 ]);
 
 /** The cross-field rules zod's per-field schemas can't see. */
-export const formFieldsSchema = z.array(fieldSchema).superRefine((fields, ctx) => {
+export const formFieldsSchema = z.array(fieldSchema).max(FORM_LIMITS.maxFields).superRefine((fields, ctx) => {
   if (fields.length < 1 || fields.length > FORM_LIMITS.maxFields) ctx.addIssue({ code: "custom", path: [], message: "count" });
   if (!fields.some((f) => f.type !== "heading")) ctx.addIssue({ code: "custom", path: [], message: "no_question" });
   if (fields.filter((f) => f.type === "long_text").length > FORM_LIMITS.maxLongText) {

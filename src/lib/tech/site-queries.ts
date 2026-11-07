@@ -10,6 +10,7 @@ import { readRows } from "@/lib/admin/invoice-field-writes";
 import { normalizeAddress } from "@/lib/admin/location-queries";
 import { decrypt } from "@/lib/crypto";
 import { uuidArraySql } from "@/lib/db/sql-arrays";
+import { iso } from "@/lib/db/row-format";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import { findActiveVisit, findReadableJob, isActiveLead } from "@/lib/tech/ownership";
 import { issueLabel } from "@/lib/tech/job-display";
@@ -18,7 +19,6 @@ import { membershipEvaluable, siteMatches, siteScopeOf, type SiteCandidate, type
 import type { SiteEstimate, SiteMembership, SitePastJob, SiteView } from "@/lib/tech/site-view";
 
 type Row = Record<string, unknown>;
-const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
 const CANDIDATE_CAP = 500;
 const PAST_JOBS_CAP = 20;
 
@@ -185,10 +185,12 @@ export async function getSiteView(org: string, me: string, rawRid: string): Prom
     unaddressedCount = Number(un?.n ?? 0);
   }
 
+  // R2: an erased customer's membership is withheld, never "Not a member." (no customer at all = none).
+  const noMembership: SiteMembership = { state: self.customerErased ? "withheld" : "none" };
   const [past, estimates, membership] = await Promise.all([
     matches.length > 0 ? readRows(pastJobsSql(org, matches)) : Promise.resolve([] as Row[]),
     readRows(openEstimatesSql(org, [rid, ...matches])),
-    cust !== null && !self.customerErased ? readMembership(org, cust, rid, self.address) : Promise.resolve<SiteMembership>({ state: "none" }),
+    cust !== null && !self.customerErased ? readMembership(org, cust, rid, self.address) : Promise.resolve(noMembership),
   ]);
 
   return {

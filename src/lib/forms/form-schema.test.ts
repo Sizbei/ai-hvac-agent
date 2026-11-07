@@ -30,6 +30,8 @@ describe("formDefinitionSchema (spec §3.3)", () => {
   it("refuses a form with only headings, more than 60 fields, more than 10 long answers", () => {
     expect(pathOf([{ id: id(1), type: "heading", label: "H", required: false }])).toEqual([]);
     expect(pathOf(Array.from({ length: 61 }, (_, i) => cb(i)))).toEqual([]);
+    // The array itself is bounded (.max), not only the refinement.
+    expect(formFieldsSchema.safeParse(Array.from({ length: 61 }, (_, i) => cb(i))).error?.issues.some((i) => i.code === "too_big")).toBe(true);
     expect(pathOf(Array.from({ length: 11 }, (_, i) => ({ id: id(i), type: "long_text", label: "L", required: false })))).toEqual([]);
     expect(pathOf([])).toEqual([]);
   });

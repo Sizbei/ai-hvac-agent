@@ -82,6 +82,9 @@ describe("GET …/forms and …/forms/[formId]", () => {
     const one = () => ONE(new NextRequest(`${base}/${FORM}?visit=${AID}`), { params: Promise.resolve({ id: RID, formId: FORM }) });
     h.getJobForm.mockResolvedValueOnce({ kind: "not_found" });
     expect(await json(await one())).toMatchObject({ error: { code: "NOT_FOUND", message: "This form is no longer on this job." } });
+    h.getJobForm.mockResolvedValueOnce({ kind: "job_not_found" });
+    const j = await one();
+    expect([j.status, (await json(j)).error]).toEqual([404, { code: "NOT_FOUND", message: "This job isn't yours." }]);
     h.getJobForm.mockResolvedValueOnce({ kind: "archived" });
     const a = await one();
     expect(a.status).toBe(409);
@@ -117,6 +120,29 @@ describe("PUT …/draft (spec §4.2)", () => {
     expect([r.status, (await json(r)).data]).toEqual([200, { submissionId: "s", revision: 4, savedAt: "t" }]);
     expect(h.gate).not.toHaveBeenCalled();
     expect(h.save).not.toHaveBeenCalled();
+  });
+
+  it("leave-time save (R1(b)): leave + bases pass to the writer; a merge answers 200 with skipped", async () => {
+    const b = body({ saveId: SAVE, baseRevision: 1, leave: true, bases: { f_0000000001: null } });
+    h.save.mockResolvedValueOnce({ ok: true, submissionId: "s", revision: 3, savedAt: "t", created: false, skipped: ["f_0000000001"] });
+    const r = await put(b);
+    expect([r.status, (await json(r)).data]).toEqual([200, { submissionId: "s", revision: 3, savedAt: "t", skipped: ["f_0000000001"] }]);
+    expect(h.save).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ leave: true, bases: { f_0000000001: null } }));
+  });
+
+  it("strict body: bases without leave, a base for a field not in changes, leave other than true → 400", async () => {
+    for (const bad of [
+      body({ saveId: SAVE, bases: { f_0000000001: null } }),
+      body({ saveId: SAVE, leave: true, bases: { f_0000000009: "x" } }),
+      body({ saveId: SAVE, leave: false }),
+      body({ saveId: SAVE, leave: true, extra: 1 }),
+    ]) {
+      const r = await put(bad);
+      expect([r.status, (await json(r)).error?.code]).toEqual([400, "INVALID_INPUT"]);
+    }
+    expect(h.save).not.toHaveBeenCalled();
+    h.save.mockResolvedValueOnce({ ok: true, submissionId: "s", revision: 1, savedAt: "t", created: true });
+    expect((await put(body({ saveId: SAVE, leave: true }))).status).toBe(201);
   });
 
   it("refusals map to codes with id / revision / path details only", async () => {
@@ -162,6 +188,13 @@ describe("POST …/submit (spec §4.3)", () => {
     expect([r.status, (await json(r)).data]).toEqual([200, { submissionId: "s", revision: 3, submittedAt: "t" }]);
     expect(h.submitReplay).toHaveBeenCalledWith({ userId: U, organizationId: ORG }, RID, FORM, AID, "derived-form-submit");
     expect(h.gateFail).not.toHaveBeenCalled();
+    expect(h.submit).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable job answers 404 \"This job isn't yours.\" (R3)", async () => {
+    h.gateFail.mockResolvedValueOnce({ ok: false, reason: "job_not_found" });
+    const r = await post(body());
+    expect([r.status, (await json(r)).error]).toEqual([404, { code: "NOT_FOUND", message: "This job isn't yours." }]);
     expect(h.submit).not.toHaveBeenCalled();
   });
 

@@ -31,7 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const r = await reopenSubmission(session.organizationId, id, submissionId, parsed.data.revision);
     if (!r.ok) {
-      if (r.reason === "not_found") return errorResponse("Form not found", "NOT_FOUND", 404);
+      if (r.reason === "not_found") return errorResponse(FORM_OFFICE_COPY.NOT_FOUND, "NOT_FOUND", 404);
       if (r.reason === "answers_removed") return errorResponse(FORM_OFFICE_COPY.ANSWERS_REMOVED, "ANSWERS_REMOVED", 409);
       return errorResponse(FORM_OFFICE_COPY.REOPEN_STALE, "STALE", 409);
     }

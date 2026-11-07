@@ -183,8 +183,7 @@ describe('encryptFields / decryptFields', () => {
 });
 
 describe('macHex (M3d)', () => {
-  it('is blindIndex under the blind-index label, and a different label gives a different digest', () => {
-    expect(macHex('hvac-blind-index-v1', 'pat@example.com')).toBe(blindIndex('pat@example.com'));
+  it('a different label from the blind index gives a different digest', () => {
     expect(macHex('hvac-form-changes-v1', 'pat@example.com')).not.toBe(blindIndex('pat@example.com'));
     expect(macHex('hvac-form-changes-v1', '{}')).toMatch(/^[0-9a-f]{64}$/);
     expect(macHex('hvac-form-changes-v1', '')).toMatch(/^[0-9a-f]{64}$/);
@@ -192,5 +191,8 @@ describe('macHex (M3d)', () => {
   it('rejects an empty label or one containing NUL', () => {
     expect(() => macHex('', 'x')).toThrow('macHex label must be non-empty and NUL-free');
     expect(() => macHex('a\0b', 'x')).toThrow('macHex label must be non-empty and NUL-free');
+  });
+  it('refuses the blind-index label, so the contact-dedupe domain stays blindIndex-only', () => {
+    expect(() => macHex('hvac-blind-index-v1', 'pat@example.com')).toThrow('macHex label is reserved');
   });
 });

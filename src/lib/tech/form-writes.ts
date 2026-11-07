@@ -5,18 +5,24 @@
  * idempotency key, with an in-batch audit gated on the row THIS transaction
  * submitted. Each write is ONE db.batch led by L_req; every statement repeats
  * the request and visit gates; outcomes come from the batch's tail SELECT.
+ * A leave-time draft (`leave` + `bases`, lead ruling R1(b)) that meets a newer
+ * revision merges field-wise instead of answering STALE.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { lockRequestSql, readRows, runBatch } from "@/lib/admin/invoice-field-writes";
 import { decrypt, encrypt } from "@/lib/crypto";
+import { iso } from "@/lib/db/row-format";
 import { parseStoredFields, type FormField } from "@/lib/forms/form-schema";
-import { applyChanges, missingRequired, valuesTooLarge, type Changes, type FormValues } from "@/lib/forms/form-values";
+import {
+  applyChanges, fieldWiseMerge, missingRequired, valuesTooLarge, type Changes, type FormValues,
+} from "@/lib/forms/form-values";
 import {
   gateReason, readFormGatesSql, requestGateSql, toFormGates, visitGateSql, type FormGates, type GateReason,
 } from "@/lib/forms/form-gates";
 
 export type FormWriteReason =
   | GateReason
+  | "job_not_found"
   | "form_archived" | "form_changed" | "answers_removed" | "form_submitted" | "answers_unreadable"
   | "stale" | "invalid_values" | "values_too_large" | "form_incomplete";
 
@@ -36,11 +42,19 @@ export interface DraftInput {
   readonly baseRevision: number;
   readonly saveId: string;
   readonly changes: Changes;
+  /** The keepalive save sent as the page is left (R1(b)). */
+  readonly leave?: true;
+  /** Per changed field, the value the client last saw (null / missing = absent). Only with `leave`. */
+  readonly bases?: Changes;
 }
-export type SubmitInput = Omit<DraftInput, "saveId">;
+export type SubmitInput = Omit<DraftInput, "saveId" | "leave" | "bases">;
 
 export type DraftResult =
-  | { readonly ok: true; readonly submissionId: string; readonly revision: number; readonly savedAt: string; readonly created: boolean }
+  | {
+      readonly ok: true; readonly submissionId: string; readonly revision: number; readonly savedAt: string; readonly created: boolean;
+      /** Set only when the leave-time field-wise merge ran: the changed fields a colleague had changed, kept as theirs. */
+      readonly skipped?: readonly string[];
+    }
   | FormWriteFail;
 export type SubmitResult =
   | { readonly ok: true; readonly submissionId: string; readonly revision: number; readonly submittedAt: string }
@@ -49,7 +63,6 @@ export type SubmitResult =
 type Row = Record<string, unknown>;
 const fail = (reason: FormWriteReason, extra: { fieldIds?: readonly string[]; revision?: number } = {}): FormWriteFail =>
   ({ ok: false, reason, ...extra });
-const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
 const lc = (s: string): string => s.toLowerCase();
 
 /** The submission row by its natural key, every column the decisions read. */
@@ -238,25 +251,24 @@ export async function findDraftReplay(a: FormActor, raw: DraftInput): Promise<Dr
   return replayOf(toSubmissionRow(pre), input);
 }
 
-export async function saveFormDraft(a: FormActor, raw: DraftInput): Promise<DraftResult> {
-  const input = normDraft(raw);
-  const { organizationId: org, requestId: rid } = a;
-  const [pre] = await readRows(selectSubmissionSql(org, rid, input.appointmentId, input.formId));
-  const row = toSubmissionRow(pre);
-  // 1. Replay first: nothing else is read, decrypted, applied or measured.
-  const replay = replayOf(row, input);
-  if (replay) return replay;
-  const prepared = await prepare(a, input, row);
-  if (!prepared.ok) return prepared;
-  const enc = encryptValues(prepared.values);
+async function readSubmission(a: FormActor, input: DraftInput): Promise<SubmissionRow | null> {
+  const [pre] = await readRows(selectSubmissionSql(a.organizationId, a.requestId, input.appointmentId, input.formId));
+  return toSubmissionRow(pre);
+}
 
+/**
+ * One draft write: L_req → INSERT … SELECT → the UPDATE gated on
+ * `input.baseRevision` → tail; a zero-row UPDATE maps through zeroRowOutcome.
+ */
+async function writeDraft(a: FormActor, input: DraftInput, values: FormValues, fallbackRevision: number): Promise<DraftResult> {
+  const { organizationId: org, requestId: rid } = a;
   const out = await runBatch([
     lockRequestSql(org, rid),
     insertSubmissionSql(a, input),
-    updateSubmissionSql(a, input, enc, sql`, last_save_id = ${input.saveId}::uuid`),
+    updateSubmissionSql(a, input, encryptValues(values), sql`, last_save_id = ${input.saveId}::uuid`),
     selectSubmissionSql(org, rid, input.appointmentId, input.formId),
   ]);
-  if (!Array.isArray(out)) return fail("stale", { revision: row?.revision ?? 0 });
+  if (!Array.isArray(out)) return fail("stale", { revision: fallbackRevision });
   const [, inserted, updated, tailRows] = out;
   const up = updated![0];
   if (up) {
@@ -266,6 +278,57 @@ export async function saveFormDraft(a: FormActor, raw: DraftInput): Promise<Draf
   const z = zeroRowOutcome(tail, await readGates(a, input), input);
   if (z.kind === "replay") return { ok: true, submissionId: tail!.id, revision: tail!.revision, savedAt: tail!.updatedAt, created: false };
   return z.fail;
+}
+
+export async function saveFormDraft(a: FormActor, raw: DraftInput): Promise<DraftResult> {
+  const input = normDraft(raw);
+  const row = await readSubmission(a, input);
+  // 1. Replay first: nothing else is read, decrypted, applied or measured.
+  const replay = replayOf(row, input);
+  if (replay) return replay;
+  const prepared = await prepare(a, input, row);
+  const r = prepared.ok ? await writeDraft(a, input, prepared.values, row?.revision ?? 0) : prepared;
+  if (r.ok || r.reason !== "stale" || input.leave !== true) return r;
+  return leaveMerge(a, input, r);
+}
+
+/** Attempts at the field-wise merge before a leave save gives up as STALE (each one re-reads the row). */
+const LEAVE_MERGE_ATTEMPTS = 3;
+
+/**
+ * Lead ruling R1(b): a leave-time save that met a newer revision applies each
+ * changed field only where the stored value still equals the client's base,
+ * and skips the rest. The write is the same batch (L_req, every gate) gated on
+ * the revision it merged against, so a field it read can't change under it; a
+ * race re-reads and merges again. Same `last_save_id`; unreadable answers stay
+ * refused. Nothing left to apply (a retry, or every field skipped) writes nothing.
+ */
+async function leaveMerge(a: FormActor, input: DraftInput, stale: FormWriteFail): Promise<DraftResult> {
+  let last = stale;
+  for (let i = 0; i < LEAVE_MERGE_ATTEMPTS; i++) {
+    const row = await readSubmission(a, input);
+    const replay = replayOf(row, input);
+    if (replay) return replay;
+    if (!row) return last;
+    if (row.erased) return fail("answers_removed");
+    if (row.status === "submitted") return fail("form_submitted");
+    if (row.formVersion !== input.formVersion) return fail("form_changed");
+    const stored = decryptValues(row.valuesEncrypted);
+    const fields = parseStoredFields(row.fields);
+    if (stored === "unreadable" || fields === null) return fail("answers_unreadable");
+    const { apply, skipped } = fieldWiseMerge(stored, input.changes, input.bases ?? {});
+    if (Object.keys(apply).length === 0) {
+      return { ok: true, submissionId: row.id, revision: row.revision, savedAt: row.updatedAt, created: false, skipped };
+    }
+    const applied = applyChanges(fields, stored, apply);
+    if (!applied.ok) return fail("invalid_values", { fieldIds: applied.fieldIds });
+    if (valuesTooLarge(applied.values)) return fail("values_too_large");
+    const r = await writeDraft(a, { ...input, baseRevision: row.revision }, applied.values, row.revision);
+    if (r.ok) return { ...r, skipped };
+    if (r.reason !== "stale") return r;
+    last = r;
+  }
+  return last;
 }
 
 export async function submitForm(a: FormActor, raw: SubmitInput, ids: { submitKey: string }): Promise<SubmitResult> {

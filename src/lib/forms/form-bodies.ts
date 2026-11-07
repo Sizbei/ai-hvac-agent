@@ -16,7 +16,17 @@ export const submitBodySchema = z.object({
   changes: changesSchema,
 }).strict();
 
-export const draftBodySchema = submitBodySchema.extend({ saveId: z.string().uuid() }).strict();
+/**
+ * Draft PUT. `leave: true` marks the keepalive save sent as the page is left;
+ * `bases` (only with `leave`, keys a subset of `changes`) holds the value the
+ * client last saw for each changed field, null = absent (lead ruling R1(b)).
+ */
+export const draftBodySchema = submitBodySchema
+  .extend({ saveId: z.string().uuid(), leave: z.literal(true).optional(), bases: changesSchema.optional() })
+  .strict()
+  .refine((b) => b.bases === undefined || (b.leave === true && Object.keys(b.bases).every((k) => Object.hasOwn(b.changes, k))), {
+    path: ["bases"],
+  });
 
 export type SubmitBody = z.infer<typeof submitBodySchema>;
 export type DraftBody = z.infer<typeof draftBodySchema>;

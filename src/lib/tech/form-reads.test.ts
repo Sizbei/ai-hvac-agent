@@ -101,6 +101,14 @@ describe("getJobForms (spec §6)", () => {
 });
 
 describe("getJobForm (spec §6)", () => {
+  it("an unreadable job → job_not_found (\"This job isn't yours.\"); a visit that doesn't count → not_found", async () => {
+    vi.mocked(findReadableJob).mockResolvedValueOnce(null);
+    expect(await getJobForm(ORG, ME, RID, FORM, AID)).toEqual({ kind: "job_not_found" });
+    expect(executed).toHaveLength(0);
+    readQueue.push([{ id: AID, appointment_number: 1, counts: false }]);
+    expect(await getJobForm(ORG, ME, RID, FORM, AID)).toEqual({ kind: "not_found" });
+  });
+
   it("a foreign or missing form id → 404; an archived form with no row → archived", async () => {
     readQueue.push([{ id: AID, appointment_number: 1, counts: true }], [gates()], [], []);
     expect(await getJobForm(ORG, ME, RID, FORM, AID)).toEqual({ kind: "not_found" });

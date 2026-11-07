@@ -352,6 +352,24 @@ describe("field forms (dev DB)", () => {
     expect([code(x), code(y)].sort()).toEqual(["ok", "stale"]);
   }, 60_000);
 
+  it("(d2) leave-time save (R1(b)): a colleague saved A; a leave save of A (from the old base) and B applies B only", async () => {
+    const formId = await newForm();
+    const rid = await newJob();
+    const v1 = await visitOf(rid);
+    await assign(v1, helper, { arrived: true });
+    expect(await draft(rid, v1, formId, { [F.psi]: 118 })).toMatchObject({ ok: true, revision: 1 });
+    expect(await draft(rid, v1, formId, { [F.psi]: 120 }, { me: helper, base: 1 })).toMatchObject({ ok: true, revision: 2 });
+    const leave = { formId, appointmentId: v1, formVersion: 1, baseRevision: 1, changes: { [F.psi]: 125, [F.note]: "Coil iced" }, bases: { [F.psi]: 118 } };
+    // Without leave the same save is STALE, as before.
+    expect(await fw.saveFormDraft(actor(rid), { ...leave, saveId: randomUUID() })).toEqual({ ok: false, reason: "stale", revision: 2 });
+    const saveId = randomUUID();
+    expect(await fw.saveFormDraft(actor(rid), { ...leave, saveId, leave: true })).toMatchObject({ ok: true, revision: 3, skipped: [F.psi] });
+    expect((await techView(rid, formId, v1)).submission?.values).toEqual({ [F.psi]: 120, [F.note]: "Coil iced" });
+    expect(String((await row(rid, v1, formId))!.last_save_id)).toBe(saveId);
+    // A retry writes nothing more and still reports the colleague's field.
+    expect(await fw.saveFormDraft(actor(rid), { ...leave, saveId, leave: true })).toMatchObject({ ok: true, revision: 3, skipped: [F.psi] });
+  }, 60_000);
+
   it("(e) a version-1 draft submits on version 1 after the office saves v2; FORM_CHANGED carry keeps a colleague's answers", async () => {
     const def = checklist();
     const formId = await newForm(def);

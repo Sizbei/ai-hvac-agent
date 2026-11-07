@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { FORM_LIMITS, formFieldsSchema, type FormField } from "./form-schema";
 import {
-  answerText, applyChanges, carryValues, draftValueOk, droppedByCarry, hasControlChars, mergeDraft, missingRequired,
-  numberInputState, rangeNote, stripControlChars, valuesBytes, valuesTooLarge,
+  answerText, applyChanges, carryValues, draftValueOk, droppedByCarry, fieldWiseMerge, hasControlChars, mergeDraft, missingRequired,
+  numberInputState, sameAnswer, rangeNote, stripControlChars, valuesBytes, valuesTooLarge,
 } from "./form-values";
 
 const F = {
@@ -69,7 +69,7 @@ describe("the 128 KB measure", () => {
     expect(valuesBytes({ a: "\t" })).toBe(10);
   });
 
-  it("the cap is unreachable with a valid definition: the largest valid document is measured well under it", () => {
+  it("a valid definition filled with real characters at every limit stays under the cap", () => {
     // 10 long answers (the most a form may hold) + 50 short answers, every one at its length limit in "€"
     // (3 UTF-8 bytes per UTF-16 unit, the worst a valid text can do; JSON escapes cost at most 2).
     const fields: FormField[] = [
@@ -81,6 +81,18 @@ describe("the 128 KB measure", () => {
     expect(fields.every((f) => draftValueOk(f, values[f.id]))).toBe(true);
     expect(valuesBytes(values)).toBe(91_081);
     expect(valuesTooLarge(values)).toBe(false);
+  });
+
+  it("lone surrogates (6 B each once JSON-escaped) can pass the length limits and reach the cap, which refuses them", () => {
+    expect(valuesBytes({ a: "\uD800" })).toBe(valuesBytes({ a: "x" }) + 5);
+    const fields: FormField[] = [
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `f_long${String(i).padStart(6, "0")}`, type: "long_text" as const, label: "L", required: false })),
+      ...Array.from({ length: 50 }, (_, i) => ({ id: `f_shrt${String(i).padStart(6, "0")}`, type: "short_text" as const, label: "S", required: false })),
+    ];
+    expect(formFieldsSchema.safeParse(fields).success).toBe(true);
+    const values = Object.fromEntries(fields.map((f) => [f.id, "\uD800".repeat(f.type === "long_text" ? FORM_LIMITS.longText : FORM_LIMITS.shortText)]));
+    expect(fields.every((f) => draftValueOk(f, values[f.id]))).toBe(true);
+    expect(valuesTooLarge(values)).toBe(true);
   });
 
   it("refuses just over the cap and accepts at it", () => {
@@ -107,6 +119,15 @@ describe("carryValues", () => {
     expect(after).toEqual({ [F.tick.id]: true });
     expect(droppedByCarry(before, after)).toEqual([F.choice.id, F.short.id]);
   });
+
+  it("a null clear on a field still in the version is carried (so it is re-sent); one on a removed field is dropped", () => {
+    const mine = { [F.tick.id]: null, [F.num.id]: null } as unknown as Record<string, string>;
+    expect(carryValues([F.tick], mine)).toEqual({ [F.tick.id]: null });
+  });
+
+  it("droppedByCarry reads own keys only (a key named like an Object.prototype member)", () => {
+    expect(droppedByCarry({ toString: "x" } as Record<string, string>, {})).toEqual(["toString"]);
+  });
 });
 
 describe("mergeDraft (spec §7.3)", () => {
@@ -119,6 +140,22 @@ describe("mergeDraft (spec §7.3)", () => {
   it("a retry of my own landed write finds no foreign change", () => {
     const base = { a: true } as const;
     expect(mergeDraft(base, { b: "mine" }, { a: true, b: "mine" })).toEqual({ values: { a: true, b: "mine" }, foreignChange: false });
+  });
+
+  it("conflict: a field both sides changed takes mine, and alone is no foreign change", () => {
+    expect(mergeDraft({ a: "x" }, { a: "mine" }, { a: "theirs" })).toEqual({ values: { a: "mine" }, foreignChange: false });
+  });
+
+  it("base-only clear: a colleague cleared a field I didn't touch → gone, and it's a foreign change", () => {
+    expect(mergeDraft({ a: "x", b: 1 }, { b: 2 }, { b: 1 })).toEqual({ values: { b: 2 }, foreignChange: true });
+  });
+
+  it("precedence: my clear beats their new value; their untouched answers survive", () => {
+    expect(mergeDraft({ a: "x" }, { a: null }, { a: "y", c: true })).toEqual({ values: { c: true }, foreignChange: true });
+  });
+
+  it("an own-key check, not `in`: a field id named like a prototype member still counts as foreign", () => {
+    expect(mergeDraft({ toString: "a" } as Record<string, string>, {}, { toString: "b" } as Record<string, string>).foreignChange).toBe(true);
   });
 
   it("FORM_CHANGED path: carry both sides, then merge, so a colleague's answers survive", () => {
@@ -168,5 +205,32 @@ describe("answerText and rangeNote", () => {
     expect(rangeNote(hi, 20)).toBe("Outside the usual range (at most 15 °F)");
     expect(rangeNote(bare, 20)).toBe("Outside the usual range (5–15)");
     expect(rangeNote(bare, 10)).toBeNull();
+  });
+});
+
+describe("fieldWiseMerge (lead ruling R1(b))", () => {
+  it("applies a field whose stored value equals the base; skips one a colleague changed", () => {
+    expect(fieldWiseMerge({ a: "theirs", b: 1 }, { a: "mine", b: 2 }, { a: "old", b: 1 })).toEqual({ apply: { b: 2 }, skipped: ["a"] });
+  });
+
+  it("null and a missing base both mean absent", () => {
+    expect(fieldWiseMerge({}, { a: "mine", b: true }, { a: null })).toEqual({ apply: { a: "mine", b: true }, skipped: [] });
+    expect(fieldWiseMerge({ b: true }, { b: "x" }, {})).toEqual({ apply: {}, skipped: ["b"] });
+  });
+
+  it("a clear applies only if the stored value is still the base; a colleague's clear isn't overwritten", () => {
+    expect(fieldWiseMerge({ a: "old" }, { a: null }, { a: "old" })).toEqual({ apply: { a: null }, skipped: [] });
+    expect(fieldWiseMerge({}, { a: "mine" }, { a: "old" })).toEqual({ apply: {}, skipped: ["a"] });
+  });
+
+  it("a field already holding my value is neither applied nor skipped (a retry of a merged save)", () => {
+    expect(fieldWiseMerge({ a: "mine", b: 7 }, { a: "mine", b: 8 }, { a: "old", b: 6 })).toEqual({ apply: {}, skipped: ["b"] });
+  });
+
+  it("sameAnswer is canonical JSON equality: 0 and -0 match, types don't coerce", () => {
+    expect(sameAnswer(0, -0)).toBe(true);
+    expect(sameAnswer("1", 1)).toBe(false);
+    expect(sameAnswer(null, undefined)).toBe(true);
+    expect(sameAnswer(true, "true")).toBe(false);
   });
 });

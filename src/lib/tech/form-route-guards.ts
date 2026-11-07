@@ -30,12 +30,12 @@ export async function techFormFront(request: NextRequest, id: string, formId: st
   return front;
 }
 
-/** The gates as a write refusal (null = pass). An unreadable job is NOT_FOUND. */
+/** The gates as a write refusal (null = pass). An unreadable job is job_not_found ("This job isn't yours."). */
 export async function formGateFail(
   session: TechSessionPayload, id: string, formId: string, rawAppointmentId: string,
 ): Promise<FormWriteFail | null> {
   const { organizationId: org, userId: me } = session;
-  if (!(await findReadableJob(org, me, id))) return { ok: false, reason: "not_found" };
+  if (!(await findReadableJob(org, me, id))) return { ok: false, reason: "job_not_found" };
   const aid = rawAppointmentId.toLowerCase(); // Postgres returns lowercase uuids (resolveTarget's rule)
   const g = toFormGates((await readRows(readFormGatesSql(org, id, aid, me, formId.toLowerCase())))[0]);
   const reason = gateReason(g);
@@ -47,7 +47,6 @@ export async function techFormGate(
 ): Promise<{ ok: true } | { ok: false; response: NextResponse }> {
   const fail = await formGateFail(session, id, formId, rawAppointmentId);
   if (!fail) return { ok: true };
-  if (fail.reason === "not_found") return { ok: false, response: errorResponse("This job isn't yours.", "NOT_FOUND", 404) };
   return { ok: false, response: formReasonResponse(fail) };
 }
 

@@ -16,10 +16,15 @@ export function visitGateSql(org: string, rid: string, aid: string, me: string):
       AND p.cancelled_at IS NULL AND a.technician_id = ${me}::uuid AND a.status <> 'cancelled'::request_status)`;
 }
 
+/** An assignment row (alias `a`, a trusted literal) has arrived / started / completed. Written once for both gate paths. */
+function arrivedSql(a: string): SQL {
+  return sql.raw(`(${a}.arrived_at IS NOT NULL OR ${a}.started_at IS NOT NULL OR ${a}.completed_at IS NOT NULL)`);
+}
+
 /** The caller's own row on the visit has arrived / started / completed (the helper arm). */
 function ownProgressSql(org: string, aid: string, me: string): SQL {
   return sql`EXISTS (SELECT 1 FROM appointment_assignments ga WHERE ga.appointment_id = ${aid}::uuid AND ga.organization_id = ${org}::uuid
-      AND ga.technician_id = ${me}::uuid AND (ga.arrived_at IS NOT NULL OR ga.started_at IS NOT NULL OR ga.completed_at IS NOT NULL))`;
+      AND ga.technician_id = ${me}::uuid AND ${arrivedSql("ga")})`;
 }
 
 /**
@@ -79,7 +84,7 @@ export function readFormGatesSql(org: string, rid: string, aid: string, me: stri
       COALESCE(p.cancelled_at IS NULL, false) AS visit_live,
       EXISTS (${mine}) AS my_row,
       EXISTS (${mine} AND a.status <> 'cancelled'::request_status) AS my_live_row,
-      EXISTS (${mine} AND (a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)) AS my_progress,
+      EXISTS (${mine} AND ${arrivedSql("a")}) AS my_progress,
       f.id IS NOT NULL AS form_found,
       COALESCE(f.active, false) AS form_active,
       f.version AS form_version

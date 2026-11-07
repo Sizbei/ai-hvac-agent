@@ -7,6 +7,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { readRows } from "@/lib/admin/invoice-field-writes";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { uuidArraySql } from "@/lib/db/sql-arrays";
+import { iso, isoOrNull } from "@/lib/db/row-format";
 import { officeId } from "@/lib/http/idempotency";
 import { FORM_LIMITS, parseStoredFields, questionCount, type FormDefinition, type FormField } from "@/lib/forms/form-schema";
 import type { FormValues } from "@/lib/forms/form-values";
@@ -14,8 +15,6 @@ import { formAppliesSql, visitCountsSql } from "@/lib/forms/form-gates";
 import { decryptValues } from "@/lib/tech/form-writes";
 
 type Row = Record<string, unknown>;
-const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
-const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
 
 const dedupeIds = (ids: readonly string[]): string[] => [...new Set(ids.map((i) => i.toLowerCase()))];
 

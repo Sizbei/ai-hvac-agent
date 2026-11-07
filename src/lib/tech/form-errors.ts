@@ -8,6 +8,7 @@ type Shape = { status: number; code: string; message: string };
 
 export const FORM_REASON: Record<FormWriteReason, Shape> = {
   not_found: { status: 404, code: "NOT_FOUND", message: "This form is no longer on this job." },
+  job_not_found: { status: 404, code: "NOT_FOUND", message: "This job isn't yours." },
   job_closed: { status: 409, code: "JOB_CLOSED", message: "This job is closed." },
   visit_ended: { status: 409, code: "VISIT_ENDED", message: "This visit has ended." },
   not_assigned: { status: 403, code: "NOT_ASSIGNED", message: "Only a technician on this visit can fill in its forms." },

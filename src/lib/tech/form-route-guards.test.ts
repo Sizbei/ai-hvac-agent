@@ -55,11 +55,23 @@ describe("techFormFront (spec §6)", () => {
 });
 
 describe("techFormGate", () => {
-  it("404 when the job isn't readable", async () => {
+  it("404 \"This job isn't yours.\" when the job isn't readable (R3); formGateFail says job_not_found", async () => {
     h.findReadableJob.mockResolvedValueOnce(null);
     const r = await techFormGate(SESSION, RID, FORM, AID);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.response.status).toBe(404);
+    if (!r.ok) {
+      expect(r.response.status).toBe(404);
+      expect((await r.response.json()).error).toEqual({ code: "NOT_FOUND", message: "This job isn't yours." });
+    }
+    h.findReadableJob.mockResolvedValueOnce(null);
+    expect(await formGateFail(SESSION, RID, FORM, AID)).toEqual({ ok: false, reason: "job_not_found" });
+  });
+
+  it("a readable job whose visit isn't on the request: 404 with the form copy", async () => {
+    h.execute.mockResolvedValueOnce({ rows: [gates({ visit_found: false })] });
+    const r = await techFormGate(SESSION, RID, FORM, AID);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect((await r.response.json()).error).toEqual({ code: "NOT_FOUND", message: "This form is no longer on this job." });
   });
 
   it("maps the gate read: cancelled → 409 JOB_CLOSED; a cancelled visit → VISIT_ENDED; no row → 403 NOT_ASSIGNED", async () => {

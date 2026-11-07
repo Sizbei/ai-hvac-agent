@@ -6,6 +6,7 @@ const storage = vi.hoisted(() => ({
   uploadFile: vi.fn(),
   deleteFile: vi.fn(),
   getSignedReadUrl: vi.fn(),
+  verifyMagicBytes: vi.fn(),
 }));
 vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: vi.fn() }));
 vi.mock("@/lib/tech/field-queries", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/lib/storage/r2-client", () => ({
   getStorageClient: vi.fn(() => storage),
   generateStorageKey: vi.fn(() => "org/job/before.jpg"),
   ADMIN_DOCUMENT_MIME_TYPES: [],
+  verifyMagicBytes: storage.verifyMagicBytes,
 }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
 
@@ -42,6 +44,7 @@ beforeEach(() => {
   storage.validateFile.mockReturnValue("image/jpeg");
   storage.uploadFile.mockResolvedValue(undefined);
   storage.deleteFile.mockResolvedValue(undefined);
+  storage.verifyMagicBytes.mockReturnValue(true);
 });
 
 describe("GET /api/tech/jobs/[id]/photo", () => {
@@ -106,6 +109,37 @@ describe("POST /api/tech/jobs/[id]/photo (M3d spec §7.7)", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ success: false, error: { code: "STALE", message: "This job changed. Try again." } });
     expect(storage.deleteFile).toHaveBeenCalledWith("org/job/before.jpg");
+  });
+
+  it("a thrown write (Neon error, lock timeout): the upload is deleted and the answer is 500", async () => {
+    (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    (addJobPhoto as unknown as Mock).mockRejectedValue(new Error("fetch failed"));
+    const res = await POST(upload(jpeg()), ctx(VALID_ID) as never);
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.code).toBe("INTERNAL_ERROR");
+    expect(storage.deleteFile).toHaveBeenCalledWith("org/job/before.jpg");
+  });
+
+  it("a thrown write whose orphan delete also fails: logged (ids only), still 500", async () => {
+    (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    (addJobPhoto as unknown as Mock).mockRejectedValue(new Error("fetch failed"));
+    storage.deleteFile.mockRejectedValueOnce(new Error("r2 down"));
+    expect((await POST(upload(jpeg()), ctx(VALID_ID) as never)).status).toBe(500);
+    expect(logger.warn).toHaveBeenCalledWith({ storageKey: "org/job/before.jpg", serviceRequestId: VALID_ID }, "orphan upload delete failed");
+  });
+
+  it("bytes that don't match the declared type: 400 with the invalid-file copy, nothing uploaded", async () => {
+    (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    storage.verifyMagicBytes.mockReturnValue(false);
+    const res = await POST(upload(jpeg()), ctx(VALID_ID) as never);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: { code: "INVALID_INPUT", message: "Invalid file. Allowed: JPEG, PNG, WEBP, HEIC, or PDF (max 4 MB)." },
+    });
+    expect(storage.verifyMagicBytes).toHaveBeenCalledWith(expect.any(ArrayBuffer), "image/jpeg");
+    expect(storage.uploadFile).not.toHaveBeenCalled();
+    expect(addJobPhoto).not.toHaveBeenCalled();
   });
 
   it("logs a failed orphan delete (ids only) and still answers", async () => {

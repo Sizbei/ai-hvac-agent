@@ -24,6 +24,7 @@ vi.mock("@/lib/storage/r2-client", () => ({
   getStorageClient: vi.fn(() => storage),
   generateStorageKey: vi.fn(() => "org/job/before.jpg"),
   ADMIN_DOCUMENT_MIME_TYPES: [],
+  verifyMagicBytes: vi.fn(() => true),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   slidingWindow: vi.fn(() => ({ allowed: true })),

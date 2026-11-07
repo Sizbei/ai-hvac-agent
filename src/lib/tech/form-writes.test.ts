@@ -92,6 +92,9 @@ describe("saveFormDraft (spec §5.2)", () => {
     // The UPDATE re-checks the visit (a technician removed after the route's gate read).
     expect(s[2]).toContain(VISIT_GATE);
     expect(params(2)[0]).toBe(`ENC:${JSON.stringify({ [TICK.id]: true })}`);
+    // C M-3: the revision gate binds the client's base revision and form version, by value and position.
+    expect(s[2]).toContain("AND revision = $8::int AND form_version = $9::int");
+    expect(params(2).slice(0, 9)).toEqual([`ENC:${JSON.stringify({ [TICK.id]: true })}`, ME, SAVE, ORG, AID, FORM, RID, 0, 1]);
     // INSERT: forms, the row value, rg, gc, ga, p, a. UPDATE: the row, rg, gc, ga, p, a.
     expect(orgCount(1)).toBe(7);
     expect(orgCount(2)).toBe(6);
@@ -109,6 +112,13 @@ describe("saveFormDraft (spec §5.2)", () => {
       expect(params(i)).toContain(UP.toLowerCase());
       expect(params(i)).not.toContain(UP);
     }
+  });
+
+  it("a later base binds that base, not base + 1 (C M-3)", async () => {
+    readQueue.push([row({ revision: 3, form_version: 2 })]);
+    batch.mockResolvedValueOnce(rowsOf([], [], [{ id: SID, revision: 4, updated_at: T0 }], [row({ revision: 4 })]));
+    await saveFormDraft(actor, draft({ baseRevision: 3, formVersion: 2 }));
+    expect(params(2).slice(7, 9)).toEqual([3, 2]);
   });
 
   it("clearing every answer stores NULL", async () => {
@@ -277,5 +287,83 @@ describe("decryptValues", () => {
     expect(decryptValues("BAD")).toBe("unreadable");
     expect(decryptValues("ENC:[1]")).toBe("unreadable");
     expect(decryptValues('ENC:{"a":1}')).toEqual({ a: 1 });
+  });
+});
+
+describe("leave-time field-wise merge (lead ruling R1(b))", () => {
+  const enc = (v: Record<string, unknown>) => `ENC:${JSON.stringify(v)}`;
+  const GATES = { status: "arrived", native: true, visit_found: true, visit_live: true, my_row: true, my_live_row: true, form_found: true, form_active: true, form_version: 1 };
+  // A colleague set NUM (absent → 120) at revision 2; this phone, based on revision 1, changed NUM and TICK.
+  const theirs = () => row({ revision: 2, values_encrypted: enc({ [NUM.id]: 120 }) });
+  const leaveDraft = (over: Partial<DraftInput> = {}) =>
+    draft({ baseRevision: 1, leave: true, changes: { [NUM.id]: 118, [TICK.id]: true }, bases: { [NUM.id]: null }, ...over });
+
+  it("applies only the fields whose stored value is still the base, gated on the merged revision, same saveId", async () => {
+    readQueue.push([theirs()], [theirs()]);
+    batch.mockResolvedValueOnce(rowsOf([], [], [{ id: SID, revision: 3, updated_at: T0 }], [row({ revision: 3 })]));
+    expect(await saveFormDraft(actor, leaveDraft())).toEqual({ ok: true, submissionId: SID, revision: 3, savedAt: T0, created: false, skipped: [NUM.id] });
+    const s = stmts();
+    expect(s[0]).toBe(LOCK);
+    expect(s[2]).toContain("last_save_id = $3::uuid");
+    expect(s[2]).toContain(VISIT_GATE);
+    expect(params(2)[0]).toBe(enc({ [NUM.id]: 120, [TICK.id]: true }));
+    expect(params(2)[2]).toBe(SAVE);
+    expect(params(2).slice(7, 9)).toEqual([2, 1]);
+  });
+
+  it("without leave a moved revision stays STALE (spec §4.2), no batch", async () => {
+    readQueue.push([theirs()]);
+    expect(await saveFormDraft(actor, leaveDraft({ leave: undefined }))).toEqual({ ok: false, reason: "stale", revision: 2 });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("every field skipped, or a retry whose fields already hold my values: 200 with nothing written", async () => {
+    readQueue.push([theirs()], [theirs()]);
+    expect(await saveFormDraft(actor, leaveDraft({ changes: { [NUM.id]: 118 } }))).toEqual({
+      ok: true, submissionId: SID, revision: 2, savedAt: T0, created: false, skipped: [NUM.id],
+    });
+    const mergedRow = row({ revision: 3, last_save_id: SAVE, values_encrypted: enc({ [NUM.id]: 120, [TICK.id]: true }) });
+    readQueue.push([mergedRow], [mergedRow]);
+    expect(await saveFormDraft(actor, leaveDraft())).toMatchObject({ ok: true, revision: 3, skipped: [NUM.id] });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("unreadable stored answers stay refused; erased, submitted and other version keep their codes", async () => {
+    for (const [r, reason] of [
+      [row({ revision: 2, values_encrypted: "BAD" }), "answers_unreadable"],
+      [row({ revision: 2, fields: "nope" }), "answers_unreadable"],
+    ] as const) {
+      readQueue.push([r], [r]);
+      expect(await saveFormDraft(actor, leaveDraft())).toEqual({ ok: false, reason });
+    }
+    readQueue.push([row({ revision: 2, erased: true })]);
+    expect(await saveFormDraft(actor, leaveDraft())).toEqual({ ok: false, reason: "answers_removed" });
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("a write that lands between the read and the lock: re-read, merge again against the newer row", async () => {
+    const newer = row({ revision: 3, values_encrypted: enc({ [NUM.id]: 120, [TICK.id]: true }) });
+    readQueue.push([theirs()], [theirs()], [GATES], [newer]);
+    batch
+      .mockResolvedValueOnce(rowsOf([], [], [], [newer]))
+      .mockResolvedValueOnce(rowsOf([], [], [{ id: SID, revision: 4, updated_at: T0 }], [row({ revision: 4 })]));
+    // On the newer row TICK already holds my value and NUM is a colleague's → nothing to apply.
+    expect(await saveFormDraft(actor, leaveDraft())).toMatchObject({ ok: true, revision: 3, skipped: [NUM.id] });
+    expect(batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up as STALE after repeated races; a gate refusal is returned as is", async () => {
+    readQueue.push([theirs()]);
+    for (let i = 0; i < 3; i++) {
+      readQueue.push([theirs()], [GATES]);
+      batch.mockResolvedValueOnce(rowsOf([], [], [], [row({ revision: 9 })]));
+    }
+    expect(await saveFormDraft(actor, leaveDraft())).toEqual({ ok: false, reason: "stale", revision: 9 });
+    expect(batch).toHaveBeenCalledTimes(3);
+    batch.mockReset();
+    readQueue.length = 0;
+    readQueue.push([theirs()], [theirs()], [{ ...GATES, status: "cancelled", visit_live: false }]);
+    batch.mockResolvedValueOnce(rowsOf([], [], [], [theirs()]));
+    expect(await saveFormDraft(actor, leaveDraft())).toEqual({ ok: false, reason: "job_closed" });
   });
 });

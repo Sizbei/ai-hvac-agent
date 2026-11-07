@@ -90,6 +90,15 @@ describe("site SQL binds the org on every table (spec §7.6)", () => {
     expect(m).toContain("m.status = 'active'::membership_status");
   });
 
+  it("the customer and request binds are pinned by value and position (C M-4)", () => {
+    expect(q(candidatesSql(ORG, CUST, RID)).params).toEqual([ORG, CUST, RID, 500]);
+    expect(q(unaddressedSql(ORG, CUST, RID)).params).toEqual([ORG, CUST, RID]);
+    expect(q(allAddressesSql(ORG, CUST)).params).toEqual([ORG, CUST]);
+    expect(q(locationCountSql(ORG, CUST)).params).toEqual([ORG, CUST]);
+    expect(q(membershipSql(ORG, CUST)).params).toEqual([ORG, ORG, CUST]);
+    expect(text(candidatesSql(ORG, CUST, RID))).toContain("organization_id = $1::uuid AND customer_id = $2::uuid AND id <> $3::uuid");
+  });
+
   it("past jobs exclude unstarted future jobs and never select description, notes or contact columns", () => {
     const t = text(pastJobsSql(ORG, [OTHER]));
     expect(t).toContain("AND NOT (r.status IN ('pending'::request_status, 'assigned'::request_status, 'scheduled'::request_status) AND COALESCE(r.scheduled_date, r.arrival_window_start) > now())");
@@ -133,6 +142,13 @@ describe("getSiteView", () => {
       },
     });
     expect(q(executed[4] as SQL).params).toEqual(expect.arrayContaining([RID, OTHER]));
+  });
+
+  it("an erased customer: none scope and membership withheld, never \"Not a member.\" (R2); no customer reads", async () => {
+    readQueue.push([{ customer_id: CUST, location_id: LOC, address_encrypted: ADDR, customer_erased: true, location_label: null }], []);
+    const r = await getSiteView(ORG, ME, RID);
+    expect(r).toMatchObject({ kind: "ok", view: { scope: "none", membership: { state: "withheld" }, hasCustomer: true, pastJobs: [] } });
+    expect(executed.map((e) => text(e as SQL)).some((t) => t.includes("customer_memberships") || t.includes("customer_id = $2"))).toBe(false);
   });
 
   it("member: one address everywhere and one location", async () => {

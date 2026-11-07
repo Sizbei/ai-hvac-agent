@@ -57,7 +57,8 @@ describe("POST …/reopen (spec §5.5)", () => {
     h.reopen.mockResolvedValueOnce({ ok: false, reason: "answers_removed" });
     expect((await reopen({ revision: 1 })).status).toBe(409);
     h.reopen.mockResolvedValueOnce({ ok: false, reason: "not_found" });
-    expect((await reopen({ revision: 1 })).status).toBe(404);
+    const nf = await reopen({ revision: 1 });
+    expect([nf.status, (await json(nf)).error]).toEqual([404, { code: "NOT_FOUND", message: "Form not found." }]);
     expect((await reopen({ revision: 1 }, "nope")).status).toBe(400);
     expect((await reopen({ revision: -1 })).status).toBe(400);
   });

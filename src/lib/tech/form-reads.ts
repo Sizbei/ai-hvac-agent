@@ -5,6 +5,7 @@
  */
 import { sql, type SQL } from "drizzle-orm";
 import { readRows } from "@/lib/admin/invoice-field-writes";
+import { iso, isoOrNull, strOrNull } from "@/lib/db/row-format";
 import { findReadableJob } from "@/lib/tech/ownership";
 import { parseStoredFields } from "@/lib/forms/form-schema";
 import {
@@ -14,9 +15,6 @@ import { decryptValues } from "@/lib/tech/form-writes";
 import { buildFormsCard, type SubmissionRowIn, type SubmittedOn, type TechFormsView, type TechFormView } from "@/lib/tech/form-view";
 
 type Row = Record<string, unknown>;
-const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
-const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
-const strOrNull = (v: unknown): string | null => (v == null ? null : String(v));
 
 export function countingVisitSql(org: string, rid: string, aid: string): SQL {
   return sql`SELECT p.id, p.appointment_number, ${visitCountsSql(org, "p")} AS counts FROM appointments p
@@ -58,13 +56,13 @@ function toSubmissionIn(r: Row): SubmissionRowIn {
 
 type Visit = { id: string; number: number; gates: FormGates };
 
-/** Readable job → the visit counts → the gate row. Null = 404. */
-async function openVisit(org: string, me: string, rid: string, aid: string, formId: string | null): Promise<Visit | null> {
-  if (!(await findReadableJob(org, me, rid))) return null;
+/** Readable job (else "job") → the visit counts → the gate row (else "visit"). Both are 404s. */
+async function openVisit(org: string, me: string, rid: string, aid: string, formId: string | null): Promise<Visit | "job" | "visit"> {
+  if (!(await findReadableJob(org, me, rid))) return "job";
   const [v] = await readRows(countingVisitSql(org, rid, aid));
-  if (!v || v.counts !== true) return null;
+  if (!v || v.counts !== true) return "visit";
   const gates = toFormGates((await readRows(readFormGatesSql(org, rid, aid, me, formId)))[0]);
-  return gates ? { id: String(v.id), number: Number(v.appointment_number), gates } : null;
+  return gates ? { id: String(v.id), number: Number(v.appointment_number), gates } : "visit";
 }
 
 export type FormsResult = { kind: "not_found" } | { kind: "ok"; view: TechFormsView };
@@ -72,7 +70,7 @@ export type FormsResult = { kind: "not_found" } | { kind: "ok"; view: TechFormsV
 export async function getJobForms(org: string, me: string, rid: string, rawAid: string): Promise<FormsResult> {
   const aid = rawAid.toLowerCase();
   const visit = await openVisit(org, me, rid, aid, null);
-  if (!visit) return { kind: "not_found" };
+  if (typeof visit === "string") return { kind: "not_found" };
   const [forms, subs] = await Promise.all([readRows(cardFormsSql(org, rid)), readRows(cardSubmissionsSql(org, rid))]);
   const card = buildFormsCard(
     visit.id,
@@ -110,13 +108,15 @@ export function submittedElsewhereSql(org: string, rid: string, aid: string, for
     ORDER BY s.submitted_at DESC, s.id LIMIT 1`;
 }
 
-export type FormResult = { kind: "not_found" } | { kind: "archived" } | { kind: "ok"; view: TechFormView };
+/** `job_not_found` = the job isn't readable ("This job isn't yours."); `not_found` = the form or visit isn't on it. */
+export type FormResult = { kind: "job_not_found" } | { kind: "not_found" } | { kind: "archived" } | { kind: "ok"; view: TechFormView };
 
 export async function getJobForm(org: string, me: string, rid: string, rawFormId: string, rawAid: string): Promise<FormResult> {
   const aid = rawAid.toLowerCase();
   const formId = rawFormId.toLowerCase();
   const visit = await openVisit(org, me, rid, aid, formId);
-  if (!visit) return { kind: "not_found" };
+  if (visit === "job") return { kind: "job_not_found" };
+  if (visit === "visit") return { kind: "not_found" };
   const [[form], [row]] = await Promise.all([
     readRows(sql`SELECT name, description, version, fields, active FROM forms WHERE id = ${formId}::uuid AND organization_id = ${org}::uuid`),
     readRows(oneSubmissionSql(org, rid, aid, formId)),
