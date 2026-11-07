@@ -107,3 +107,84 @@ Rejected / deferred:
 - Keep row 126 with the blocker and list its consumers (C4 option b): rejected by L3.
 
 Verdict: v2 for round 2. Round 1 had one blocker (B1), resolved by L2.
+
+## Spec round 2 (v2 → v3), 2026-11-07 — 2 critics (A correctness/data/concurrency/erasure, B UX/buildability)
+
+Counts: A 0 blocker / 5 major / 13 minor; B 2 blocker / 9 major / 20 minor. Neither signed off. Lead
+rulings R2-1…R2-10 binding.
+
+Correction recorded: round 1's C2 ("a retry merges cleanly without a save token") was wrong. A tick whose
+response is lost, then an untick, then the retry re-applies the tick and raises a false "someone else"
+banner (A2-2). v3 restores `saveId` / `last_save_id`.
+
+Applied:
+- Forms on FieldPulse-synced jobs: allowed for any technician holding an assignment on the visit (synced
+  jobs get visit #1 and a lead row from `assigned_to` via the 0049 trigger). Synced status window = any
+  status but cancelled, because the status there is FieldPulse's. Status, close-out and money stay
+  native-only. The "Managed in FieldPulse" forms stub and MANAGED_EXTERNALLY are removed from forms;
+  integration (g) covers it, and Done-when names both (R2-1; supersedes B M7).
+- Site scope: a request with neither location nor address matches nothing (no fallback to the customer's
+  address); address-less candidates never match; "Synced jobs included" removed, replaced with a counted
+  line "N earlier jobs have no saved address."; membership only when every one of the customer's requests
+  has an address normalising to this one (and ≤ 1 location); row 131 note made honest (R2-2, A2-5).
+- Draft retry: `saveId` back; an unknown write is retried with its own body and saveId before any newer
+  write; a replay returns the stored revision with no merge. Drafts send `changes` (every touched field,
+  `null` = cleared), applied server-side to the decrypted document under the revision gate (R2-3, A2-2).
+- Half-typed numbers: `numberInputState` (empty / partial / invalid / value); "1,200" accepted by stripping
+  thousands separators; a partial or invalid input keeps its last valid value in `changes`, never deletes
+  it; inline notes "Not saved yet. Finish the number." / "Enter a number like 12.5 (up to 3 decimal
+  places)."; status line "Not saved yet: 1 answer isn't a number." and never `Saved` while any input is
+  unparsed; submit refused with "Fix the highlighted answers." (R2-4, A2-3, B M2).
+- FORM_CHANGED: carry then the same three-way merge against the re-read row, so a colleague's answers
+  survive; dropped answers listed (R2-5, A2-4).
+- Locking: draft and submit batches take L_req first; the erase batch updates `service_requests` before
+  the answers UPDATE (same lock order, no deadlock, no missed row); two-connection integration case (R2-6,
+  A2-1).
+- Empty forms: `New form` inserts nothing; the first valid Save creates the row whole (≥ 1 non-heading
+  question), so an empty form is never listed (R2-7, B blocker 1).
+- Walk: the other-address request belongs to customer B, so A's membership shows; the helper taps Done
+  before the lead's Close out (R2-8, B blocker 2, B M8 walk part).
+- B majors (R2-9): `myVisit` + `backHref` with `from=` so `?visit=` links never 404 (M1); "Some job types"
+  with none ticked → "Pick at least one job type, or choose All requests.", archived job types kept as
+  ticked "(archived)" rows (M3); `changeType` forces Heading's required off and drops type extras, Choice
+  seeds two options (M4); a message for every builder rule, Save disabled with "Fix these to save:" and the
+  list linking to rows (M5; the lead's ruling chose disabled-with-reasons over B's "enabled Save");
+  `missingRequired` on completed requests ("Required, not submitted: …"), not on cancelled ones (M6); the
+  close-out reminder renders when the sheet is blocked too (M8); the status-line table covers first load
+  (with day and other-editor name), 401 with a sign-in link, other refusals → read-only + "Not saved"
+  list, 400 with `Try again`, over-size (M9); mistaken drafts are emptied with `Clear answers` (no new
+  writer; an answerless draft reads `Not started` and is hidden from the office) (M9).
+- A minors: `submit_key` in the tail; the `form_submitted` audit is an in-batch INSERT gated on the row's
+  xmin, so takeovers and resubmits audit correctly (A2-6); `attachmentsDeleted` computed in SQL in an
+  audit INSERT placed before the DELETE (A2-7); the request arm of `attachmentMatch` is an in-batch
+  subquery (A2-8); `addJobPhoto` refuses an erased customer's request (`CUSTOMER_REMOVED`) and deletes the
+  uploaded object (A2-9); C0 controls refused, the 128 KB cap enforced by measuring `JSON.stringify`
+  bytes on both sides, the "every form fits" claim removed (A2-10, R2-10); the fill page recovers its own
+  submit intent `{ base, body }` and merges on STALE / FORM_CHANGED (A2-11); every PUT ≤ 60 KB uses
+  keepalive, `hidden` / `pagehide` bypass the 3 s floor (A2-12, B minor 5); drafts get their own
+  `form-draft` bucket at 60/min (A2-13); admin form GET/PATCH org-scoped, admin answers `unreadable`
+  never 500 (A2-14); migration procedure (copy `drizzle/` to scratch, diff hand SQL against generated SQL,
+  migrate dev, compare catalogs, `RETURNING id`) (A2-15); submit request hash over an HMAC of the changes
+  (A2-17); ids lowercased before comparing (A2-18).
+- B minors: `±` behaviour and visibility (1); one-bound range copy and unit spacing (2); chip combinations
+  (3); `submittedOn` = this visit has no submitted row (4); `plural` helper (6); Forms tab sort, empty
+  state, question count, job type names from the full list (7); builder route path, `Back to forms`,
+  title, Archive refused while dirty (8); option ids `o_` + 8 (9); "Required form" switch label (10);
+  `maxLength` + count from 80 % (11); footer static while an input has focus (12); inline quality radio
+  (13); still-over-4 MB copy (14); `PHOTO_UPLOAD_FAILED` changes, "Photo uploaded." kept (15); buttons
+  disabled while a failed blob waits, PDF retry (16); the limit in a pure `upload-limits.ts` (17); Site:
+  future unstarted jobs excluded, `generated` → "Booked", "Paid through" (omitted when null), forms line,
+  `This job` on an upcoming visit, card copy with no customer (18); office: unreadable copy, cancelled
+  visit label and not counted, Reopen warns when no technician is on the visit, office tells the
+  technician (19); the erase widening ships as its own commit and test group (20).
+
+Rejected:
+- A2-16 site-only address folding (Tennessee → TN, trailing USA): not needed; strict matching finds no
+  false match on dev, and a miss only hides history. Recorded under §11.
+- B minor 20, trimming `submittedOn` / `View visit #N's answers` / the `Add a form` filter / PDF tiles:
+  kept. `submittedOn` is lead ruling L7, the rest are small, and the PDF tile fixes a live defect.
+- A `Discard draft` writer that deletes the row (B M9 option): not taken; `Clear answers` reuses the draft
+  write, needs no new endpoint or audit, and the empty row is invisible.
+- Forms-tab line about FieldPulse orgs (B M7): moot under R2-1.
+
+Verdict: v3 for round 3.
