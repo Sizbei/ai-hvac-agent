@@ -102,6 +102,9 @@ export function FormFillClient({
   const recovery = useRef<{ key: string; done: Promise<void> } | null>(null);
   /** A scheduled re-read after a failed one (reconcile's back-off); autosave waits while it is set. */
   const rereadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** A re-read in flight: one reconcile at a time (a second call is dropped; the running one merges the live state). */
+  const rereadingRef = useRef(false);
+  const mountedRef = useRef(true);
   const reconcileRef = useRef<((code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => Promise<void>) | null>(null);
 
   const intentId = `form:submit:${formId}:${visitId}`;
@@ -163,12 +166,33 @@ export function FormFillClient({
     return null;
   }, [jobId, formId, visitId]);
 
+  /** Make a recovered submit's changes live edits: untouched fields take the change as a touched input. */
+  const foldIntoInputs = useCallback((changes: Changes) => {
+    const fields = fieldsRef.current;
+    const add = Object.keys(changes).filter((id) => !touchedRef.current.has(id) && fields.some((f) => f.id === id));
+    if (add.length === 0) return;
+    const fresh = inputsFromValues(fields, nonNull(Object.fromEntries(add.map((id) => [id, changes[id]!]))));
+    const next: Record<string, InputValue> = { ...inputsRef.current };
+    const valid: Record<string, number> = { ...lastValidRef.current };
+    for (const id of add) {
+      next[id] = fresh[id]!;
+      const value = changes[id];
+      if (typeof value === 'number') valid[id] = value;
+      else delete valid[id];
+    }
+    lastValidRef.current = valid;
+    touchedRef.current = new Set([...touchedRef.current, ...add]);
+    setInputs(next);
+    syncFlags();
+  }, [setInputs, syncFlags]);
+
   /** STALE / FORM_CHANGED / a refusal during autosave or submit: re-read and merge or go read-only. */
-  const reconcile = useCallback(async (code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => {
+  const reconcileOnce = useCallback(async (code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => {
     const old = fieldsRef.current;
     const mine = mineOverride ?? buildChanges(old, inputsRef.current, touchedRef.current, lastValidRef.current);
     const base = baseOverride ?? baseRef.current;
     const v = await refetch();
+    if (!mountedRef.current) return;
     if (v === 'gone') {
       setNotSaved(notSavedLines(Object.keys(mine)));
       dispatchSave({ type: 'stop', reason: 'blocked' });
@@ -178,10 +202,13 @@ export function FormFillClient({
       // The re-read itself failed (a network blip): back off and try again, never freeze the page.
       dispatchSave({ type: 'unknown', now: Date.now(), retryAfterMs: null });
       setPhase('retrying');
-      if (rereadRef.current) clearTimeout(rereadRef.current);
+      // A recovered submit's changes become live edits (touched inputs) first, so the rescheduled re-read merges
+      // from the live inputs: edits typed during the back-off survive, and the submit's answers still go out
+      // (autosave or the next submit). A live submit's changes are already touched, so nothing is overwritten.
+      if (mineOverride) foldIntoInputs(mineOverride);
       rereadRef.current = setTimeout(() => {
         rereadRef.current = null;
-        void reconcileRef.current?.(code, mineOverride, baseOverride);
+        if (mountedRef.current) void reconcileRef.current?.(code);
       }, Math.max(0, saveRef.current.waitUntil - Date.now()));
       return;
     }
@@ -202,11 +229,13 @@ export function FormFillClient({
     let fields = old;
     let carriedBase = base;
     let carriedMine = mine;
+    let dropped: readonly string[] = [];
     if (code === 'FORM_CHANGED' || v.form.version !== versionRef.current) {
       fields = v.form.fields;
       const carried = carryForNewVersion(fields, base, mine);
       carriedBase = carried.base;
       carriedMine = carried.mine;
+      dropped = carried.dropped;
       setNotSaved(notSavedLines(carried.dropped));
       setNotice('The office changed this form. Check your answers.');
     }
@@ -215,9 +244,12 @@ export function FormFillClient({
     const mineInputs = mineOverride ? inputsFromValues(fields, nonNull(carriedMine)) : inputsRef.current;
     // A live merge keeps every touched input (a half-typed number isn't in `mine`); a recovered submit has only its changes.
     const ids = new Set(fields.map((f) => f.id));
+    // A field the new version can't take (carryForNewVersion's `dropped`) leaves the touched set: its input follows
+    // the merged value and it is never sent (its old answer is listed under "Not saved").
+    const droppedIds = new Set(dropped);
     const touched = mineOverride
       ? new Set(Object.keys(carriedMine))
-      : new Set([...touchedRef.current, ...Object.keys(carriedMine)].filter((id) => ids.has(id)));
+      : new Set([...touchedRef.current, ...Object.keys(carriedMine)].filter((id) => ids.has(id) && !droppedIds.has(id)));
     const merged = mergeIntoInputs(fields, carriedBase, carriedMine, theirs, mineInputs, touched, lastValidRef.current);
     viewRef.current = v;
     fieldsRef.current = fields;
@@ -236,12 +268,31 @@ export function FormFillClient({
     syncFlags();
     dispatchSave({ type: 'resume' });
     dispatchSave({ type: 'edit', now: Date.now() });
-  }, [applyView, dispatchSave, notSavedLines, refetch, setInputs, syncFlags]);
+  }, [applyView, dispatchSave, foldIntoInputs, notSavedLines, refetch, setInputs, syncFlags]);
+  const reconcile = useCallback(async (code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => {
+    if (rereadingRef.current || !mountedRef.current) return;
+    rereadingRef.current = true;
+    if (rereadRef.current) {
+      // This call supersedes a scheduled re-read.
+      clearTimeout(rereadRef.current);
+      rereadRef.current = null;
+    }
+    try {
+      await reconcileOnce(code, mineOverride, baseOverride);
+    } finally {
+      rereadingRef.current = false;
+    }
+  }, [reconcileOnce]);
   useEffect(() => {
     reconcileRef.current = reconcile;
   }, [reconcile]);
-  useEffect(() => () => {
-    if (rereadRef.current) clearTimeout(rereadRef.current);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (rereadRef.current) clearTimeout(rereadRef.current);
+      rereadRef.current = null;
+    };
   }, []);
 
   const currentChanges = useCallback(
@@ -337,7 +388,7 @@ export function FormFillClient({
     const wake = nextWakeAt(save, dirty);
     if (wake === null) return;
     const t = setTimeout(() => {
-      if (rereadRef.current) return;
+      if (rereadRef.current || rereadingRef.current) return;
       const action = saveDue(saveRef.current, Date.now(), touchedRef.current.size > 0 || pendingRef.current !== null);
       if (action) void sendDraft(action);
     }, Math.max(0, wake - Date.now()));
