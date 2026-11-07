@@ -52,7 +52,8 @@ type Load = { kind: 'loading' } | { kind: 'ok'; view: TechFormView } | { kind: '
 
 async function getView(jobId: string, formId: string, visitId: string): Promise<{ status: number | null; view: TechFormView | null; code: string | null }> {
   try {
-    const res = await fetch(`/api/tech/jobs/${jobId}/forms/${formId}?visit=${visitId}`);
+    // A dead connection times out into the caller's back-off instead of holding a re-read open forever.
+    const res = await fetch(`/api/tech/jobs/${jobId}/forms/${formId}?visit=${visitId}`, { signal: AbortSignal.timeout(15_000) });
     const body = await res.json().catch(() => null);
     return { status: res.status, view: res.ok && body?.success ? (body.data as TechFormView) : null, code: body?.error?.code ?? null };
   } catch {
@@ -102,8 +103,10 @@ export function FormFillClient({
   const recovery = useRef<{ key: string; done: Promise<void> } | null>(null);
   /** A scheduled re-read after a failed one (reconcile's back-off); autosave waits while it is set. */
   const rereadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** A re-read in flight: one reconcile at a time (a second call is dropped; the running one merges the live state). */
+  /** A re-read in flight: one reconcile at a time; a call made meanwhile waits in `queuedRef` (latest code wins). */
   const rereadingRef = useRef(false);
+  /** The queued reconcile: its code and every recovered submit's changes queued with it (folded in when it runs). */
+  const queuedRef = useRef<{ code: string | null; changes: Changes } | null>(null);
   const mountedRef = useRef(true);
   const reconcileRef = useRef<((code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => Promise<void>) | null>(null);
 
@@ -270,7 +273,12 @@ export function FormFillClient({
     dispatchSave({ type: 'edit', now: Date.now() });
   }, [applyView, dispatchSave, foldIntoInputs, notSavedLines, refetch, setInputs, syncFlags]);
   const reconcile = useCallback(async (code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => {
-    if (rereadingRef.current || !mountedRef.current) return;
+    if (!mountedRef.current) return;
+    if (rereadingRef.current) {
+      // Queue, never drop: it runs after the current re-read, with any recovered changes folded into the inputs.
+      queuedRef.current = { code, changes: { ...queuedRef.current?.changes, ...mineOverride } };
+      return;
+    }
     rereadingRef.current = true;
     if (rereadRef.current) {
       // This call supersedes a scheduled re-read.
@@ -282,7 +290,13 @@ export function FormFillClient({
     } finally {
       rereadingRef.current = false;
     }
-  }, [reconcileOnce]);
+    const queued = queuedRef.current;
+    queuedRef.current = null;
+    if (queued && mountedRef.current) {
+      foldIntoInputs(queued.changes);
+      await reconcileRef.current?.(queued.code);
+    }
+  }, [foldIntoInputs, reconcileOnce]);
   useEffect(() => {
     reconcileRef.current = reconcile;
   }, [reconcile]);
@@ -446,6 +460,10 @@ export function FormFillClient({
     if (outcome === 'success_refetch' || code === 'FORM_SUBMITTED') {
       // A submitted page never autosaves: a draft still queued behind the submit is dropped, not retried.
       pendingRef.current = null;
+      // Nothing re-reads a submitted page: a scheduled or queued re-read would report the user's own submit as someone else's.
+      if (rereadRef.current) clearTimeout(rereadRef.current);
+      rereadRef.current = null;
+      queuedRef.current = null;
       dispatchSave({ type: 'submitted' });
       setPhase('submitted');
       const v = await refetch();
