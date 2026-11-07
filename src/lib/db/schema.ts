@@ -3529,3 +3529,71 @@ export const fpImportRuns = pgTable(
     ),
   ],
 );
+
+// M3d: office-built job forms (checklists). A row exists only once a valid
+// definition (>= 1 non-heading question) was saved; archived, never deleted.
+// `version` is the CAS token and the snapshot version (+1 per PATCH).
+export const forms = pgTable(
+  "forms",
+  {
+    id: uuid("id").primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    fields: jsonb("fields").notNull(),
+    jobTypeIds: uuid("job_type_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    required: boolean("required").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("forms_org_active_idx").on(table.organizationId, table.active),
+    uniqueIndex("forms_org_name_active_unique").on(table.organizationId, sql`lower(${table.name})`).where(sql`${table.active}`),
+    check("forms_fields_array_check", sql`jsonb_typeof(${table.fields}) = 'array'`),
+  ],
+);
+
+// M3d: one submission per visit per form. The snapshot (form_name,
+// form_version, fields) is taken when the row is created. appointment_id and
+// form_id are NO ACTION: a request delete or an org purge removes the visit and
+// the submission in one statement; a lone visit delete that would orphan
+// answers fails (the 0058 trigger keeps visits that have a submission).
+export const formSubmissions = pgTable(
+  "form_submissions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    formId: uuid("form_id").notNull().references(() => forms.id),
+    serviceRequestId: uuid("service_request_id").notNull().references(() => serviceRequests.id, { onDelete: "cascade" }),
+    appointmentId: uuid("appointment_id").notNull().references(() => appointments.id),
+    formName: text("form_name").notNull(),
+    formVersion: integer("form_version").notNull(),
+    fields: jsonb("fields").notNull(),
+    // encrypt(JSON.stringify(values)); NULL = no answers, or erased.
+    valuesEncrypted: text("values_encrypted"),
+    status: text("status").notNull().default("draft"),
+    revision: integer("revision").notNull().default(0),
+    lastSaveId: uuid("last_save_id"),
+    submitKey: uuid("submit_key"),
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    submittedBy: uuid("submitted_by").references(() => users.id, { onDelete: "set null" }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    erasedAt: timestamp("erased_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("form_submissions_visit_form_unique").on(table.appointmentId, table.formId, table.serviceRequestId),
+    index("form_submissions_org_request_idx").on(table.organizationId, table.serviceRequestId),
+    index("form_submissions_form_idx").on(table.formId),
+    check("form_submissions_fields_array_check", sql`jsonb_typeof(${table.fields}) = 'array'`),
+    check("form_submissions_status_check", sql`${table.status} IN ('draft','submitted')`),
+    check("form_submissions_revision_check", sql`${table.revision} >= 0`),
+    check("form_submissions_submitted_check", sql`(${table.status} = 'submitted') = (${table.submittedAt} IS NOT NULL)`),
+    check("form_submissions_erased_check", sql`${table.erasedAt} IS NULL OR ${table.valuesEncrypted} IS NULL`),
+  ],
+);
