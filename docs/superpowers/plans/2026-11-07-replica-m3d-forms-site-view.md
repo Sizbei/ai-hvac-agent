@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** main at `78520cd` or later (spec v4.1 FINAL committed; migrations through 0057 applied on dev). **Plan v2** after adversarial review round 1 (critic A: spec fidelity, SQL, concurrency, erasure, test strength; critic B: buildability, copy, task boundaries; reports in the session scratchpad `m3d/plan-r1-A.md`, `m3d/plan-r1-B.md`). Every code block below was compiled (`npx tsc --noEmit` → 0) and every unit test run (`npx vitest run` → 532 files, 6 682 passed, 1 skipped, against 6 481 on `78520cd`: +201 tests) in a scratch worktree of `78520cd` rebuilt mechanically from this plan's own blocks; the integration suite, the probes and the walks were type-checked only (they need the dev DB and a dev server).
+**Prerequisite:** main at `78520cd` or later (spec v4.1 FINAL committed; migrations through 0057 applied on dev). **Plan v3** after adversarial review round 1 (critic A: spec fidelity, SQL, concurrency, erasure, test strength; critic B: buildability, copy, task boundaries; reports in the session scratchpad `m3d/plan-r1-A.md`, `m3d/plan-r1-B.md`) and the round-2 scoped re-review (`m3d/plan-r2.md`: ruling 12 reversed by the lead, stale ruling cross-references, three nits). Every code block below was compiled (`npx tsc --noEmit` → 0) and every unit test run (`npx vitest run` → 532 files, 6 685 passed, 1 skipped, against 6 481 on `78520cd`: +204 tests) in a scratch worktree of `78520cd` rebuilt mechanically from this plan's own blocks; the integration suite, the probes and the walks were type-checked only (they need the dev DB and a dev server).
 
 **Goal:** The office builds checklists under Settings → Forms; the technicians on a visit fill them on the job page with server-side autosave (a reload or a second phone shows the draft), submit once, the office reads and reopens them on the request sheet, erasure removes the answers; a Site page shows the history at this address; photos get a quality setting, are resized on the phone, and the Photos card takes PDFs.
 
@@ -15,7 +15,7 @@
 **Lead rulings / deviations** (binding; recorded again in Task 12's docs):
 1. **Gate order (spec §6 vs §5.1 and test (f)).** §6 orders the preamble NOT_ASSIGNED (from `findTechAssignments`) → VISIT_ENDED → on-site window. `findTechAssignments` (`src/lib/tech/ownership.ts`) only returns rows on non-cancelled visits, so VISIT_ENDED could never fire; and test (f) wants `cancelled` → JOB_CLOSED although 0050 step 0 cancels every visit and row first. One read, `readFormGatesSql` (`src/lib/forms/form-gates.ts`), feeds one pure decision, `gateReason`, used by the preamble, the writers' zero-row map and the GETs: not on the request → 404; request `cancelled` → JOB_CLOSED; customer erased → CUSTOMER_REMOVED (v2, critic A-9: an erased customer refuses every write, whoever and wherever, so the GET's `writeBlockedReason` and the write's refusal agree); visit ended → VISIT_ENDED for a technician with a row on it, else NOT_ASSIGNED; no live row → NOT_ASSIGNED; native, not in `BILL_STATUSES` and no own arrival → NOT_ON_SITE.
 2. **`techFormPreamble` is split** (`src/lib/tech/form-route-guards.ts`): `techFormFront` (session, same-origin, uuid on job and form, rate bucket) runs before the body is read; `formGateFail` / `techFormGate` (readable job, then the gate read with the body's lowercased `appointmentId`) after. `frontGates` is exported from `src/lib/tech/invoice-route-guards.ts` with the new `limit` parameter.
-3. **Replay before the gates (v2, critic A-11; spec §4.2 "the replay check runs first").** The draft route runs `findDraftReplay` (the writer's own `saveId` check) BEFORE `techFormGate`; the submit route runs `formGateFail` INSIDE `withIdempotency`'s run (its codes are unstored, so a refusal releases the key). A retry of a write that landed answers 200 even after the visit ended or the job closed. The probe reads the caller's org and request only, and a `saveId` is a client-minted uuid, so a match proves the caller sent the write.
+3. **Replay before the gates (v2, critic A-11; spec §4.2 "the replay check runs first").** The draft route runs `findDraftReplay` (the writer's own `saveId` check) BEFORE `techFormGate`; the submit route runs `formGateFail` INSIDE `withIdempotency`'s run. Most gate codes are unstored (a refusal releases the key, and a later retry re-runs the gates); CUSTOMER_REMOVED is a stored code (spec §4.3), so that refusal is stored against the key and replays, which is right: an erased customer's request never takes answers again. A retry of a write that landed answers 200 even after the visit ended or the job closed. The probe reads the caller's org and request only, and a `saveId` is a client-minted uuid, so a match proves the caller sent the write.
 4. **The pre-read revision is the base (v2, critic A-3).** `prepare` answers STALE `{ revision }` when the pre-read row's revision isn't `baseRevision`, and STALE `{ revision: 0 }` for `baseRevision > 0` with no row, before any decrypt or batch: "the document it changed is the one it read" (§4.2) holds even for a client whose base runs ahead, and no empty row is orphaned.
 5. **The 128 KB cap is unreachable with a valid definition (v2, critic A-4, measured).** The largest valid document — 10 long answers (the cap per form) and 50 short answers, each at its length limit in "€" (3 UTF-8 bytes per unit, the worst a valid text does) — measures 91 081 bytes (`form-values.test.ts` pins it). The cap, its 400 `{ path: ["values"] }` and the "too long to save" line stay as defence in depth; the writer test reaches them with an INJECTED snapshot of 22 long answers.
 6. **Status codes the spec doesn't give:** NOT_ASSIGNED is 403 (the M3c equipment precedent); every other refusal is 409 except INVALID_INPUT and FORM_INCOMPLETE (400) and NOT_FOUND (404). STALE carries `{ revision }`; FORM_INCOMPLETE `{ fieldIds }`; the values cap `{ path: ["values"] }`.
@@ -24,7 +24,7 @@
 9. **Both technician GETs add `myRowCancelled`**: §7.3's "when the caller's row is cancelled" line needs it. The list GET's visit-level `writeBlockedReason` ignores `archived` (that is per form).
 10. **Builder:** an unparseable usual-range text shows "Enter a number like 12.5 (up to 3 decimal places)." (§8's builder list has no rule for it). The first Save of a new form moves the URL with `window.history.replaceState`, not `router.replace`: `[id]/page.tsx` with `new` → a uuid changes the dynamic segment, so `router.replace` would remount the builder and lose the "replay that stays dirty" state §4.1 requires. A New form compares against its own blank start (an untouched one is not "unsaved"); a replay whose GET failed re-reads the row before the next PATCH.
 11. **Forms card header** shows `· Visit #N` when N > 1 (the GET has no visit count). The status line's other-editor name is a first name ("· Sam"). The fill page is keyed by form, visit and `from`, and its submit-intent recovery runs once per intent through M3c's keyed ref (`{ key, done }`).
-12. **Site:** the route test's "no key like phone, email, description, address, signature" is the spec's substring rule with ONE allowed key, the spec's own `unaddressedCount`. The Site GET carries **no lead flag**: this job's open native estimates link to the M3c estimate page for every reader, and that page already answers helpers "Only the lead technician can open this." (critic A-6 asked for `isLead`; not taken — the estimate page is the one place the lead rule lives, and a second copy in the Site read would have to track M3c's rule by hand). `leadTechnicianName` is the first name of `service_requests.assigned_to`. An erased customer's Site reads scope `none`, membership `none`.
+12. **Site (v3: the lead reversed the v2 rejection of critic A-6; spec §7.6 holds).** The Site GET returns `isLead`, computed by `isActiveLead(visit, me)` — M3c's lead expression (`visit?.leadTechnicianId === me`, `src/lib/tech/estimate-queries.ts`) exported once from `src/lib/tech/ownership.ts` and used by both the estimates GET and the Site GET, never copied. Rows aren't links, except this job's open native estimates, and only for the lead (`estimateHref`). The route test's "no key like phone, email, description, address, signature" is the spec's substring rule with ONE allowed key, the spec's own `unaddressedCount`. `leadTechnicianName` (past jobs) is the first name of `service_requests.assigned_to`. An erased customer's Site reads scope `none`, membership `none`.
 13. **Integration (m) (critic A-7).** Spec §9 (m) "one [submission] on a visit cancelled before any work doesn't [count]" contradicts §5.1, where any `form_submissions` row makes its visit count (and v4.1 keeps such visits through the trigger). (m) is built as: a submission on a visit cancelled before any work DOES satisfy `missingRequired`; a visit cancelled before any work with NO submission doesn't count (its GET is 404).
 14. **Submit after an unknown draft (v2, critic B-M3).** A confirmed Submit waits for the write in flight, re-sends a pending unknown draft with its own body and `saveId` and needs it to land, then submits (`submitStep`, pure); a draft that doesn't land unlocks the page instead. After a successful submit (or FORM_SUBMITTED) the page drops any queued draft and stops autosaving (`{ type: "submitted" }`), so the submitter never reads "<own name> submitted this form…".
 15. **Erase:** the audit row is built in SQL (`json_build_object(…)::text`, so its text has spaces after the colons); `erased_at = COALESCE(erased_at, now())` keeps the first erase time. Caveat (critic A-10, accepted): the office uploader takes no request lock, so an office upload landing between statements 1 and 2 can make `attachmentsDeleted` one short; the DELETE still removes it (no leak).
@@ -32,7 +32,6 @@
 17. **Plan-chosen copy** (the spec gives none; each is human copy in the canon): "Couldn't load forms." (card and office section), "Couldn't load this form.", "Couldn't load this site.", "No visits due.", "Question removed.", "Couldn't reopen the form. Please try again.", "Form not found.", "Answer the required questions." (FORM_INCOMPLETE message; the page shows its own lines), "Someone else changed this form." (STALE message; the page merges), "Filter forms…". The Reopen dialog is title "Reopen this form?" + description "The technician can change the answers and submit again." (spec §7.5's sentence split across the two, so it isn't said twice).
 
 **Rejected or deferred** (one line each):
-- Critic A-6 (`isLead` on the Site GET): see ruling 12.
 - Critic B-m11's optional Task 8 split: not taken; Task 8's route files are thin and share one test style, and the fixture is needed by its probe. Task 10 is split (10a pure, 10b UI).
 - `tests/api/tech-photo.test.ts` (an `INTEGRATION_SUITES` entry) mocks `getAdminSession` and the old `field-queries` `addJobPhoto` export; it is already stale against the route (which uses `getTechSession`) and is not touched. The route's own `route.test.ts` is rewritten in Task 6.
 - The Vercel 4.5 MB body limit and `img.decode()` memory on 48 MP captures stay unverified on dev (spec §11); Task 12 lists them for the deploy checklist.
@@ -76,7 +75,7 @@
 | 4 | `src/lib/tech/form-writes.ts` (+test), `src/lib/tech/form-errors.ts` (+test) | — |
 | 5 | `src/lib/admin/form-queries.ts` (+test) | — |
 | 6 | `src/lib/admin/erasure-sql.ts` (+test), `src/lib/tech/photo-writes.ts` (+test) | `src/lib/admin/erasure-queries.ts`, `src/lib/admin/erasure-queries.test.ts`, `src/lib/tech/field-queries.ts` (photo removal), `src/lib/tech/field-queries.test.ts`, `src/app/api/tech/jobs/[id]/photo/route.ts`, `src/app/api/tech/jobs/[id]/photo/route.test.ts` |
-| 7 | `src/lib/tech/form-view.ts` (+test), `src/lib/tech/form-reads.ts` (+test), `src/lib/tech/site-view.ts`, `src/lib/tech/site-queries.ts` (+test) | — |
+| 7 | `src/lib/tech/form-view.ts` (+test), `src/lib/tech/form-reads.ts` (+test), `src/lib/tech/site-view.ts`, `src/lib/tech/site-queries.ts` (+test) | `src/lib/tech/ownership.ts` (`isActiveLead`), `src/lib/tech/ownership.test.ts`, `src/lib/tech/estimate-queries.ts` (uses it) |
 | 8 | `scripts/agent/m3d-walk.mts`, `src/lib/tech/form-route-guards.ts` (+test), `src/lib/forms/form-bodies.ts`, `src/lib/tech/form-submit-hash.ts`, `src/lib/admin/form-route-copy.ts`, routes `src/app/api/tech/jobs/[id]/forms/{route,[formId]/route,[formId]/draft/route,[formId]/submit/route}.ts` (+`forms/route.test.ts`), `src/app/api/tech/jobs/[id]/site/route.ts` (+test), `src/app/api/admin/settings/forms/{route,[id]/route}.ts` (+`route.test.ts`), `src/app/api/admin/requests/[id]/forms/{route,[submissionId]/reopen/route}.ts` (+`route.test.ts`) | `src/lib/rate-limit.ts`, `src/lib/tech/invoice-route-guards.ts` |
 | 9 | `src/lib/admin/form-builder.ts` (+test), `src/lib/admin/forms-tab.ts` (+test), `src/components/admin/settings/forms-panel.tsx`, `src/components/admin/forms/{form-builder-client,form-field-editor}.tsx`, `src/app/admin/(dashboard)/settings/forms/[id]/page.tsx` | `src/lib/admin/settings-tabs.ts`, `src/lib/admin/settings-tabs.test.ts`, `src/app/admin/(dashboard)/settings/page.tsx` |
 | 10a | `src/lib/tech/form-fill-state.ts` (+test), `src/lib/tech/form-save-machine.ts` (+test), `src/lib/tech/form-copy.ts` (+test) | — |
@@ -1325,7 +1324,7 @@ const ok: FormGates = {
   myRow: true, myLiveRow: true, myProgress: false, formFound: true, formActive: true, formVersion: 1,
 };
 
-describe("gateReason (plan ruling 2)", () => {
+describe("gateReason (lead ruling 1)", () => {
   it("passes an on-site native job and any synced status but cancelled", () => {
     expect(gateReason(ok)).toBeNull();
     expect(gateReason({ ...ok, native: false, status: "scheduled" })).toBeNull();
@@ -2067,7 +2066,7 @@ describe("saveFormDraft (spec §5.2)", () => {
     expect(await saveFormDraft(actor, draft())).toEqual({ ok: false, reason: "form_changed" });
   });
 
-  it("content: a bad value names its field; an injected over-128 KB document is values_too_large (lead ruling 4: no valid definition reaches the cap)", async () => {
+  it("content: a bad value names its field; an injected over-128 KB document is values_too_large (lead ruling 5: no valid definition reaches the cap)", async () => {
     readQueue.push([], [{ active: true, version: 1, fields: FIELDS }]);
     expect(await saveFormDraft(actor, draft({ changes: { [NUM.id]: "12" } }))).toEqual({ ok: false, reason: "invalid_values", fieldIds: [NUM.id] });
     const LONG = { id: "f_0000000003", type: "long_text", label: "L", required: false };
@@ -3070,7 +3069,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `uuidArraySql` (Task 3), `lockRequestSql` / `readRows` / `runBatch`, `techCanReadSql` (`src/lib/tech/ownership.ts`), `TECH_UPLOAD_LIMIT_BYTES` / `FILE_TOO_LARGE_COPY` (Task 3).
-- Produces: `eraseLockSql(org, cust)`, `attachmentMatchSql(org, cust, sessionIds)`, `eraseAuditSql(org, cust, sessionIds)`, `eraseAttachmentsSql(org, cust, sessionIds)` (… `RETURNING storage_key`), `eraseAnswersSql(org, cust)`; `anonymizeCustomer` batch = lock → audit (count in SQL) → attachments DELETE … RETURNING → the existing statements → answers UPDATE (after the `service_requests` UPDATE); R2 cleanup takes the returned keys plus the signature keys (the attachments pre-read is gone). `addJobPhoto(org, me, rid, input): { ok: true; id } | { ok: false; reason: "not_owned" | "customer_removed" }` from `src/lib/tech/photo-writes.ts` (ruling 4); the photo POST checks `isUuid`, refuses > 4 MB with "This file is too large. The limit is 4 MB.", and answers 409 `CUSTOMER_REMOVED` after deleting the uploaded object.
+- Produces: `eraseLockSql(org, cust)`, `attachmentMatchSql(org, cust, sessionIds)`, `eraseAuditSql(org, cust, sessionIds)`, `eraseAttachmentsSql(org, cust, sessionIds)` (… `RETURNING storage_key`), `eraseAnswersSql(org, cust)`; `anonymizeCustomer` batch = lock → audit (count in SQL) → attachments DELETE … RETURNING → the existing statements → answers UPDATE (after the `service_requests` UPDATE); R2 cleanup takes the returned keys plus the signature keys (the attachments pre-read is gone). `addJobPhoto(org, me, rid, input): { ok: true; id } | { ok: false; reason: "not_owned" | "customer_removed" }` from `src/lib/tech/photo-writes.ts` (ruling 7); the photo POST checks `isUuid`, refuses > 4 MB with "This file is too large. The limit is 4 MB.", and answers 409 `CUSTOMER_REMOVED` after deleting the uploaded object.
 
 - [ ] **Step 1: Write the failing erase tests.** `src/lib/admin/erasure-sql.test.ts`:
 
@@ -3941,13 +3940,15 @@ EOF
 
 **Files:**
 - Create: `src/lib/tech/form-view.ts`, `src/lib/tech/form-view.test.ts`, `src/lib/tech/form-reads.ts`, `src/lib/tech/form-reads.test.ts`, `src/lib/tech/site-view.ts`, `src/lib/tech/site-queries.ts`, `src/lib/tech/site-queries.test.ts`
+- Modify: `src/lib/tech/ownership.ts` (`isActiveLead`, M3c's lead expression exported once), `src/lib/tech/ownership.test.ts`, `src/lib/tech/estimate-queries.ts` (uses it; behaviour unchanged)
 
 **Interfaces:**
-- Consumes: `findReadableJob` (`src/lib/tech/ownership.ts`); `readRows`; Task 3 `formAppliesSql`, `readFormGatesSql`, `toFormGates`, `visitCountsSql`, `writeBlockedReason`, `siteScopeOf`, `siteMatches`, `membershipEvaluable`, `normalizeAddress`, `uuidArraySql`; Task 4 `decryptValues`; `decrypt` (`src/lib/crypto.ts`); `issueLabel` (`src/lib/tech/job-display.ts`); `estimateLabel` (`src/lib/tech/estimate-display.ts`); `BUSINESS_BASE_LOCATION`.
+- Consumes: `findReadableJob`, `findActiveVisit`, `ActiveVisit` (`src/lib/tech/ownership.ts`); `readRows`; Task 3 `formAppliesSql`, `readFormGatesSql`, `toFormGates`, `visitCountsSql`, `writeBlockedReason`, `siteScopeOf`, `siteMatches`, `membershipEvaluable`, `normalizeAddress`, `uuidArraySql`; Task 4 `decryptValues`; `decrypt` (`src/lib/crypto.ts`); `issueLabel` (`src/lib/tech/job-display.ts`); `estimateLabel` (`src/lib/tech/estimate-display.ts`); `BUSINESS_BASE_LOCATION`.
 - Produces:
   - `form-view.ts` (client-safe types + pure): `CardSubmission`, `SubmittedOn`, `CardForm`, `TechFormsView { visitId; visitNumber; myVisit; canWrite; writeBlockedReason; myRowCancelled; forms; otherForms }`, `TechFormSubmission`, `TechFormView { form { name; description; version; fields }; submission; submittedOn; myVisit; canWrite; writeBlockedReason; myRowCancelled }`, `buildFormsCard(visitId, forms, subs)`, `unsubmittedRequired(view)`.
   - `form-reads.ts`: `getJobForms(org, me, rid, aid): { kind: "not_found" } | { kind: "ok"; view: TechFormsView }`; `getJobForm(org, me, rid, formId, aid): { kind: "not_found" } | { kind: "archived" } | { kind: "ok"; view: TechFormView }`; SQL builders `countingVisitSql`, `cardFormsSql`, `cardSubmissionsSql`, `oneSubmissionSql`, `submittedElsewhereSql`.
-  - `site-view.ts`: `SitePastJob { id; referenceNumber; date; status; kind; leadTechnicianName; submittedFormNames }`, `SiteEstimate`, `SiteMembership` (`member | none | withheld`), `SiteView { scope; title; pastJobs; unaddressedCount; openEstimates; membership; hasCustomer }`.
+  - `ownership.ts`: `isActiveLead(visit: ActiveVisit | null, me: string): boolean` (`visit?.leadTechnicianId === me`, the one lead rule; `getTechEstimatesView` now calls it).
+  - `site-view.ts`: `SitePastJob { id; referenceNumber; date; status; kind; leadTechnicianName; submittedFormNames }`, `SiteEstimate`, `SiteMembership` (`member | none | withheld`), `SiteView { scope; title; pastJobs; unaddressedCount; openEstimates; membership; hasCustomer; isLead }`.
   - `site-queries.ts`: `getSiteView(org, me, rid): { kind: "not_found" } | { kind: "ok"; view: SiteView }`, `normalizedAddress(enc)`, SQL builders `siteSelfSql`, `candidatesSql`, `pastJobsSql`, `unaddressedSql`, `openEstimatesSql`, `allAddressesSql`, `membershipSql`, `upcomingVisitsSql`.
 
 - [ ] **Step 1: Write the failing tests** — `src/lib/tech/form-view.test.ts`:
@@ -4160,7 +4161,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/admin/pricebook-queries", () => ({ getDefaultTaxBps: vi.fn(), getPricebookItemById: vi.fn() }));
-vi.mock("@/lib/tech/ownership", async (orig) => ({ ...(await orig<typeof import("@/lib/tech/ownership")>()), findReadableJob: vi.fn() }));
+vi.mock("@/lib/tech/ownership", async (orig) => ({
+  ...(await orig<typeof import("@/lib/tech/ownership")>()),
+  findReadableJob: vi.fn(),
+  findActiveVisit: vi.fn(),
+}));
 vi.mock("@/lib/crypto", () => ({
   encrypt: (s: string) => `ENC:${s}`,
   decrypt: (s: string) => {
@@ -4174,7 +4179,7 @@ import {
   allAddressesSql, candidatesSql, getSiteView, membershipSql, normalizedAddress, openEstimatesSql, pastJobsSql, siteSelfSql,
   unaddressedSql, upcomingVisitsSql,
 } from "./site-queries";
-import { findReadableJob } from "@/lib/tech/ownership";
+import { findActiveVisit, findReadableJob } from "@/lib/tech/ownership";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const ME = "22222222-2222-4222-8222-222222222222";
@@ -4192,6 +4197,7 @@ beforeEach(() => {
   readQueue.length = 0;
   executed.length = 0;
   vi.mocked(findReadableJob).mockResolvedValue({ id: RID, customerId: CUST, native: true, status: "arrived" });
+  vi.mocked(findActiveVisit).mockResolvedValue({ appointmentId: "a", leadTechnicianId: ME });
 });
 
 describe("site SQL binds the org on every table (spec §7.6)", () => {
@@ -4225,7 +4231,7 @@ describe("getSiteView", () => {
     readQueue.push([{ customer_id: null, location_id: null, address_encrypted: null, customer_erased: false, location_label: null }], []);
     expect(await getSiteView(ORG, ME, RID)).toEqual({
       kind: "ok",
-      view: { scope: "none", title: "Service address", unaddressedCount: 0, membership: { state: "none" }, hasCustomer: false, pastJobs: [], openEstimates: [] },
+      view: { scope: "none", title: "Service address", unaddressedCount: 0, membership: { state: "none" }, hasCustomer: false, isLead: true, pastJobs: [], openEstimates: [] },
     });
   });
 
@@ -4262,6 +4268,15 @@ describe("getSiteView", () => {
     expect(r).toMatchObject({ kind: "ok", view: { scope: "address", membership: { state: "member", planName: "Comfort Club", upcoming: [{ status: "generated", thisJob: true }] } } });
   });
 
+  it("isLead comes from the shared lead rule (the active visit's lead), not from assigned_to", async () => {
+    vi.mocked(findActiveVisit).mockResolvedValueOnce({ appointmentId: "a", leadTechnicianId: "someone-else" });
+    readQueue.push([{ customer_id: null, location_id: null, address_encrypted: null, customer_erased: false, location_label: null }], []);
+    expect(await getSiteView(ORG, ME, RID)).toMatchObject({ kind: "ok", view: { isLead: false } });
+    vi.mocked(findActiveVisit).mockResolvedValueOnce(null);
+    readQueue.push([{ customer_id: null, location_id: null, address_encrypted: null, customer_erased: false, location_label: null }], []);
+    expect(await getSiteView(ORG, ME, RID)).toMatchObject({ kind: "ok", view: { isLead: false } });
+  });
+
   it("normalizedAddress tolerates a rotated key", () => {
     expect(normalizedAddress("BAD")).toBeNull();
     expect(normalizedAddress("ENC:  12 Elm  St ")).toBe("12 elm st");
@@ -4269,10 +4284,40 @@ describe("getSiteView", () => {
 });
 ```
 
+`src/lib/tech/ownership.test.ts` (the shared lead rule):
+
+```diff
+diff --git a/src/lib/tech/ownership.test.ts b/src/lib/tech/ownership.test.ts
+index 9dfb84c..84a8b4a 100644
+--- a/src/lib/tech/ownership.test.ts
++++ b/src/lib/tech/ownership.test.ts
+@@ -31,6 +31,7 @@ import {
+   pickActiveVisit,
+   techCanReadSql,
+   type TechAssignmentRow,
++  isActiveLead,
+ } from "./ownership";
+ 
+ let n = 0;
+@@ -179,3 +180,12 @@ describe("queries", () => {
+     expect(await findActiveVisit("o", "j")).toEqual({ appointmentId: "appt-1", leadTechnicianId: "lead" });
+   });
+ });
++
++describe("isActiveLead (the one lead rule, shared by M3c's estimates GET and M3d's Site GET)", () => {
++  it("the caller leads the active visit; no visit or no lead is false", () => {
++    expect(isActiveLead({ appointmentId: "a", leadTechnicianId: "me" }, "me")).toBe(true);
++    expect(isActiveLead({ appointmentId: "a", leadTechnicianId: "other" }, "me")).toBe(false);
++    expect(isActiveLead({ appointmentId: "a", leadTechnicianId: null }, "me")).toBe(false);
++    expect(isActiveLead(null, "me")).toBe(false);
++  });
++});
+```
+
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `npx vitest run src/lib/tech/form-view.test.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-queries.test.ts`
-Expected: FAIL — the three modules are unresolved.
+Run: `npx vitest run src/lib/tech/form-view.test.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-queries.test.ts src/lib/tech/ownership.test.ts`
+Expected: FAIL — the three modules are unresolved; `isActiveLead` is not exported.
 
 - [ ] **Step 3: Implement** — `src/lib/tech/form-view.ts`:
 
@@ -4317,7 +4362,7 @@ export interface TechFormsView {
   readonly myVisit: boolean;
   readonly canWrite: boolean;
   readonly writeBlockedReason: WriteBlockedReason | null;
-  /** Plan ruling 6: the caller's row on this visit is cancelled (adds the "assign you again" line). */
+  /** Lead ruling 9: the caller's row on this visit is cancelled (adds the "assign you again" line). */
   readonly myRowCancelled: boolean;
   readonly forms: readonly CardForm[];
   readonly otherForms: ReadonlyArray<{ readonly formId: string; readonly name: string }>;
@@ -4631,6 +4676,8 @@ export interface SiteView {
   readonly openEstimates: readonly SiteEstimate[];
   readonly membership: SiteMembership;
   readonly hasCustomer: boolean;
+  /** The caller leads the active visit (`isActiveLead`): only then are this job's open estimates links (spec §7.6). */
+  readonly isLead: boolean;
 }
 ```
 
@@ -4650,7 +4697,7 @@ import { normalizeAddress } from "@/lib/admin/location-queries";
 import { decrypt } from "@/lib/crypto";
 import { uuidArraySql } from "@/lib/db/sql-arrays";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
-import { findReadableJob } from "@/lib/tech/ownership";
+import { findActiveVisit, findReadableJob, isActiveLead } from "@/lib/tech/ownership";
 import { issueLabel } from "@/lib/tech/job-display";
 import { estimateLabel } from "@/lib/tech/estimate-display";
 import { membershipEvaluable, siteMatches, siteScopeOf, type SiteCandidate, type SiteSelf } from "@/lib/forms/site-scope";
@@ -4794,8 +4841,9 @@ export type SiteResult = { kind: "not_found" } | { kind: "ok"; view: SiteView };
 export async function getSiteView(org: string, me: string, rawRid: string): Promise<SiteResult> {
   const rid = rawRid.toLowerCase();
   if (!(await findReadableJob(org, me, rid))) return { kind: "not_found" };
-  const [selfRow] = await readRows(siteSelfSql(org, rid));
+  const [[selfRow], visit] = await Promise.all([readRows(siteSelfSql(org, rid)), findActiveVisit(org, rid)]);
   if (!selfRow) return { kind: "not_found" };
+  const isLead = isActiveLead(visit, me);
   const cust = selfRow.customer_id == null ? null : String(selfRow.customer_id);
   const self: SiteSelf = {
     hasCustomer: cust !== null,
@@ -4828,7 +4876,7 @@ export async function getSiteView(org: string, me: string, rawRid: string): Prom
   return {
     kind: "ok",
     view: {
-      scope, title, unaddressedCount, membership, hasCustomer: cust !== null,
+      scope, title, unaddressedCount, membership, hasCustomer: cust !== null, isLead,
       pastJobs: past.map(toPastJob),
       openEstimates: estimates.map((e) => toEstimate(e, rid)),
     },
@@ -4836,16 +4884,65 @@ export async function getSiteView(org: string, me: string, rawRid: string): Prom
 }
 ```
 
+Export the lead rule once (`src/lib/tech/ownership.ts`) and use it in M3c's estimates GET (`src/lib/tech/estimate-queries.ts`), so the Site GET doesn't copy it:
+
+```diff
+diff --git a/src/lib/tech/ownership.ts b/src/lib/tech/ownership.ts
+index dec448b..54b9a07 100644
+--- a/src/lib/tech/ownership.ts
++++ b/src/lib/tech/ownership.ts
+@@ -33,6 +33,14 @@ export interface ActiveVisit {
+   readonly leadTechnicianId: string | null;
+ }
+ 
++/**
++ * The ONE "is the caller the lead" rule (M3c's estimates GET, M3d's Site GET):
++ * the lead of the request's active visit (pickActiveVisit).
++ */
++export function isActiveLead(visit: ActiveVisit | null, me: string): boolean {
++  return visit?.leadTechnicianId === me;
++}
++
+ export function hasProgress(
+   r: Pick<TechAssignmentRow, "enRouteAt" | "arrivedAt" | "startedAt" | "completedAt">,
+ ): boolean {
+```
+
+```diff
+diff --git a/src/lib/tech/estimate-queries.ts b/src/lib/tech/estimate-queries.ts
+index ef6eb65..3ac908e 100644
+--- a/src/lib/tech/estimate-queries.ts
++++ b/src/lib/tech/estimate-queries.ts
+@@ -11,7 +11,7 @@ import { ERASED_PLACEHOLDER } from "@/lib/admin/report-format";
+ import { errorCode, logger } from "@/lib/logger";
+ import { P_LIVE, P_NATIVE } from "@/lib/admin/invoice-field-writes";
+ import { billingInvoiceIdSql, jobBilledSql, officeBilledSql } from "@/lib/admin/estimate-billing-sql";
+-import { findActiveVisit, findReadableJob } from "@/lib/tech/ownership";
++import { findActiveVisit, findReadableJob, isActiveLead } from "@/lib/tech/ownership";
+ import { billingOf, createBlockedReason, derivedStatus, estimateLabel } from "@/lib/tech/estimate-display";
+ import type { TechEstimate, TechEstimateOption, TechEstimatesView, TechJobInvoiceRef } from "@/lib/tech/estimate-view";
+ 
+@@ -147,7 +147,7 @@ export async function getTechEstimatesView(
+     companyNameOf(org),
+     customerNameOf(org, job.customerId),
+   ]);
+-  const isLead = visit?.leadTechnicianId === me;
++  const isLead = isActiveLead(visit, me);
+   const reason = createBlockedReason({ isLead, status: job.status, hasCustomer: job.customerId !== null });
+   const estimates = assembleEstimates(estRows, optRows, lineRows, now);
+   const inv = invRows[0];
+```
+
 - [ ] **Step 4: Run them to verify they pass**
 
-Run: `npx vitest run src/lib/tech/form-view.test.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-queries.test.ts`
-Expected: PASS (4 + 7 + 7).
+Run: `npx vitest run src/lib/tech/form-view.test.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-queries.test.ts src/lib/tech/ownership.test.ts src/lib/tech/estimate-queries.test.ts`
+Expected: PASS (4 + 7 + 8 + ownership +1; the M3c estimate-queries suite unchanged).
 
 - [ ] **Step 5: Gates and commit**
 
 ```bash
-npx tsc --noEmit && npx eslint src/lib/tech/form-view.ts src/lib/tech/form-view.test.ts src/lib/tech/form-reads.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-view.ts src/lib/tech/site-queries.ts src/lib/tech/site-queries.test.ts && npx vitest run
-git add src/lib/tech/form-view.ts src/lib/tech/form-view.test.ts src/lib/tech/form-reads.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-view.ts src/lib/tech/site-queries.ts src/lib/tech/site-queries.test.ts
+npx tsc --noEmit && npx eslint src/lib/tech/form-view.ts src/lib/tech/form-view.test.ts src/lib/tech/form-reads.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-view.ts src/lib/tech/site-queries.ts src/lib/tech/site-queries.test.ts src/lib/tech/ownership.ts src/lib/tech/ownership.test.ts src/lib/tech/estimate-queries.ts && npx vitest run
+git add src/lib/tech/form-view.ts src/lib/tech/form-view.test.ts src/lib/tech/form-reads.ts src/lib/tech/form-reads.test.ts src/lib/tech/site-view.ts src/lib/tech/site-queries.ts src/lib/tech/site-queries.test.ts src/lib/tech/ownership.ts src/lib/tech/ownership.test.ts src/lib/tech/estimate-queries.ts
 git commit -m "$(cat <<'EOF'
 feat(m3d): technician form read models (card, fill page) and the site view (location/address scope, membership states)
 
@@ -4866,7 +4963,7 @@ EOF
 
 **Interfaces:**
 - Consumes: everything from Tasks 2–7; `readWriteBody`, `readKey`, `okResult` (`src/lib/tech/invoice-write-route.ts`); `withIdempotency`, `canonicalHash`, `toResponse` (`src/lib/http/idempotency.ts`); `macHex`, `canonicalJson` (Task 3); `logAudit`.
-- Produces: `RATE_LIMITS.techFormDraft = { maxRequests: 60, windowMs: 60_000 }`; `frontGates(request, id, bucket, limit = RATE_LIMITS.adminMutation)`; `techFormFront(request, id, formId, bucket: "form" | "form-draft")`, `formGateFail(session, id, formId, appointmentId): Promise<FormWriteFail | null>`, `techFormGate(session, id, formId, appointmentId)` (the draft route runs `findDraftReplay` before it; the submit route runs `formGateFail` inside its keyed run, lead ruling 3); `draftBodySchema`, `submitBodySchema`, `SubmitBody`; `FORM_CHANGES_LABEL = "hvac-form-changes-v1"`, `submitHashInput(body)`; `createFormBodySchema`, `patchFormBodySchema`, `reopenBodySchema`, `FORM_OFFICE_COPY`; the HTTP contracts of spec §6 (plus `myRowCancelled`, ruling 6; PATCH body, ruling 5).
+- Produces: `RATE_LIMITS.techFormDraft = { maxRequests: 60, windowMs: 60_000 }`; `frontGates(request, id, bucket, limit = RATE_LIMITS.adminMutation)`; `techFormFront(request, id, formId, bucket: "form" | "form-draft")`, `formGateFail(session, id, formId, appointmentId): Promise<FormWriteFail | null>`, `techFormGate(session, id, formId, appointmentId)` (the draft route runs `findDraftReplay` before it; the submit route runs `formGateFail` inside its keyed run, lead ruling 3); `draftBodySchema`, `submitBodySchema`, `SubmitBody`; `FORM_CHANGES_LABEL = "hvac-form-changes-v1"`, `submitHashInput(body)`; `createFormBodySchema`, `patchFormBodySchema`, `reopenBodySchema`, `FORM_OFFICE_COPY`; the HTTP contracts of spec §6 (plus `myRowCancelled`, ruling 9; PATCH body, ruling 8; Site `isLead`, ruling 12).
 
 - [ ] **Step 1: Write the failing tests.** `src/lib/tech/form-route-guards.test.ts` (real rate limiter, reset per test):
 
@@ -5137,7 +5234,7 @@ import { GET } from "./route";
 const RID = "11111111-1111-4111-8111-111111111111";
 const get = (id = RID) => GET(new NextRequest(`http://localhost/api/tech/jobs/${id}/site`), { params: Promise.resolve({ id }) });
 const VIEW = {
-  scope: "location", title: "Main house", unaddressedCount: 1, hasCustomer: true,
+  scope: "location", title: "Main house", unaddressedCount: 1, hasCustomer: true, isLead: true,
   pastJobs: [{ id: "r1", referenceNumber: "R-1", date: "2026-11-03T15:00:00.000Z", status: "completed", kind: "Maintenance", leadTechnicianName: "Alex", submittedFormNames: ["Maintenance checklist"] }],
   openEstimates: [{ id: "e1", label: "Estimate · Nov 6 · 2 options", createdAt: "2026-11-06T15:00:00.000Z", totalCents: 481200, optionCount: 2, thisJob: true, fromFieldPulse: false }],
   membership: { state: "member", planName: "Comfort Club", startedAt: "2026-03-01T00:00:00.000Z", currentPeriodEnd: null, visitsPerYear: 2, upcoming: [] },
@@ -5171,7 +5268,7 @@ describe("GET /api/tech/jobs/[id]/site (spec §7.6)", () => {
     h.getSiteView.mockResolvedValueOnce({ kind: "ok", view: VIEW });
     const res = await get();
     const keys = keysDeep(await res.json());
-    // Substring rule (spec §9); the spec's own `unaddressedCount` is the one allowed key (lead ruling 5).
+    // Substring rule (spec §9); the spec's own `unaddressedCount` is the one allowed key (lead ruling 12).
     expect(keys.filter((k) => k !== "unaddressedcount" && /phone|email|description|address|signature/.test(k))).toEqual([]);
     expect(keys).toContain("unaddressedcount");
   });
@@ -8195,7 +8292,7 @@ EOF
 
 **Interfaces:**
 - Consumes: Task 10a (all of it); Task 7 `TechFormsView`, `TechFormView`, `unsubmittedRequired`; Task 8 routes; `useIdempotencyKey` (`src/hooks/use-idempotency-key.ts`, `storageKey` + `rehydrate`), `ESTIMATE_INTENTS_KEY` (`src/lib/tech/estimate-intents.ts`), `classifyWriteError` (`src/lib/tech/invoice-client-errors.ts`), `outcomeEvent` (`src/lib/tech/invoice-key-state.ts`), `postJson` (`src/components/tech/invoice/post-json.ts`), `mintKey`; `pickActiveVisit` (already computed in `getTechJobSummary`).
-- Produces: `TechJobSummary.activeVisitId`; `SummaryLoaded` gains `native`, `assignmentVisitId`, `activeVisitId`; `TechJobSummary` prop `formReminders`; `CloseOutSheet` prop `reminders` (rendered under the blockers when blocked, between the warnings and the confirm when ready; never blocks); `FormsCard({ jobId, visitId: string | null | undefined, refreshKey, onLoaded })` (undefined = the summary hasn't loaded: a skeleton); `FormFillClient` keyed by form, visit and `from` with a keyed recovery ref (lead ruling 11); the submit intent id `form:submit:<formId>:<appointmentId>` in `ESTIMATE_INTENTS_KEY(rid)` storing `{ path, payload, base }` (`recoverEstimateIntents` callers match other prefixes, so they never pick it up).
+- Produces: `TechJobSummary.activeVisitId`; `SummaryLoaded` gains `native`, `assignmentVisitId`, `activeVisitId`; `TechJobSummary` prop `formReminders`; `FormsCard` prop `summaryFailed` (a failed summary shows "Couldn't load forms.", never a skeleton forever); `CloseOutSheet` prop `reminders` (rendered under the blockers when blocked, between the warnings and the confirm when ready; never blocks); `FormsCard({ jobId, visitId: string | null | undefined, refreshKey, onLoaded })` (undefined = the summary hasn't loaded: a skeleton); `FormFillClient` keyed by form, visit and `from` with a keyed recovery ref (lead ruling 11); the submit intent id `form:submit:<formId>:<appointmentId>` in `ESTIMATE_INTENTS_KEY(rid)` storing `{ path, payload, base }` (`recoverEstimateIntents` callers match other prefixes, so they never pick it up).
 
 - [ ] **Step 1: The summary's active visit.** `src/lib/tech/field-queries.ts`:
 
@@ -8396,9 +8493,12 @@ export function FormsCard({
   jobId,
   visitId,
   refreshKey,
+  summaryFailed = false,
   onLoaded,
 }: {
   readonly jobId: string;
+  /** The job summary failed to load, so the visit is unknown: show the error state, not a skeleton forever. */
+  readonly summaryFailed?: boolean;
   /** undefined while the job summary is still loading. */
   readonly visitId: string | null | undefined;
   readonly refreshKey: number;
@@ -8461,7 +8561,9 @@ export function FormsCard({
         )}
       </CardHeader>
       <CardContent className="space-y-2">
-        {visitId === undefined ? (
+        {visitId === undefined && summaryFailed ? (
+          <p role="alert" className="text-[15px] text-danger-strong">Couldn&apos;t load forms.</p>
+        ) : visitId === undefined ? (
           <Skeleton className="h-12 w-full" />
         ) : visitId === null ? (
           <p className="text-[15px] text-muted-foreground">No visit on this job yet.</p>
@@ -9321,8 +9423,10 @@ import { unsubmittedRequired, type TechFormsView } from '@/lib/tech/form-view';
   // undefined = the summary hasn't said yet (the card shows a skeleton, not "No visit on this job yet.").
   const [formsVisit, setFormsVisit] = useState<string | null | undefined>(appointmentId ?? undefined);
   const [formsView, setFormsView] = useState<TechFormsView | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
   const onSummaryLoaded = useCallback((outcome: JobLoadOutcome, job: SummaryLoaded | null) => {
     setJobOutcome(outcome);
+    setSummaryFailed(outcome === 'error');
     if (job) {
       setJobStatus(job.status);
       setInvoiceState(job.invoiceState);
@@ -9342,7 +9446,7 @@ import { unsubmittedRequired, type TechFormsView } from '@/lib/tech/form-view';
 4. Pass `formReminders={formReminders}` to `<TechJobSummary … />` (after `unbilledParts={unbilledParts}`), and put the card directly after the summary, before the Estimates card:
 
 ```tsx
-      <FormsCard jobId={id} visitId={formsVisit} refreshKey={refreshKey} onLoaded={setFormsView} />
+      <FormsCard jobId={id} visitId={formsVisit} summaryFailed={summaryFailed} refreshKey={refreshKey} onLoaded={setFormsView} />
       <EstimatesCard jobId={id} refreshKey={refreshKey} onLoaded={onEstimatesLoaded} />
 ```
 
@@ -9467,18 +9571,18 @@ EOF
 
 **Interfaces:**
 - Consumes: Task 10b (the job page with the Forms card); Task 7 `SiteView` & co.; Task 3 `TECH_UPLOAD_LIMIT_BYTES`, `FILE_TOO_LARGE_COPY`; Task 5 `OfficeSubmission`, `RequestForms` (types); Task 2 `answerText`, `plural`; `statusLabel` (`src/lib/tech/job-display.ts`); `formatCentsExact` (`src/lib/admin/money-format.ts`); the Task 8 site, photo and request-forms routes.
-- Produces: `SITE_COPY`, `pastJobLine`, `estimateTotal`, `unaddressedLine`, `membershipLines`, `siteCardLine`; `PhotoQuality`, `QUALITY_STORAGE_KEY = "tech:photo-quality"`, `STEPS`, `resizePlan`, `qualityFromStorage`, `pickPrepared`, `PHOTO_CANT_PREPARE`; `preparePhoto(file, quality)`; `PHOTO_UPLOAD_FAILED = "Couldn't upload that photo."`, `FILE_UPLOAD_FAILED`, `UPLOAD_CUSTOMER_REMOVED`, `isImageMime`; `visitLabel`, `submissionChip`, `whoWhen`, `missingLine`, `reopenDescription`, `REOPEN_*`, `UNREADABLE`; `RequestFormsSection` after `VisitsSection`.
+- Produces: `SITE_COPY`, `pastJobLine`, `estimateHref(jobId, estimate, isLead)` (a link only for the lead, ruling 12), `estimateTotal`, `unaddressedLine`, `membershipLines`, `siteCardLine`; `PhotoQuality`, `QUALITY_STORAGE_KEY = "tech:photo-quality"`, `STEPS`, `resizePlan`, `qualityFromStorage`, `pickPrepared`, `PHOTO_CANT_PREPARE`; `preparePhoto(file, quality)`; `PHOTO_UPLOAD_FAILED = "Couldn't upload that photo."`, `FILE_UPLOAD_FAILED`, `UPLOAD_CUSTOMER_REMOVED`, `isImageMime`; `visitLabel`, `submissionChip`, `whoWhen`, `missingLine`, `reopenDescription`, `REOPEN_*`, `UNREADABLE`; `RequestFormsSection` after `VisitsSection`.
 
 - [ ] **Step 1: Write the failing tests** — `src/lib/tech/site-display.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { estimateTotal, membershipLines, pastJobLine, siteCardLine, SITE_COPY, unaddressedLine } from "./site-display";
+import { estimateHref, estimateTotal, membershipLines, pastJobLine, siteCardLine, SITE_COPY, unaddressedLine } from "./site-display";
 import type { SiteView } from "./site-view";
 
 const TZ = "America/New_York";
 const view = (over: Partial<SiteView> = {}): SiteView => ({
-  scope: "location", title: "Service address", pastJobs: [], unaddressedCount: 0, openEstimates: [], membership: { state: "none" }, hasCustomer: true, ...over,
+  scope: "location", title: "Service address", pastJobs: [], unaddressedCount: 0, openEstimates: [], membership: { state: "none" }, hasCustomer: true, isLead: true, ...over,
 });
 const job = { id: "r", referenceNumber: "R-1", date: "2026-11-03T15:00:00.000Z", status: "completed", kind: "Maintenance", leadTechnicianName: "Alex", submittedFormNames: ["Maintenance checklist"] };
 const est = (over = {}) => ({ id: "e", label: "Estimate · Nov 6 · 2 options", createdAt: "2026-11-06T15:00:00.000Z", totalCents: 481200, optionCount: 2, thisJob: false, fromFieldPulse: false, ...over });
@@ -9487,6 +9591,12 @@ describe("site rows (spec §8)", () => {
   it("past job line", () => {
     expect(pastJobLine(job, TZ)).toBe("Nov 3, 2026 · Maintenance · Completed · Alex · Forms: Maintenance checklist");
     expect(pastJobLine({ ...job, leadTechnicianName: null, submittedFormNames: [] }, TZ)).toBe("Nov 3, 2026 · Maintenance · Completed");
+  });
+  it("only this job's native open estimates link, and only for the lead (spec §7.6)", () => {
+    expect(estimateHref("j", est({ thisJob: true }), true)).toBe("/tech/jobs/j/estimates/e");
+    expect(estimateHref("j", est({ thisJob: true }), false)).toBeNull();
+    expect(estimateHref("j", est({ thisJob: false }), true)).toBeNull();
+    expect(estimateHref("j", est({ thisJob: true, fromFieldPulse: true }), true)).toBeNull();
   });
   it("estimate total", () => {
     expect(estimateTotal(est())).toBe("Up to $4,812.00");
@@ -9664,6 +9774,11 @@ export function pastJobLine(j: SitePastJob, timeZone: string = TZ): string {
   return parts.join(" · ");
 }
 
+/** Spec §7.6: rows aren't links, except this job's open (native) estimates for the lead — to the M3c estimate page. */
+export function estimateHref(jobId: string, e: Pick<SiteEstimate, "id" | "thisJob" | "fromFieldPulse">, isLead: boolean): string | null {
+  return isLead && e.thisJob && !e.fromFieldPulse ? `/tech/jobs/${jobId}/estimates/${e.id}` : null;
+}
+
 /** "Up to $4,812.00" for several options, the exact total for one. */
 export function estimateTotal(e: SiteEstimate): string {
   return e.optionCount > 1 ? `Up to ${formatCentsExact(e.totalCents)}` : formatCentsExact(e.totalCents);
@@ -9839,7 +9954,7 @@ index ef11467..0858178 100644
 
 - [ ] **Step 4: Run them to verify they pass**
 
-Run: the Step 2 command. Expected: PASS (6 + 5 + 4 + the job-page-state file).
+Run: the Step 2 command. Expected: PASS (7 + 5 + 4 + the job-page-state file).
 
 - [ ] **Step 5: Site card and page.** `src/components/tech/site/fetch-site.ts`:
 
@@ -9916,13 +10031,13 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { estimateTotal, membershipLines, pastJobLine, SITE_COPY, unaddressedLine } from '@/lib/tech/site-display';
+import { estimateHref, estimateTotal, membershipLines, pastJobLine, SITE_COPY, unaddressedLine } from '@/lib/tech/site-display';
 import type { SiteView } from '@/lib/tech/site-view';
 import { fetchSite } from './fetch-site';
 
 const CHIP = 'rounded-[3px] border px-1.5 py-0.5 text-[13px]';
 
-/** What the technician should know about this address (M3d spec §7.6). Rows aren't links, except this job's open estimates. */
+/** What the technician should know about this address (M3d spec §7.6). Rows aren't links, except this job's open estimates for the lead. */
 export function SitePageClient({ jobId }: { readonly jobId: string }) {
   const [view, setView] = useState<SiteView | null | undefined>(undefined);
   useEffect(() => {
@@ -9984,11 +10099,10 @@ export function SitePageClient({ jobId }: { readonly jobId: string }) {
                           </span>
                         </span>
                       );
+                      const href = estimateHref(jobId, e, view.isLead);
                       return (
                         <li key={e.id}>
-                          {e.thisJob && !e.fromFieldPulse
-                            ? <Link href={`/tech/jobs/${jobId}/estimates/${e.id}`} className="block min-h-11 active:bg-accent">{row}</Link>
-                            : row}
+                          {href ? <Link href={href} className="block min-h-11 active:bg-accent">{row}</Link> : row}
                         </li>
                       );
                     })}
@@ -10045,7 +10159,7 @@ export default async function TechSitePage({ params }: { readonly params: Promis
 In `src/components/tech/tech-job-detail-client.tsx` add `import { SiteCard } from '@/components/tech/site/site-card';` after the `FormsCard` import, and the card right after the Forms card:
 
 ```tsx
-      <FormsCard jobId={id} visitId={formsVisit} refreshKey={refreshKey} onLoaded={setFormsView} />
+      <FormsCard jobId={id} visitId={formsVisit} summaryFailed={summaryFailed} refreshKey={refreshKey} onLoaded={setFormsView} />
       <SiteCard jobId={id} />
 ```
 
@@ -10584,7 +10698,7 @@ try {
 }
 ```
 
-Run `npx tsx walk-m3d-11.mts`. Expected `{"ok":true,…}` and the org deleted. Look at: `/tmp/m3d-11-reopened.png` (`Draft` after the Reopen confirm whose description reads "The technician can change the answers and submit again."), `/tmp/m3d-11-job.png` (Site card "2 past jobs · 1 open estimate · Member" after Forms; Photos "Quality: High · Change", `Take photo` and `Add file`), `/tmp/m3d-11-site.png` ("At this address", A's two past jobs — none of B's "Bristol" job —, the estimate "Up to $4,812.00", "Comfort Club · Member since … · Paid through …", "2 visits a year", one upcoming visit), `/tmp/m3d-11-office.png` (Forms section after Visits: "Visit #1", `Submitted`, "Suction pressure 180 psi · Outside the usual range (100–140 psi)", `Reopen`), `/tmp/m3d-11-erased.png` ("Answers removed", no answers). Photo upload cannot run on dev (no R2 write credentials, `page-tech` gotchas): the 4 MB, uuid and erased-customer paths are the Task 6 route tests. Delete the walk script.
+Run `npx tsx walk-m3d-11.mts`. Expected `{"ok":true,…}` and the org deleted. Look at: `/tmp/m3d-11-reopened.png` (`Draft` after the Reopen confirm whose description reads "The technician can change the answers and submit again."), `/tmp/m3d-11-job.png` (Site card "2 past jobs · 1 open estimate · Member" after Forms; Photos "Quality: High · Change", `Take photo` and `Add file`), `/tmp/m3d-11-site.png` ("At this address", A's two past jobs — none of B's "Bristol" job —, the estimate "Up to $4,812.00" (a link: the walk's session is the lead; a helper's session shows it as plain text), "Comfort Club · Member since … · Paid through …", "2 visits a year", one upcoming visit), `/tmp/m3d-11-office.png` (Forms section after Visits: "Visit #1", `Submitted`, "Suction pressure 180 psi · Outside the usual range (100–140 psi)", `Reopen`), `/tmp/m3d-11-erased.png` ("Answers removed", no answers). Photo upload cannot run on dev (no R2 write credentials, `page-tech` gotchas): the 4 MB, uuid and erased-customer paths are the Task 6 route tests. Delete the walk script.
 
 - [ ] **Step 9: Gates and commit**
 
@@ -10881,7 +10995,7 @@ describe("field forms (dev DB)", () => {
     // The same saveId again → replay.
     expect(await draft(rid, v1, formId, { [F.a]: true, [F.c]: true, [F.psi]: 180 }, { me: helper, saveId: save1 })).toMatchObject({ ok: true, revision: 1, created: false });
     // A colleague's long answer, then a replay: the helper's next save lands and its retry is still a replay
-    // (checked before any decrypt, apply or measure). No valid form reaches the 128 KB cap (lead ruling 4).
+    // (checked before any decrypt, apply or measure). No valid form reaches the 128 KB cap (lead ruling 5).
     await assign(v1, lead, { arrived: true });
     expect(await draft(rid, v1, formId, { [F.note]: "€".repeat(2000) }, { base: 1 })).toMatchObject({ ok: true, revision: 2 });
     const save2 = randomUUID();
@@ -10939,7 +11053,7 @@ describe("field forms (dev DB)", () => {
     expect(await auditCount("form_submitted", sid)).toBe(2);
 
     // A first-insert batch whose UPDATE misses writes no audit row. The writer refuses a non-zero base with
-    // no row before batching (lead ruling 3), so drive the writer's own statements directly.
+    // no row before batching (lead ruling 4), so drive the writer's own statements directly.
     const form2 = await newForm();
     const sub = { formId: form2, appointmentId: v1, formVersion: 1, baseRevision: 5, changes: ALL_REQUIRED };
     const k2 = randomUUID();
@@ -11331,7 +11445,7 @@ describe("field forms (dev DB)", () => {
     expect(heldForms?.missingRequired.map((m) => m.formId)).not.toContain(formId);
     expect(heldForms?.submissions[0]?.visitState).toBe("ended");
 
-    // Lead ruling 12: (m)'s "a visit cancelled before any work doesn't count" can only mean a visit with NO
+    // Lead ruling 13: (m)'s "a visit cancelled before any work doesn't count" can only mean a visit with NO
     // submission — §5.1 makes any visit holding a submission count. Pin both sides.
     const preWork = await newJob();
     const pv = await visitOf(preWork);
@@ -11427,8 +11541,12 @@ EOF
   changes, `macHex("hvac-form-changes-v1", …)`), `GET /api/tech/jobs/[id]/site`.
 - **Who writes:** a non-cancelled row on THAT live visit; native on site (`BILL_STATUSES`) or
   the caller's own row arrived/started/completed; synced (FieldPulse or HCP) any status but
-  cancelled. One gate read (`readFormGatesSql`) + `gateReason`: cancelled request → JOB_CLOSED
-  first; ended visit → VISIT_ENDED for a technician with a row on it, else NOT_ASSIGNED.
+  cancelled. One gate read (`readFormGatesSql`) + `gateReason`, in this order: cancelled request
+  → JOB_CLOSED; erased customer → CUSTOMER_REMOVED; ended visit → VISIT_ENDED for a technician
+  with a row on it, else NOT_ASSIGNED; no live row → NOT_ASSIGNED; native and not on site →
+  NOT_ON_SITE. Replays run BEFORE the gates: the draft route's `findDraftReplay` (saveId), the
+  submit route's idempotency key (`formGateFail` runs inside the keyed run). A pre-read revision
+  other than `baseRevision` is STALE before any decrypt.
 - **Visits counts** = live, or progressed/completed work on it, or a submission. Migration 0058
   re-creates `sync_request_appointment()` with ONE added predicate: a visit with any
   `form_submissions` row (an empty draft included) is kept (times nulled, lead demoted) instead
@@ -11442,6 +11560,8 @@ EOF
   "Fill in “…”" links in `close-out-sheet.tsx`; nothing blocks (row 126 deferred).
 - **Site:** match by `location_id`, else by `normalizeAddress` of the request's own address;
   never the customer's other address, never a fallback. Membership `member | none | withheld`.
+  `isLead` comes from `isActiveLead` (`ownership.ts`, shared with the M3c estimates GET); this
+  job's open native estimates are links for the lead only.
 - **Photos:** quality per device (`tech:photo-quality`), resized on the phone, PDFs via
   `Add file`, 4 MB on phone and route; an erased customer's job refuses uploads
   (409 CUSTOMER_REMOVED, object deleted).
@@ -11503,13 +11623,13 @@ EOF
 | §5.4 erase (lock, audit count in SQL, DELETE … RETURNING, answers last, request + equipment arms), photos after erase, own commit | Task 6, Task 12 (i) |
 | §5.5 reopen | Task 5, Task 8, Task 11 UI, Task 12 (j) |
 | §5.6 office writers, 100-form limit, UNKNOWN_JOB_TYPE, audits | Task 5, Task 8 |
-| §6 routes, `frontGates` limit, `techFormDraft`, preamble, GET contracts, office routes | Task 8 (rulings 2, 3, 5, 6) |
+| §6 routes, `frontGates` limit, `techFormDraft`, preamble, GET contracts, office routes | Task 8 (rulings 2, 3, 6, 8, 9) |
 | §7.1 tab and builder (all copy, Undo, Discard changes, guard, archive confirm) | Task 9 |
 | §7.2 Forms card (visit pick, chips, Add a form, filter above 10) | Tasks 10a (pure), 10b |
 | §7.3 fill page (controls, ±, notes, touched/sent, autosave, status table, read-only reasons, merge, Clear answers, submit after a pending draft) | Tasks 10a (pure), 10b |
 | §7.4 close-out reminder (blocked and ready, order, `reminderVisible`) | Tasks 10a, 10b |
 | §7.5 office section (labels, chips, missing lines, Reopen confirm and STALE) | Task 11 |
-| §7.6 Site (scope, payload, membership, card copy, page) | Tasks 3, 7, 11; Task 12 (l) |
+| §7.6 Site (scope, payload, membership, card copy, page, estimate links for the lead only via the shared `isActiveLead`) | Tasks 3, 7, 11; Task 12 (l) |
 | §7.7 photos (quality, resize steps, kept blob, Try again / Discard, PDF, 4 MB, route checks) | Task 6 (route), Task 11 (card) |
 | §8 copy | Tasks 2, 4, 9, 10a, 11 (exact strings; plan-chosen copy listed in ruling 17) |
 | §9 pure tests, SQL renders (incl. org counts on every builder, both batches' L_req and both UPDATEs' visit gate), route tests, integration (a)–(n) + v4.1 cascades + a foreign-org form + unassigned-from-a-row, browser walk | Tasks 1–11 (unit / render / route), Task 12 (integration), walks in Tasks 9, 10b, 11 |
@@ -11518,7 +11638,9 @@ EOF
 
 **2. Placeholder scan:** no TBD / "add appropriate" / "similar to Task N"; every code step carries the full file or an exact diff. Two places give edits as numbered snippets rather than a whole file (`tech-job-detail-client.tsx` in Tasks 10b and 11), because the file is shared between them.
 
-**v2 changes after review round 1:** critic A-1 org-count / request-scope render assertions on `insertSubmissionSql` (7), the UPDATE (6), `cardFormsSql` (2), `countingVisitSql` (3), `oneSubmissionSql` (3), `submittedElsewhereSql` (4), `missingRequiredFormsSql` (6), the executed form reads and reopen's `service_request_id`, plus a foreign-org form in integration (f) and another request's id in (j); A-2 the submit batch's L_req and both UPDATEs' visit gate pinned, plus "unassigned from a visit that already has a row" in (f); A-3 the pre-read base (ruling 4; (c)'s insert-then-miss case now drives the writer's own statements); A-4 the cap measured and ruled unreachable (ruling 5); A-5 the substring PII-key rule; A-6 rejected (ruling 12); A-7 (m) built both ways (ruling 13); A-8 (a) no-row check, (f) `not_found`, (l) another location, the synced job's own estimate, unmatched estimates absent, member / non-member customers; A-9 erased-customer gate order (ruling 1); A-10 caveat recorded (ruling 15); A-11 replay before the gates (ruling 3). Critic B-M1 the address-less synced job is customer B's; B-M2 the fill page keyed and its recovery ref keyed; B-M3 submit after a pending draft (ruling 14, `submitStep`); B-m1 `dayShort`; m2 the Forms card's loading state; m3 the Reopen sentence not said twice; m4 the unreadable line not said twice; m5 straight apostrophe and plan-chosen copy listed (ruling 17); m6 walk 9's exact label; m7 the fixture's estimate options and walk 11's Reopen; m8 a failed re-read backs off; m9 a replay's failed GET re-read before PATCH; m10 an untouched New form isn't dirty; m11 Task 10 split into 10a / 10b (Task 8 kept whole); m12 the rerun-once note.
+**v2 changes after review round 1:** critic A-1 org-count / request-scope render assertions on `insertSubmissionSql` (7), the UPDATE (6), `cardFormsSql` (2), `countingVisitSql` (3), `oneSubmissionSql` (3), `submittedElsewhereSql` (4), `missingRequiredFormsSql` (6), the executed form reads and reopen's `service_request_id`, plus a foreign-org form in integration (f) and another request's id in (j); A-2 the submit batch's L_req and both UPDATEs' visit gate pinned, plus "unassigned from a visit that already has a row" in (f); A-3 the pre-read base (ruling 4; (c)'s insert-then-miss case now drives the writer's own statements); A-4 the cap measured and ruled unreachable (ruling 5); A-5 the substring PII-key rule; A-6 rejected in v2, then reversed by the lead in v3 (ruling 12); A-7 (m) built both ways (ruling 13); A-8 (a) no-row check, (f) `not_found`, (l) another location, the synced job's own estimate, unmatched estimates absent, member / non-member customers; A-9 erased-customer gate order (ruling 1); A-10 caveat recorded (ruling 15); A-11 replay before the gates (ruling 3). Critic B-M1 the address-less synced job is customer B's; B-M2 the fill page keyed and its recovery ref keyed; B-M3 submit after a pending draft (ruling 14, `submitStep`); B-m1 `dayShort`; m2 the Forms card's loading state; m3 the Reopen sentence not said twice; m4 the unreadable line not said twice; m5 straight apostrophe and plan-chosen copy listed (ruling 17); m6 walk 9's exact label; m7 the fixture's estimate options and walk 11's Reopen; m8 a failed re-read backs off; m9 a replay's failed GET re-read before PATCH; m10 an untouched New form isn't dirty; m11 Task 10 split into 10a / 10b (Task 8 kept whole); m12 the rerun-once note.
+
+**v3 changes after the round-2 re-review:** ruling 12 reversed by the lead (`isLead` on the Site GET from the shared `isActiveLead`, links for the lead only, tests in Tasks 7 and 11); ruling cross-references renumbered and checked (code comments and plan text); ruling 3 says CUSTOMER_REMOVED is stored; the page-tech bullet carries the gate order and replay-first; a failed summary shows the Forms card's error state.
 
 **3. Type consistency:** `FormWriteReason` (Task 4) is the key set of `FORM_REASON` and the input of `formReasonResult` / `formReasonResponse` (Task 8); `GateReason` (Task 3) ⊂ `FormWriteReason`; `WriteBlockedReason` (Task 3) is what `TechFormsView` / `TechFormView` carry (Task 7) and what `readOnlyCopy` takes (Task 10a); `submitStep` (Task 10a) drives `confirmSubmit` (Task 10b); `FormDefinition` (Task 2, readonly arrays) is what `createForm` / `updateForm` (Task 5), the route schemas (Task 8) and `toDefinition` (Task 9) exchange; `OfficeSubmission.visitState` is `'live' | 'ended'` in Task 5 and in `visitLabel` (Task 11); `SubmitBody` (Task 8) feeds `submitHashInput` and the integration `submitVia`; `SiteView` (Task 7) is what `siteCardLine` and the page read (Task 11); `TECH_UPLOAD_LIMIT_BYTES` is the one 4 MB constant for the route (Task 6), the PDF pick and the resize plan (Task 11).
 
