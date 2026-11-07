@@ -316,3 +316,23 @@ Rejected / moot:
 Verdict: v4 FINAL. The round-3 blocker (A-B1) is removed with Undo. The spec grew from 636 to 682 lines:
 cutting Undo saved about 40 lines, but fully specifying the `Move…` dialog, the copy map and the FieldPulse
 variants added more.
+
+## v4 verification (v4 → v4.1 FINAL), 2026-11-08
+
+Verification confirmed the round-3 majors closed, Undo fully cut, the five-technician cap race-free (the
+count sits in the INSERT's WHERE after the lock), version checks sound, `autoScroll` options valid in
+`@dnd-kit/core` 6.3.1, and `@dnd-kit/sortable` safe to remove. Three open items, all applied:
+
+- (3a) A worked visit became deletable: a revive clears timestamps, and the 0058 trigger keeps visit #1
+  only for timestamps or form submissions (0058:150-160), so arrive → Move anyway → drag back → drop on
+  Unscheduled deleted the visit. Revive keeps clearing timestamps (it helps the M3d, close-out and hold
+  gates). `unscheduleRequest` now refuses a visit #1 with any job time entry on it (or with no visit link)
+  → 409 `WORK_LOGGED` "Work was logged on this visit, so it can't go back to Unscheduled." (§5.4, §6, §8;
+  render test; integration (n2) runs the full sequence and checks the visit, Alex's row and his entries).
+- (3b) `TECHNICIAN_DONE` had no SQL twin: §5.3 step 1 now carries "the new lead has no `completed` row on
+  #1", and `assignTechnician` / `reassignTechnician` carry the same predicate (§5.5, §6, §8). Integration (c)
+  adds the sheet paths and a helper's done tap injected between the move's pre-read and batch.
+- (3d) An Unscheduled drop's `STALE` uses the same refetch and `moveLanded` path (landed = back in
+  Unscheduled), else the existing STALE banner line (§7.4, §8); integration (n3).
+
+Not changed: features.csv row 97's note "drag it back to reverse" describes an ordinary move, not Undo.

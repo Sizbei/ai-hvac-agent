@@ -1,6 +1,7 @@
 # Replica M2: Dispatch, as deltas to /admin/calendar
 
-Status: v4 FINAL (2026-11-08) after adversarial review rounds 1–3 (7 critic reports) and lead rulings
+Status: v4.1 FINAL (2026-11-08) after adversarial review rounds 1–3 (7 critic reports), the v4
+verification and lead rulings
 (log in `docs/superpowers/specs/2026-11-08-replica-m2-review-log.md`). Owner: Raymond Chen.
 Milestone source: `replica/architecture.md` build order item 5 (lines 625–633), the F03 route table
 (lines 134–145), the reassign-guard constraint (lines 93–95), the races paragraph (lines 344–351) and the
@@ -239,7 +240,9 @@ service_requests r WHERE r.id = $rid AND r.organization_id = $org AND r.xmin = p
 1. `UPDATE service_requests SET assigned_to = $lead, scheduled_date = $start, arrival_window_start =
    $start, arrival_window_end = $end, status = <CASE>, hold_reason = <…>, follow_up_date = <…>, updated_at
    = now() WHERE id = $rid AND organization_id = $org AND fieldpulse_job_id IS NULL AND status NOT IN
-   ('completed','cancelled') AND <version gate> AND NOT <#1 ended or cancelled> AND <no time off, checked
+   ('completed','cancelled') AND <version gate> AND NOT <#1 ended or cancelled> AND <lead not done:
+   NOT EXISTS (SELECT 1 FROM appointment_assignments d WHERE d.organization_id = $org AND d.appointment_id
+   = <#1> AND d.technician_id = $lead AND d.status = 'completed')> AND <no time off, checked
    technicians> AND (<'started' confirmed> OR NOT <started arm>) AND (<'conflict' confirmed> OR <no
    conflict>) RETURNING id, status`. Each guard is the SQL twin of a pre-read check. `<CASE>`: `pending`
    with a lead → `assigned` (as `create-request-queries.ts:375-387`); a lead change past a started lead
@@ -289,13 +292,19 @@ toTechnicianId, windowRule, window: 'morning' | 'afternoon' | 'evening' | 'anyti
 confirmed, startedStatuses, conflictCount, outsideAvailability }`. No instants.
 
 ### 5.4 Drag-to-Unscheduled (`unscheduleRequest`, `scheduling-queries.ts:916`)
-Gains the §4.1 version gate (the card already carries it), the FieldPulse predicate and
-`visitOneStartedGuardSql`. HCP pushed as today (`unschedule/route.ts:72-73`). A visit with a form
-submission keeps its row (0058); M2 deletes no visit.
+Gains the §4.1 version gate (the card already carries it), the FieldPulse predicate,
+`visitOneStartedGuardSql`, and a work-logged guard: `NOT EXISTS (SELECT 1 FROM technician_time_entries t
+WHERE t.organization_id = $org AND t.service_request_id = $rid AND t.kind = 'job' AND (t.appointment_id =
+<#1> OR t.appointment_id IS NULL))` → 409 `WORK_LOGGED`. Why: a revive clears timestamps (§3.3), and the
+0058 trigger keeps visit #1 only when a row has a timestamp or the visit has a form submission
+(0058:150-160), so after arrive → Move anyway → drag back, an Unscheduled drop would delete a worked visit
+(its rows cascade, its entries lose `appointment_id`, `schema.ts:2594`). Time entries are the durable
+record of work, so they gate it. HCP pushed as today (`unschedule/route.ts:72-73`). A visit with a form
+submission keeps its row (0058); M2 deletes no worked visit.
 
 ### 5.5 The sheet
 - `assignTechnician` / `reassignTechnician` get the started guard (no override there), the FieldPulse
-  predicate, and `reviveLeadSql` appended to their `lockedUpdate` batch (`visit-one-guard.ts:32-36`) gated
+  predicate, the same lead-not-done predicate as §5.3 step 1 (409 `TECHNICIAN_DONE`), and `reviveLeadSql` appended to their `lockedUpdate` batch (`visit-one-guard.ts:32-36`) gated
   on the request xmin, so a sheet reassign A → B → A never leaves a `cancelled` lead.
   `placeAndAssignRequest` (autopilot, office booking) appends it too.
 - `scheduleRequest` and `updateAppointment` are unchanged (§3.2).
@@ -332,8 +341,8 @@ keeping wall-clock times. No `deltaMinutes` (architecture.md:144); no undo (move
 | --- | --- | --- |
 | `GET /api/admin/calendar` (exists) | `adminRead` | §7.1 fields; day view adds `blocks` |
 | `POST /api/admin/requests/[id]/move` (new) | `isUuid`, `admin:visit-move:<user>` `adminMutation`, `readJsonBody`, zod | §5.3 |
-| `POST /api/admin/requests/[id]/unschedule` (exists) | + version, FieldPulse, started guard | unchanged |
-| `POST` and `PATCH /api/admin/requests/[id]/assign` (exist) | + FieldPulse refusal, started guard, revive | unchanged |
+| `POST /api/admin/requests/[id]/unschedule` (exists) | + version, FieldPulse, started guard, `WORK_LOGGED` | unchanged |
+| `POST` and `PATCH /api/admin/requests/[id]/assign` (exist) | + FieldPulse refusal, started guard, `TECHNICIAN_DONE`, revive | unchanged |
 | `PATCH /api/admin/requests/[id]` (exists, schedule edit) | unchanged | unchanged |
 | `POST /api/admin/dispatch/mass-reschedule/preview` (new) | `adminRead`; `isRealIsoDate`, today − 1 … today + 365; `isUuid` | `{ candidates }` |
 | `POST /api/admin/dispatch/mass-reschedule` (new) | `adminMutation`, zod, Idempotency-Key | §5.6 |
@@ -397,7 +406,8 @@ The draggable wrapper (`draggable-job-card.tsx:45-48`) drops dnd-kit's `tabIndex
 `handleDragStart` (:523-532) finds the card by `requestId` and `laneRole === 'lead'`. Client move state
 (overlay, optimistic board, in-flight set, `applyMoveResult`) is keyed by `requestId`; `visitId` only rides
 in the body.
-1. Unscheduled drop → §5.4.
+1. Unscheduled drop → §5.4. Its `STALE` goes through the same refetch and `moveLanded` path as a move
+   (landed means the request is back in Unscheduled); otherwise the STALE banner (§8).
 2. `promptPlan`; the prompt if needed.
 3. `resolveMoveWindow`.
 4. `timeOffHits(blocks, checkedTechnicians, window)` (pure; `removesCapacity` blocks only) → the time-off
@@ -495,8 +505,8 @@ Columns under the unassigned scope (no technician change); the prompt applies; o
 | Time off | "<Sam> is off 4 PM–8 PM on Tue, Nov 10." · over more than one day "<Sam> is off Mon, Nov 9 – Fri, Nov 13." · `non_job` or a capacity-removing `on_call`: "<Sam> has a non-job event 4 PM–8 PM on Tue, Nov 10." · a helper adds "Or remove <Sam> in the request." |
 | FieldPulse (three variants) | board, Unscheduled, mass row: "Change this request in FieldPulse." · sheet technician: "Change the technician for this request in FieldPulse." · sheet crew: "Change the technicians for this request in FieldPulse." · any other sheet refusal on a FieldPulse request: "A technician has started this visit. Change it in FieldPulse." |
 | Banners | STALE "This request changed. The calendar has been refreshed." · VISIT_ENDED "This visit has ended. Add a new visit instead." · VISIT_PINNED "Visit #<n>. Change its time in the request." · REQUEST_TERMINAL "This request is completed, so it can't be moved." / "…cancelled…" · TECHNICIAN_NOT_FOUND "That technician isn't active any more." · TECHNICIAN_DONE "<Sam> has finished on this visit." · WINDOW_ENDED `WINDOW_ENDED_MESSAGE` · other "Couldn't move the request. Please try again." |
-| Unscheduled | started "A technician has started this visit, so it can't go back to Unscheduled." |
-| Sheet reassign | native HAS_PROGRESS "A technician has started this visit. To move it anyway, use Move… on the calendar." |
+| Unscheduled | started "A technician has started this visit, so it can't go back to Unscheduled." · WORK_LOGGED "Work was logged on this visit, so it can't go back to Unscheduled." · STALE: the banners' STALE line |
+| Sheet reassign | native HAS_PROGRESS "A technician has started this visit. To move it anyway, use Move… on the calendar." · TECHNICIAN_DONE "<name> has finished on this visit." |
 | Sheet crew | ALREADY_ASSIGNED "<name> is already on this visit." · HAS_PROGRESS "<name> has started, so they stay on this visit." · TIME_OFF "<name> is off during this visit." · VISIT_ENDED "This visit has ended." · NO_LEAD "Assign a technician to this request first." · VISIT_FULL "This visit already has 5 technicians." · other "Couldn't change the technicians. Please try again." |
 | Change time (`VISIT_ERROR_COPY`) | HAS_PROGRESS "Work has started on this visit, so its time can't change. Cancel it and add a new visit instead." · VERSION_CONFLICT "This visit changed. It has been refreshed." · TIME_OFF "<name> is off during this time." · TECHNICIAN_NOT_FOUND "A technician on this visit isn't active any more. Cancel it and add a new visit instead." · VISIT_ENDED, VISIT_CANCELLED, WINDOW_ENDED (existing) · generic "Couldn't save the visit. Please try again." |
 | Mass reasons | started "Started" · ended "Visit ended" · later_visit "Visit #<n>. Change it in the request." · time_off "Time off then" · window_ended "That time has passed" · already_on_visit "<Sam> is already on it" · fieldpulse "Change it in FieldPulse" · helper "Helping <lead first name>. Change it in the request." · stale "Changed since you opened this" · conflict "Overlaps another request" · pushesNotSent "Not sent to Housecall Pro. Open it to retry." |
@@ -533,7 +543,8 @@ a lead change, gated; `reviveLeadSql` (nulls timestamps on a cancelled revive) i
 and `placeAndAssignRequest`; the entries filter; the audit xmin gate; the final version read;
 `visitOneStartedGuardSql` in the five callers, `visitOneGuardSql` unchanged in `scheduleRequest`,
 `visitProgressed` unchanged; `fieldpulse_job_id IS NULL` in every M2 writer; `addVisitTechnician` lock,
-revive, lead and cap clauses and version bump; `removeVisitTechnician` cancel branch and version bump; the
+revive, lead and cap clauses and version bump; `removeVisitTechnician` cancel branch and version bump; the lead-not-done predicate in the move, `assignTechnician`
+and `reassignTechnician`; the work-logged guard in `unscheduleRequest`; the
 mass `NOT EXISTS` predicate and the SQL-computed audit details.
 
 **Route tests:** every code and its order; 400s (non-UUID, `keep` without a window); TIME_OFF has no
@@ -554,7 +565,9 @@ Sam's save of Alex's draft before arriving → refused by M3d's gate; Sam taps a
 (b3) pause: request `on_hold` → override → `scheduled`, hold fields cleared;
 (b4) Alex en route, then Alex's time off from now → move to Sam with confirm → 200;
 (c) done lead: Alex `completed` → time move → confirm; lead change → Alex `cancelled`; a done helper as the
-new lead → TECHNICIAN_DONE;
+new lead → TECHNICIAN_DONE; the same through the sheet's assign and reassign → TECHNICIAN_DONE; a helper who
+taps done between the move's pre-read and batch (statement injected between them) → TECHNICIAN_DONE on the
+re-read, Sam not lead;
 (d) helper working, lead untouched → board lead swap without confirm; sheet reassign → HAS_PROGRESS; time
 move → 409;
 (e) office PATCH `in_progress` → board 409; sheet reassign 409 with the Move… copy; sheet reassign A → B →
@@ -581,7 +594,10 @@ event; (j'') a placed unassigned request → GET `visitId` = #1's id → drop on
 wall-clock kept, one audit row whose moved and skipped come from SQL; a visit made stale inside the batch →
 recorded `stale`; same key → same result; delete the key row and re-send → same result, nothing
 re-written, calendar sync and HCP update re-sent, no HCP create, a request needing one in `pushesNotSent`;
-(n) visit #1 with a form submission to Unscheduled → the visit survives;
+(n) visit #1 with a form submission to Unscheduled → the visit survives; (n2) Alex arrives (time entry on
+#1) → Move anyway to Sam → drag back to Alex (revived, null timestamps) → drop on Unscheduled →
+409 WORK_LOGGED; visit #1, Alex's row and his time entries (with `appointment_id`) intact; (n3) a stale
+Unscheduled drop → STALE, refetch, banner;
 (o) tenancy: other org ids → 404 / TECHNICIAN_NOT_FOUND;
 (p) audit rows carry ids, enums, booleans and counts only.
 
@@ -635,7 +651,8 @@ Rulings (lead rulings L1–L11, L2-1…L2-10, L3.1-1, L3-1…L3-7 in the log):
    starts unstarted; the request resets to `scheduled` (incl. `on_hold`) when nobody else works. Reverse
    by dragging back; no Undo.
 5. A cancelled row is revived clean (timestamps nulled) whenever its technician becomes lead (board, sheet,
-   autopilot) or helper.
+   autopilot) or helper; a `completed` row never becomes lead; a visit with job time entries never goes back
+   to Unscheduled.
 6. Time off is never overridable; only the technicians a move assigns are checked.
 7. Visit #1 only, while displayed and live; visits #2+ pinned and changed in the sheet.
 8. `visitId` falls back to #1; version gate on id + version (also on Unscheduled drops and after helper
