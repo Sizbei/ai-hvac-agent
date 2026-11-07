@@ -117,3 +117,21 @@ export function nextWakeAt(s: SaveState, dirty: boolean): number | null {
 
 /** keepalive only for bodies of 60 KB or less (the browser's keepalive budget). */
 export const KEEPALIVE_MAX_BYTES = 60 * 1024;
+
+export type SettleStep = "wait" | "send_retry" | "send_new" | "done" | "fail";
+
+/**
+ * In-app leave (R1a: `Back to job` and the page's other links): what to do
+ * before navigating. Wait for the write in flight or a re-read, then send
+ * what's left (an unknown body first, now, whatever its back-off), until
+ * nothing is left (`done`, navigate) or a stop that needs the technician
+ * (`fail`, stay on the page with its line). A submit owns a locked page, and a
+ * blocked or submitted page can't save more: those navigate.
+ */
+export function settleStep(s: SaveState, o: { readonly pending: boolean; readonly dirty: boolean; readonly flight: boolean; readonly rereading: boolean }): SettleStep {
+  if (s.locked || s.stop === "blocked" || s.stop === "submitted") return "done";
+  if (s.inFlight || o.flight || o.rereading) return "wait";
+  if (!o.pending && !o.dirty && !s.retryPending) return "done";
+  if (s.stop !== null) return "fail";
+  return o.pending || s.retryPending ? "send_retry" : "send_new";
+}

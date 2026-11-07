@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { fillHref, formChips } from '@/lib/tech/form-copy';
+import { fillHref, formChips, READ_ONLY_COPY } from '@/lib/tech/form-copy';
 import type { TechFormsView } from '@/lib/tech/form-view';
 
 const FILTER_FROM = 10;
@@ -23,6 +23,7 @@ export function FormsCard({
   visitId,
   refreshKey,
   summaryFailed = false,
+  closed = false,
   onLoaded,
 }: {
   readonly jobId: string;
@@ -31,6 +32,8 @@ export function FormsCard({
   /** undefined while the job summary is still loading. */
   readonly visitId: string | null | undefined;
   readonly refreshKey: number;
+  /** The job is completed or cancelled: with no visit to show, the card says so (spec §7.3 `job_closed`). */
+  readonly closed?: boolean;
   readonly onLoaded?: (view: TechFormsView | null) => void;
 }) {
   const [view, setView] = useState<TechFormsView | null>(null);
@@ -95,7 +98,7 @@ export function FormsCard({
         ) : visitId === undefined ? (
           <Skeleton className="h-12 w-full" />
         ) : visitId === null ? (
-          <p className="text-[15px] text-muted-foreground">No visit on this job yet.</p>
+          <p className="text-[15px] text-muted-foreground">{closed ? READ_ONLY_COPY.job_closed : 'No visit on this job yet.'}</p>
         ) : state === 'loading' ? (
           <Skeleton className="h-12 w-full" />
         ) : state === 'error' || !view ? (

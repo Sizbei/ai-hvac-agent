@@ -46,7 +46,7 @@ export function FormFieldEditor({
           value={field.type}
           onValueChange={(v) => v && v !== field.type && onChange(changeType(field, v as FieldType))}
         >
-          <SelectTrigger aria-label="Question type" className="w-44">
+          <SelectTrigger aria-label={`Question ${index + 1} type`} className="w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -70,12 +70,12 @@ export function FormFieldEditor({
         </div>
       </div>
 
-      <Input aria-label="Label" placeholder={isHeading ? 'Section title' : 'Question'} value={field.label} maxLength={FORM_LIMITS.label + 20} onChange={(e) => set({ label: e.target.value })} />
-      <Input aria-label="Help" placeholder="Help (optional)" value={field.help} onChange={(e) => set({ help: e.target.value })} />
+      <Input id={`label-${field.id}`} aria-label={`Question ${index + 1} label`} placeholder={isHeading ? 'Section title' : 'Question'} value={field.label} maxLength={FORM_LIMITS.label + 20} onChange={(e) => set({ label: e.target.value })} />
+      <Input aria-label={`Question ${index + 1} help`} placeholder="Help (optional)" value={field.help} maxLength={FORM_LIMITS.help + 20} onChange={(e) => set({ help: e.target.value })} />
 
       {!isHeading && (
         <label className="flex items-center gap-2 text-sm">
-          <Switch checked={field.required} onCheckedChange={(v) => set({ required: v })} />
+          <Switch checked={field.required} onCheckedChange={(v) => set({ required: v })} aria-label={`Question ${index + 1} required`} />
           Required
         </label>
       )}
@@ -116,12 +116,12 @@ export function FormFieldEditor({
           {field.options.map((o, i) => (
             <div key={o.id} className="flex items-center gap-2">
               <Input
-                aria-label={`Option ${i + 1}`}
+                aria-label={`Question ${index + 1} option ${i + 1}`}
                 value={o.label}
                 onChange={(e) => set({ options: field.options.map((x) => (x.id === o.id ? { ...x, label: e.target.value } : x)) })}
               />
               <Button
-                type="button" size="sm" variant="ghost" aria-label={`Remove option ${i + 1}`}
+                type="button" size="sm" variant="ghost" aria-label={`Remove question ${index + 1} option ${i + 1}`}
                 onClick={() => set({ options: field.options.filter((x) => x.id !== o.id) })}
               >
                 <Trash2 className="size-4" />

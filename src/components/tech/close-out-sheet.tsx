@@ -44,6 +44,7 @@ export function CloseOutSheet({
   invoice = null,
   unbilledParts = 0,
   reminders = [],
+  native,
   pending,
   error,
   onConfirm,
@@ -55,8 +56,10 @@ export function CloseOutSheet({
   readonly invoice?: CloseOutInvoice | null;
   /** Parts on no non-void invoice ("2 parts aren't on an invoice yet."). */
   readonly unbilledParts?: number;
-  /** M3d: required forms not submitted on any visit that counts; never blocks (spec §7.4). The caller passes [] on synced jobs. */
+  /** M3d: required forms not submitted on any visit that counts; never blocks (spec §7.4). Shown on native jobs only (`native`). */
   readonly reminders?: ReadonlyArray<{ readonly name: string; readonly href: string }>;
+  /** Native jobs only show the reminder (spec §7.4); synced jobs pass false. */
+  readonly native: boolean;
   readonly pending: boolean;
   readonly error: string | null;
   readonly onConfirm: (action: SheetAction, options: SheetConfirmOptions) => void;
@@ -81,7 +84,7 @@ export function CloseOutSheet({
   const copy = buildActionSheetCopy(shown);
   const blocked = shown === 'close_out' ? relevantBlockers(blockers) : [];
   const closeOutReady = shown === 'close_out' && blocked.length === 0;
-  const showReminder = reminderVisible(shown, true, reminders);
+  const showReminder = reminderVisible(shown, native, reminders);
   const reminder = showReminder ? (
     <div role="group" className="space-y-1.5" aria-label="Forms not submitted">
       <p className="text-[15px] font-medium">Not submitted yet:</p>

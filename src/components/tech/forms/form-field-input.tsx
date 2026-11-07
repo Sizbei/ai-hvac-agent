@@ -118,26 +118,32 @@ export function FormFieldInput({
       const showSign = field.usualMin === undefined || field.usualMin < 0;
       return (
         <div className="space-y-1">
-          <label className="block space-y-1">
-            {label}
-            {help}
-            <span className="flex items-center gap-2">
-              <Input
-                inputMode="decimal"
-                value={raw}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={onBlur}
-                onFocus={onFocusInput}
-                className="h-11 rounded-xl font-mono text-[15px] tabular-nums md:text-[15px]"
-              />
-              {field.unit && <span className="text-[15px] text-muted-foreground">{field.unit}</span>}
-            </span>
-          </label>
-          {showSign && (
-            <button type="button" aria-label="Switch sign" className="h-11 min-w-11 rounded-xl border border-border-input px-3 text-[15px]" onClick={() => onChange(toggleSign(raw))}>
-              ±
-            </button>
-          )}
+          <div className="flex items-end gap-2">
+            <label className="block min-w-0 flex-1 space-y-1">
+              {label}
+              {help}
+              <span className="flex items-center gap-2">
+                <Input
+                  inputMode="decimal"
+                  value={raw}
+                  onChange={(e) => onChange(e.target.value)}
+                  onBlur={onBlur}
+                  onFocus={onFocusInput}
+                  className="h-11 rounded-xl font-mono text-[15px] tabular-nums md:text-[15px]"
+                />
+                {field.unit && <span className="text-[15px] text-muted-foreground">{field.unit}</span>}
+              </span>
+            </label>
+            {showSign && (
+              // Pressing `±` never takes focus: the input keeps it, so the footer doesn't move under the tap and the next key types.
+              <button
+                type="button" aria-label="Switch sign" className="h-11 min-w-11 shrink-0 rounded-xl border border-border-input px-3 text-[15px]"
+                onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => onChange(toggleSign(raw))}
+              >
+                ±
+              </button>
+            )}
+          </div>
           {note && <span className="block text-[13px] text-muted-foreground">{note}</span>}
           {flag}
         </div>

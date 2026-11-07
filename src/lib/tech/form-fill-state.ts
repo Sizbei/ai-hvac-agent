@@ -176,3 +176,124 @@ export function toggleSign(raw: string): string {
   if (raw === "") return "-";
   return raw.startsWith("-") ? raw.slice(1) : `-${raw}`;
 }
+
+/** What the page holds when a re-read merges in (the refs reconcile reads). */
+export interface FillSnapshot {
+  readonly fields: readonly FormField[];
+  readonly version: number;
+  /** The base `mine` was made against (a recovered submit brings its own). */
+  readonly base: FormValues;
+  readonly inputs: Inputs;
+  readonly touched: ReadonlySet<string>;
+  readonly lastValid: Readonly<Record<string, number>>;
+}
+
+/** The re-read row, as far as the merge needs it. */
+export interface ReadRow {
+  readonly form: { readonly version: number; readonly fields: readonly FormField[] };
+  readonly submission: { readonly revision: number; readonly values: FormValues | null } | null;
+}
+
+export interface ReconcileResult {
+  readonly fields: readonly FormField[];
+  readonly version: number;
+  /** `theirs`: the next PUT is based on the re-read row. */
+  readonly base: FormValues;
+  readonly revision: number;
+  readonly touched: Set<string>;
+  readonly inputs: Inputs;
+  readonly lastValid: Record<string, number>;
+  /** Answers the new version can't take (listed under "Not saved"). */
+  readonly dropped: readonly string[];
+  readonly formChanged: boolean;
+  readonly foreignChange: boolean;
+}
+
+export const nonNull = (c: Changes): FormValues =>
+  Object.fromEntries(Object.entries(c).filter((e): e is [string, FieldValue] => e[1] !== null));
+
+/**
+ * A re-read draft row merged into the page (STALE / FORM_CHANGED / a merged
+ * leave save). `recovered` = `mine` is a recovered submit's changes (not in the
+ * inputs yet): its inputs are rebuilt from them and only they are touched. A
+ * live merge keeps every touched input (a half-typed number isn't in `mine`).
+ * Untouched numbers reseed their last valid value from the merged row.
+ */
+export function reconcileTransition(s: FillSnapshot, mine: Changes, recovered: boolean, row: ReadRow, code: string | null): ReconcileResult {
+  const formChanged = code === "FORM_CHANGED" || row.form.version !== s.version;
+  let fields = s.fields;
+  let base = s.base;
+  let carriedMine = mine;
+  let dropped: readonly string[] = [];
+  if (formChanged) {
+    fields = row.form.fields;
+    const carried = carryForNewVersion(fields, s.base, mine);
+    base = carried.base;
+    carriedMine = carried.mine;
+    dropped = carried.dropped;
+  }
+  const theirs = row.submission?.values ?? {};
+  const mineInputs = recovered ? inputsFromValues(fields, nonNull(carriedMine)) : s.inputs;
+  const ids = new Set(fields.map((f) => f.id));
+  // A field the new version can't take leaves the touched set: its input follows the merged value and is never sent.
+  const droppedIds = new Set(dropped);
+  const touched = recovered
+    ? new Set(Object.keys(carriedMine))
+    : new Set([...s.touched, ...Object.keys(carriedMine)].filter((id) => ids.has(id) && !droppedIds.has(id)));
+  const merged = mergeIntoInputs(fields, base, carriedMine, theirs, mineInputs, touched, s.lastValid);
+  return {
+    fields, version: row.form.version, base: theirs, revision: row.submission?.revision ?? 0, touched,
+    inputs: merged.inputs, lastValid: merged.lastValid, dropped, formChanged, foreignChange: merged.foreignChange,
+  };
+}
+
+/** A leave-time save (R1): for each changed field, the value this page last saw (null = absent). */
+export function leaveBases(changes: Changes, base: FormValues): Record<string, FieldValue | null> {
+  return Object.fromEntries(Object.keys(changes).map((id) => [id, Object.hasOwn(base, id) ? base[id]! : null]));
+}
+
+/**
+ * A leave save answered 200: did the server merge it over a newer row (some
+ * fields skipped, or the revision moved by more than this write)? Then the
+ * page, if still open, re-reads; only the applied changes count as landed.
+ */
+export function leaveOutcome(sent: Changes, baseRevision: number, revision: number, skipped: unknown): { merged: boolean; applied: Changes } {
+  const skip = new Set(Array.isArray(skipped) ? skipped.filter((x): x is string => typeof x === "string") : []);
+  const applied = Object.fromEntries(Object.entries(sent).filter(([id]) => !skip.has(id)));
+  return { merged: skip.size > 0 || revision !== baseRevision + 1, applied };
+}
+
+/** Erased or unreadable answers: the read-only view shows no field values at all (never "Not done"). */
+export function answersHidden(submission: { readonly erased: boolean; readonly values: FormValues | null } | null): boolean {
+  return submission !== null && (submission.erased || submission.values === null);
+}
+
+/** How long after a leave save the next load still reads again for it. */
+export const LEAVE_MARK_MS = 30_000;
+
+/**
+ * A leave mark still waits for its save when it's recent and the loaded row
+ * doesn't hold every change it sent yet (null = absent). A revision can't tell:
+ * a colleague's save moves it too. A field the server skipped never matches,
+ * so the wait ends at the caller's time limit.
+ */
+export function leaveMarkPending(raw: string | null, now: number, values: FormValues): boolean {
+  if (!raw) return false;
+  try {
+    const m = JSON.parse(raw) as { at?: unknown; changes?: unknown };
+    if (typeof m.at !== "number" || m.changes === null || typeof m.changes !== "object" || Array.isArray(m.changes)) return false;
+    if (now - m.at < 0 || now - m.at >= LEAVE_MARK_MS) return false;
+    return Object.keys(unsavedChanges(m.changes as Changes, values)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The changes that would still move the row: `changes` minus what `base`
+ * already holds (null = absent). A half-typed "12." whose 12 landed has
+ * nothing left, so leaving doesn't wait on it.
+ */
+export function unsavedChanges(changes: Changes, base: FormValues): Changes {
+  return Object.fromEntries(Object.entries(changes).filter(([id, v]) => (Object.hasOwn(base, id) ? base[id]! : null) !== v));
+}

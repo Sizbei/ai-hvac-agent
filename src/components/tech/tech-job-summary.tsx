@@ -340,7 +340,8 @@ export function TechJobSummary({
           blockers={relevantBlockers(serverBlockers ?? job.blockers)}
           invoice={job.invoiceSummary}
           unbilledParts={unbilledParts}
-          reminders={job.native ? formReminders : []}
+          reminders={formReminders}
+          native={job.native}
           pending={advancing !== null}
           error={sheetError}
           onConfirm={(a, options) => void advance(a, options)}

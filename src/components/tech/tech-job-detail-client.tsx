@@ -472,7 +472,7 @@ export function TechJobDetailClient({
           setRefreshKey((k) => k + 1);
         }}
       />
-      <FormsCard jobId={id} visitId={formsVisit} summaryFailed={summaryFailed} refreshKey={refreshKey} onLoaded={setFormsView} />
+      <FormsCard jobId={id} visitId={formsVisit} summaryFailed={summaryFailed} closed={closed} refreshKey={refreshKey} onLoaded={setFormsView} />
       <SiteCard jobId={id} />
       <EstimatesCard jobId={id} refreshKey={refreshKey} onLoaded={onEstimatesLoaded} />
 

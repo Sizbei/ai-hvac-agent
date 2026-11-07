@@ -1,30 +1,24 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { FormFieldInput } from '@/components/tech/forms/form-field-input';
+import { FormFillView, GONE, type FillLoad } from '@/components/tech/forms/form-fill-view';
+import { clearLeaveMark, getView, leaveMarkKey, readLeaveMark, sleep, writeLeaveMark } from '@/components/tech/forms/form-fill-io';
+import { useFormSaveEffects } from '@/components/tech/forms/use-form-save-effects';
 import { useIdempotencyKey } from '@/hooks/use-idempotency-key';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import { classifyWriteError } from '@/lib/tech/invoice-client-errors';
 import { outcomeEvent } from '@/lib/tech/invoice-key-state';
 import { ESTIMATE_INTENTS_KEY } from '@/lib/tech/estimate-intents';
 import { postJson } from '@/components/tech/invoice/post-json';
-import { answerText, applyChanges, valuesTooLarge, type Changes, type FieldValue, type FormValues } from '@/lib/forms/form-values';
+import { answerText, applyChanges, valuesTooLarge, type Changes, type FormValues } from '@/lib/forms/form-values';
 import { utf8Bytes, type FormField } from '@/lib/forms/form-schema';
 import {
-  afterLanded, buildChanges, carryForNewVersion, clearAllChanges, inputsFromValues, mergeIntoInputs, nextLastValid, parseInput,
-  submitBlock, unparsedIds, type InputValue, type Inputs,
+  afterLanded, buildChanges, clearAllChanges, inputsFromValues, leaveBases, leaveMarkPending, leaveOutcome, nextLastValid,
+  nonNull, parseInput, reconcileTransition, submitBlock, unsavedChanges, type InputValue, type Inputs,
 } from '@/lib/tech/form-fill-state';
-import { KEEPALIVE_MAX_BYTES, nextSaveState, nextWakeAt, SAVE_IDLE, saveDue, submitStep, type SaveEvent, type SaveState } from '@/lib/tech/form-save-machine';
-import {
-  backHref, dayShort, FOREIGN_CHANGE, firstName, fillHref, missingRequiredLine, readOnlyCopy, statusLine, SUBMITTED_BY_OTHER, SUBMITTED_ON,
-  type StatusPhase,
-} from '@/lib/tech/form-copy';
+import { KEEPALIVE_MAX_BYTES, nextSaveState, SAVE_IDLE, submitStep, type SaveEvent, type SaveState } from '@/lib/tech/form-save-machine';
+import { FOREIGN_CHANGE, firstName, missingRequiredLine, SUBMITTED_BY_OTHER, type StatusPhase } from '@/lib/tech/form-copy';
 import type { TechFormView } from '@/lib/tech/form-view';
 
 interface DraftBody {
@@ -41,25 +35,10 @@ interface SubmitIntent {
   readonly base: FormValues;
 }
 
-const GONE = 'This form is no longer on this job.';
 const FIX_NUMBERS = 'Fix the highlighted answers.';
 const ANSWER_THIS = 'Answer this.';
 
-const nonNull = (c: Changes): FormValues =>
-  Object.fromEntries(Object.entries(c).filter((e): e is [string, FieldValue] => e[1] !== null));
-
-type Load = { kind: 'loading' } | { kind: 'ok'; view: TechFormView } | { kind: 'gone' } | { kind: 'error' };
-
-async function getView(jobId: string, formId: string, visitId: string): Promise<{ status: number | null; view: TechFormView | null; code: string | null }> {
-  try {
-    // A dead connection times out into the caller's back-off instead of holding a re-read open forever.
-    const res = await fetch(`/api/tech/jobs/${jobId}/forms/${formId}?visit=${visitId}`, { signal: AbortSignal.timeout(15_000) });
-    const body = await res.json().catch(() => null);
-    return { status: res.status, view: res.ok && body?.success ? (body.data as TechFormView) : null, code: body?.error?.code ?? null };
-  } catch {
-    return { status: null, view: null, code: null };
-  }
-}
+type Load = { kind: 'loading' } | FillLoad;
 
 /** The fill page (M3d spec §7.3). Answers save to the server as the technician types; submit is keyed. */
 export function FormFillClient({
@@ -111,6 +90,7 @@ export function FormFillClient({
   const reconcileRef = useRef<((code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => Promise<void>) | null>(null);
 
   const intentId = `form:submit:${formId}:${visitId}`;
+  const markKey = leaveMarkKey(formId, visitId);
   const { state: keyState, dispatch: keyDispatch } = useIdempotencyKey({
     intentId, requestId: jobId, persist: true, storageKey: ESTIMATE_INTENTS_KEY, rehydrate: true,
   });
@@ -141,7 +121,8 @@ export function FormFillClient({
     return out;
   }, [fieldName]);
 
-  const applyView = useCallback((v: TechFormView) => {
+  /** `showSaved` false: a leave-time save may not have landed yet, so the line doesn't say "Saved" over this read (R1). */
+  const applyView = useCallback((v: TechFormView, showSaved = true) => {
     viewRef.current = v;
     fieldsRef.current = v.form.fields;
     versionRef.current = v.form.version;
@@ -151,7 +132,7 @@ export function FormFillClient({
     touchedRef.current = new Set();
     lastValidRef.current = Object.fromEntries(Object.entries(values).filter(([, x]) => typeof x === 'number')) as Record<string, number>;
     setInputs(inputsFromValues(v.form.fields, values));
-    setSavedAt(v.submission && v.submission.values && Object.keys(v.submission.values).length > 0 ? v.submission.updatedAt : null);
+    setSavedAt(showSaved && v.submission && v.submission.values && Object.keys(v.submission.values).length > 0 ? v.submission.updatedAt : null);
     setSavedByOther(v.submission && !v.submission.updatedByMe ? firstName(v.submission.updatedByName) : null);
     setPhase(v.submission?.status === 'submitted' ? 'submitted' : v.writeBlockedReason ? 'blocked' : v.submission ? 'saved' : 'blank');
     setLoad({ kind: 'ok', view: v });
@@ -191,8 +172,7 @@ export function FormFillClient({
 
   /** STALE / FORM_CHANGED / a refusal during autosave or submit: re-read and merge or go read-only. */
   const reconcileOnce = useCallback(async (code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => {
-    const old = fieldsRef.current;
-    const mine = mineOverride ?? buildChanges(old, inputsRef.current, touchedRef.current, lastValidRef.current);
+    const mine = mineOverride ?? buildChanges(fieldsRef.current, inputsRef.current, touchedRef.current, lastValidRef.current);
     const base = baseOverride ?? baseRef.current;
     const v = await refetch();
     if (!mountedRef.current) return;
@@ -215,56 +195,33 @@ export function FormFillClient({
       }, Math.max(0, saveRef.current.waitUntil - Date.now()));
       return;
     }
-    if (v.submission?.status === 'submitted') {
+    if (v.submission?.status === 'submitted' || v.writeBlockedReason) {
       const lines = notSavedLines(Object.keys(mine));
       applyView(v);
-      setNotice(SUBMITTED_BY_OTHER(v.submission.submittedByName ?? 'Someone'));
+      if (v.submission?.status === 'submitted') setNotice(SUBMITTED_BY_OTHER(v.submission.submittedByName ?? 'Someone'));
+      else dispatchSave({ type: 'stop', reason: 'blocked' });
       setNotSaved(lines);
       return;
     }
-    if (v.writeBlockedReason) {
-      const lines = notSavedLines(Object.keys(mine));
-      applyView(v);
-      setNotSaved(lines);
-      dispatchSave({ type: 'stop', reason: 'blocked' });
-      return;
-    }
-    let fields = old;
-    let carriedBase = base;
-    let carriedMine = mine;
-    let dropped: readonly string[] = [];
-    if (code === 'FORM_CHANGED' || v.form.version !== versionRef.current) {
-      fields = v.form.fields;
-      const carried = carryForNewVersion(fields, base, mine);
-      carriedBase = carried.base;
-      carriedMine = carried.mine;
-      dropped = carried.dropped;
-      setNotSaved(notSavedLines(carried.dropped));
+    const r = reconcileTransition(
+      { fields: fieldsRef.current, version: versionRef.current, base, inputs: inputsRef.current, touched: touchedRef.current, lastValid: lastValidRef.current },
+      mine, mineOverride !== undefined, v, code,
+    );
+    if (r.formChanged) {
+      // Before the fields change: the dropped answers are named from the old version.
+      setNotSaved(notSavedLines(r.dropped));
       setNotice('The office changed this form. Check your answers.');
     }
-    const theirs = v.submission?.values ?? {};
-    // A recovered submit's changes aren't in the inputs yet: rebuild those inputs from them.
-    const mineInputs = mineOverride ? inputsFromValues(fields, nonNull(carriedMine)) : inputsRef.current;
-    // A live merge keeps every touched input (a half-typed number isn't in `mine`); a recovered submit has only its changes.
-    const ids = new Set(fields.map((f) => f.id));
-    // A field the new version can't take (carryForNewVersion's `dropped`) leaves the touched set: its input follows
-    // the merged value and it is never sent (its old answer is listed under "Not saved").
-    const droppedIds = new Set(dropped);
-    const touched = mineOverride
-      ? new Set(Object.keys(carriedMine))
-      : new Set([...touchedRef.current, ...Object.keys(carriedMine)].filter((id) => ids.has(id) && !droppedIds.has(id)));
-    const merged = mergeIntoInputs(fields, carriedBase, carriedMine, theirs, mineInputs, touched, lastValidRef.current);
     viewRef.current = v;
-    fieldsRef.current = fields;
-    versionRef.current = v.form.version;
-    baseRef.current = theirs;
-    revisionRef.current = v.submission?.revision ?? 0;
-    touchedRef.current = touched;
-    // Untouched numbers follow the merged value (a later half-typed edit never sends a stale last-valid).
-    lastValidRef.current = merged.lastValid;
-    setInputs(merged.inputs);
+    fieldsRef.current = r.fields;
+    versionRef.current = r.version;
+    baseRef.current = r.base;
+    revisionRef.current = r.revision;
+    touchedRef.current = r.touched;
+    lastValidRef.current = r.lastValid;
+    setInputs(r.inputs);
     setLoad({ kind: 'ok', view: v });
-    if (merged.foreignChange && !bannerShown.current) {
+    if (r.foreignChange && !bannerShown.current) {
       bannerShown.current = true;
       setNotice(FOREIGN_CHANGE);
     }
@@ -300,22 +257,22 @@ export function FormFillClient({
   useEffect(() => {
     reconcileRef.current = reconcile;
   }, [reconcile]);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (rereadRef.current) clearTimeout(rereadRef.current);
-      rereadRef.current = null;
-    };
-  }, []);
 
   const currentChanges = useCallback(
     () => buildChanges(fieldsRef.current, inputsRef.current, touchedRef.current, lastValidRef.current),
     [],
   );
+  /** Something here would still change the row (a landed "12." with its 12 saved doesn't count). */
+  const unsaved = useCallback(
+    () => pendingRef.current !== null || Object.keys(unsavedChanges(currentChanges(), baseRef.current)).length > 0,
+    [currentChanges],
+  );
 
-  /** One PUT; resolves true only when it landed. */
-  const sendDraft = useCallback(async (kind: 'send_new' | 'send_retry'): Promise<boolean> => {
+  /**
+   * One PUT; resolves true only when it landed. `leave` (hidden / pagehide / unmount, ruling R1b) adds
+   * `leave: true` and each changed field's last-seen base, so a newer row merges field-wise instead of STALE.
+   */
+  const sendDraft = useCallback(async (kind: 'send_new' | 'send_retry', leave = false): Promise<boolean> => {
     let body = kind === 'send_retry' ? pendingRef.current : null;
     if (!body) {
       const changes = currentChanges();
@@ -337,7 +294,8 @@ export function FormFillClient({
     syncFlags();
     dispatchSave({ type: 'sent', now: Date.now() });
     setPhase('saving');
-    const text = JSON.stringify(body);
+    if (leave) writeLeaveMark(markKey, body.changes);
+    const text = JSON.stringify(leave ? { ...body, leave: true, bases: leaveBases(body.changes, baseRef.current) } : body);
     const flight = (async () => {
       let res: Response | null = null;
       try {
@@ -350,16 +308,23 @@ export function FormFillClient({
       const env = res ? await res.json().catch(() => null) : null;
       const sent = body!;
       if (res && res.ok && env?.success) {
-        revisionRef.current = Number(env.data.revision);
-        const r = afterLanded(fieldsRef.current, baseRef.current, sent.changes, inputsRef.current, touchedRef.current);
+        const revision = Number(env.data.revision);
+        // A leave save may skip fields a colleague changed: only what it applied counts as landed.
+        const out = leave ? leaveOutcome(sent.changes, sent.baseRevision, revision, env.data.skipped) : { merged: false, applied: sent.changes };
+        revisionRef.current = revision;
+        const r = afterLanded(fieldsRef.current, baseRef.current, out.applied, inputsRef.current, touchedRef.current);
         baseRef.current = r.base;
         touchedRef.current = r.touched;
         pendingRef.current = null;
+        if (leave) clearLeaveMark(markKey);
         syncFlags();
-        setSavedAt(String(env.data.savedAt));
+        setSavedAt(env.data.savedAt ? String(env.data.savedAt) : new Date().toISOString());
         setSavedByOther(null);
-        setPhase('saved');
+        // After `Clear answers` lands nothing is answered: the line goes blank, like the card's "Not started".
+        setPhase(Object.keys(r.base).length === 0 ? 'blank' : 'saved');
         dispatchSave({ type: 'landed' });
+        // Merged over a newer row while this page stayed open (hidden, then back): re-read it.
+        if (out.merged) await reconcile(null);
         return true;
       }
       const status = res?.status ?? null;
@@ -395,38 +360,18 @@ export function FormFillClient({
     const landed = await flight;
     flightRef.current = null;
     return landed;
-  }, [currentChanges, dispatchSave, formId, jobId, notSavedLines, reconcile, savedAt, syncFlags, visitId]);
-
-  // Autosave timer: wake at the machine's next due time.
+  }, [currentChanges, dispatchSave, formId, jobId, markKey, notSavedLines, reconcile, savedAt, syncFlags, visitId]);
   useEffect(() => {
-    const wake = nextWakeAt(save, dirty);
-    if (wake === null) return;
-    const t = setTimeout(() => {
-      if (rereadRef.current || rereadingRef.current) return;
-      const action = saveDue(saveRef.current, Date.now(), touchedRef.current.size > 0 || pendingRef.current !== null);
-      if (action) void sendDraft(action);
-    }, Math.max(0, wake - Date.now()));
-    return () => clearTimeout(t);
-  }, [save, dirty, sendDraft]);
-
-  // hidden / pagehide save at once (bypassing the 3 s floor, keeping one in flight).
-  useEffect(() => {
-    const flush = () => {
-      if (touchedRef.current.size === 0 && pendingRef.current === null) return;
-      dispatchSave({ type: 'flush' });
-      const action = saveDue(saveRef.current, Date.now(), true);
-      if (action) void sendDraft(action);
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') flush();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', flush);
+    mountedRef.current = true;
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', flush);
+      mountedRef.current = false;
+      if (rereadRef.current) clearTimeout(rereadRef.current);
+      rereadRef.current = null;
     };
-  }, [dispatchSave, sendDraft]);
+  }, []);
+  const { leaving, leaveTo } = useFormSaveEffects({
+    saveRef, touchedRef, pendingRef, flightRef, rereadRef, rereadingRef, mountedRef, save, dirty, dispatchSave, sendDraft, reconcile, unsaved,
+  });
 
   const submitFlow = useCallback(async (intent: SubmitIntent | null) => {
     let stored = intent;
@@ -481,14 +426,37 @@ export function FormFillClient({
     await reconcile(code, sent.payload.changes, sent.base);
   }, [applyView, currentChanges, dispatchSave, formId, intentId, jobId, keyDispatch, reconcile, refetch, visitId]);
 
-  // Load, then recover a pending submit of this form on this visit (the page's own intent).
+  // Load (once per mount: StrictMode's first run is discarded, so its late answer can't reset early edits).
   useEffect(() => {
+    let live = true;
+    const quiet = () => !live || touchedRef.current.size > 0 || pendingRef.current !== null || saveRef.current.locked;
     void (async () => {
       const r = await getView(jobId, formId, visitId);
-      if (r.view) applyView(r.view);
-      else setLoad(r.status === 404 || r.code === 'FORM_ARCHIVED' ? { kind: 'gone' } : { kind: 'error' });
+      if (!live) return;
+      if (!r.view) {
+        setLoad(r.status === 404 || r.code === 'FORM_ARCHIVED' ? { kind: 'gone' } : { kind: 'error' });
+        return;
+      }
+      const waiting = leaveMarkPending(readLeaveMark(markKey), Date.now(), r.view.submission?.values ?? {});
+      applyView(r.view, !waiting);
+      // R1: the last page's leave-time save (a reload within the debounce) may land after this read. Read again,
+      // briefly, before saying "Saved"; an edit here stops it (its save merges with that row anyway).
+      for (let i = 0; waiting && i < 4; i++) {
+        await sleep(750);
+        if (quiet()) break;
+        const again = await getView(jobId, formId, visitId);
+        if (quiet()) break;
+        if (again.view && !leaveMarkPending(readLeaveMark(markKey), Date.now(), again.view.submission?.values ?? {})) {
+          applyView(again.view);
+          break;
+        }
+      }
+      if (live) clearLeaveMark(markKey);
     })();
-  }, [jobId, formId, visitId, applyView]);
+    return () => {
+      live = false;
+    };
+  }, [jobId, formId, visitId, applyView, markKey]);
   // The mount recovery of this page's own stored submit intent (the `recovery` ref above).
   useEffect(() => {
     if (load.kind !== 'ok' || keyState.phase !== 'unknown') return;
@@ -563,128 +531,15 @@ export function FormFillClient({
   }
 
   if (load.kind === 'loading') return <Skeleton className="h-64 w-full rounded-xl" />;
-  if (load.kind === 'gone' || load.kind === 'error') {
-    return (
-      <Card>
-        <CardContent className="space-y-4 py-6">
-          <p role="alert" className="text-[17px] font-medium">{load.kind === 'gone' ? GONE : "Couldn't load this form."}</p>
-          <Link href={`/tech/jobs/${jobId}`} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] text-link">
-            <ArrowLeft className="size-4" /> Back to job
-          </Link>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const v = load.view;
-  const submitted = v.submission?.status === 'submitted' || phase === 'submitted';
-  const locked = keyState.phase === 'sent' || keyState.phase === 'unknown';
-  const writable = v.canWrite && !submitted && !locked && from === null && save.stop !== 'blocked' && save.stop !== 'signed_out' && save.stop !== 'submitted';
-  const back = backHref({ jobId, formId, visitId, myVisit: v.myVisit, from });
-  const unparsed = unparsedIds(v.form.fields, inputs).length;
-  const line = statusLine({
-    phase: locked ? (keyState.phase === 'sent' ? 'submit_sent' : 'submit_unknown') : submitted ? 'submitted' : phase,
-    savedAt, savedByOther, unparsedCount: submitted ? 0 : unparsed,
-    submittedAt: v.submission?.submittedAt ?? null, submittedByName: v.submission?.submittedByName ?? null, now: new Date(),
-  });
-  const reasons = readOnlyCopy(v.writeBlockedReason, { myRowCancelled: v.myRowCancelled });
-
   return (
-    <div className="space-y-4 pb-28">
-      <Link href={back.href} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] text-link">
-        <ArrowLeft className="size-4" /> {back.label}
-      </Link>
-      <header className="space-y-1">
-        <h1 className="text-[20px] font-semibold">{v.form.name}</h1>
-        {v.form.description && <p className="text-[15px] text-muted-foreground">{v.form.description}</p>}
-        {line && <p className="text-[13px] text-muted-foreground">{line}</p>}
-      </header>
-
-      {v.submittedOn && !submitted && from === null && (
-        <p className="rounded-md border border-border bg-surface-raised px-3 py-2 text-[15px]">
-          {SUBMITTED_ON(v.submittedOn.appointmentNumber, dayShort(v.submittedOn.submittedAt))}{' '}
-          <Link className="text-link underline" href={fillHref(jobId, formId, v.submittedOn.appointmentId, visitId)}>
-            View visit #{v.submittedOn.appointmentNumber}&apos;s answers
-          </Link>
-        </p>
-      )}
-      {reasons.map((r) => (
-        <p key={r} role="status" className="rounded-md border border-border bg-surface-raised px-3 py-2 text-[15px]">{r}</p>
-      ))}
-      {notice && <p role="status" className="rounded-md border border-warning-border bg-warning-light px-3 py-2 text-[15px]">{notice}</p>}
-      {phase === 'signed_out' && (
-        <Link href="/tech-login" className="inline-flex h-11 items-center rounded-xl border px-4 text-[15px]">Sign in</Link>
-      )}
-      {notSaved.length > 0 && (
-        <ul className="space-y-0.5 text-[13px] text-muted-foreground">{notSaved.map((l) => <li key={l}>{l}</li>)}</ul>
-      )}
-      {topLine && <p role="alert" className="text-[15px] text-danger-strong">{topLine}</p>}
-
-      <Card>
-        <CardContent className="space-y-4 py-4">
-          {v.form.fields.map((f) => (
-            <div key={f.id} id={`q-${f.id}`}>
-              <FormFieldInput
-                field={f}
-                value={inputs[f.id]}
-                readOnly={!writable}
-                highlight={highlights[f.id] ?? null}
-                onChange={(x) => change(f, x)}
-                onBlur={() => {
-                  setTyping(false);
-                  dispatchSave({ type: 'flush' });
-                }}
-                onFocusInput={() => setTyping(true)}
-              />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {writable && answered && (
-        <Button variant="outline" className="h-11 rounded-xl px-4 text-[15px]" onClick={() => setClearOpen(true)}>Clear answers</Button>
-      )}
-
-      <footer className={`${typing ? '' : 'sticky bottom-0'} space-y-2 border-t bg-background py-3`}>
-        <p aria-live="polite" className="text-[13px] text-muted-foreground">{line === 'Saving…' ? '' : line}</p>
-        {phase === 'bad_request' && (
-          <Button variant="outline" className="h-11 rounded-xl" onClick={() => dispatchSave({ type: 'try_again' })}>Try again</Button>
-        )}
-        {keyState.phase === 'unknown' && (
-          <Button variant="outline" className="h-11 rounded-xl" onClick={() => void submitFlow(keyState.body as SubmitIntent)}>Try again</Button>
-        )}
-        {submitted ? (
-          <Link href={back.href} className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-primary text-[16px] text-primary-foreground">
-            {back.label}
-          </Link>
-        ) : writable ? (
-          <Button className="h-12 w-full rounded-xl text-[16px]" onClick={() => void onSubmitTap()}>Submit form</Button>
-        ) : null}
-      </footer>
-
-      <Sheet open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <SheetContent side="bottom" className="gap-3 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <SheetHeader>
-            <SheetTitle className="text-[17px]">Submit “{v.form.name}”?</SheetTitle>
-            <SheetDescription className="text-[15px]">After this, only the office can reopen it.</SheetDescription>
-          </SheetHeader>
-          <div className="flex flex-col gap-2 px-4">
-            <Button className="h-12 rounded-xl text-[16px]" onClick={() => void confirmSubmit()}>Submit</Button>
-            <Button variant="outline" className="h-12 rounded-xl text-[16px]" onClick={() => setConfirmOpen(false)}>Go back</Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-      <Sheet open={clearOpen} onOpenChange={setClearOpen}>
-        <SheetContent side="bottom" className="gap-3 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <SheetHeader>
-            <SheetTitle className="text-[17px]">Clear all answers on this form?</SheetTitle>
-          </SheetHeader>
-          <div className="flex flex-col gap-2 px-4">
-            <Button className="h-12 rounded-xl text-[16px]" onClick={clearAnswers}>Clear answers</Button>
-            <Button variant="outline" className="h-12 rounded-xl text-[16px]" onClick={() => setClearOpen(false)}>Go back</Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-    </div>
+    <FormFillView
+      load={load} jobId={jobId} formId={formId} visitId={visitId} from={from} inputs={inputs} phase={phase} savedAt={savedAt}
+      savedByOther={savedByOther} notice={notice} notSaved={notSaved} highlights={highlights} topLine={topLine} typing={typing}
+      stop={save.stop} keyPhase={keyState.phase} leaving={leaving} answered={answered} leaveTo={leaveTo}
+      onChange={change} onBlurInput={() => { setTyping(false); dispatchSave({ type: 'flush' }); }} onFocusInput={() => setTyping(true)}
+      onTryAgainDraft={() => dispatchSave({ type: 'try_again' })} onTryAgainSubmit={() => { if (keyState.phase === 'unknown') void submitFlow(keyState.body as SubmitIntent); }}
+      onSubmitTap={() => void onSubmitTap()} confirmOpen={confirmOpen} setConfirmOpen={setConfirmOpen} onConfirmSubmit={() => void confirmSubmit()}
+      clearOpen={clearOpen} setClearOpen={setClearOpen} onClear={clearAnswers}
+    />
   );
 }

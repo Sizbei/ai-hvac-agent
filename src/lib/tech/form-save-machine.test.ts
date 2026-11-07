@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextSaveState, nextWakeAt, saveDue, SAVE_IDLE, submitStep, type SaveEvent, type SaveState } from "./form-save-machine";
+import { nextSaveState, nextWakeAt, saveDue, SAVE_IDLE, settleStep, submitStep, type SaveEvent, type SaveState } from "./form-save-machine";
 
 const run = (events: SaveEvent[], s: SaveState = SAVE_IDLE) => events.reduce(nextSaveState, s);
 
@@ -76,5 +76,29 @@ describe("nextSaveState / saveDue (spec §7.3)", () => {
   });
   it("nothing dirty, nothing sent", () => {
     expect(saveDue(run([{ type: "edit", now: 0 }]), 5000, false)).toBeNull();
+  });
+});
+
+describe("settleStep (in-app leave, ruling R1a)", () => {
+  const o = { pending: false, dirty: false, flight: false, rereading: false };
+  it("nothing left → done; edits → send now, an unknown body first", () => {
+    expect(settleStep(SAVE_IDLE, o)).toBe("done");
+    expect(settleStep(SAVE_IDLE, { ...o, dirty: true })).toBe("send_new");
+    expect(settleStep(SAVE_IDLE, { ...o, dirty: true, pending: true })).toBe("send_retry");
+    const backingOff = run([{ type: "sent", now: 0 }, { type: "unknown", now: 10, retryAfterMs: null }]);
+    expect(settleStep(backingOff, { ...o, pending: true })).toBe("send_retry");
+  });
+  it("a write in flight or a re-read → wait (a STALE merge re-saves before leaving)", () => {
+    expect(settleStep(run([{ type: "sent", now: 0 }]), { ...o, dirty: true })).toBe("wait");
+    expect(settleStep(SAVE_IDLE, { ...o, flight: true })).toBe("wait");
+    expect(settleStep(SAVE_IDLE, { ...o, dirty: true, rereading: true })).toBe("wait");
+  });
+  it("a stop that needs the technician → fail (stay); blocked, submitted or a locked submit → done", () => {
+    for (const reason of ["signed_out", "too_large", "bad_request"] as const) {
+      expect(settleStep(run([{ type: "stop", reason }]), { ...o, dirty: true })).toBe("fail");
+    }
+    expect(settleStep(run([{ type: "stop", reason: "blocked" }]), { ...o, dirty: true })).toBe("done");
+    expect(settleStep(run([{ type: "submitted" }]), { ...o, dirty: true })).toBe("done");
+    expect(settleStep(run([{ type: "lock" }]), { ...o, dirty: true, flight: true })).toBe("done");
   });
 });

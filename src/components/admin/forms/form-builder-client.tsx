@@ -260,6 +260,15 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     focusSoon(atEnd ? other : same);
   }
 
+  // A new question takes focus on its label (the old row's button would keep it otherwise).
+  function add(after: number): void {
+    if (!draft) return;
+    const fields = addField(draft.fields, after);
+    edit('form', { ...draft, fields });
+    const added = fields[after + 1];
+    if (added) focusSoon(`label-${added.id}`);
+  }
+
   function remove(index: number): void {
     if (!draft) return;
     const r = removeField(draft.fields, index);
@@ -378,7 +387,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
               errors={shown.filter((e) => e.target === f.id).map((e) => e.message)}
               onChange={(next) => editField(i, next)}
               onMove={(dir) => move(i, dir)}
-              onAddBelow={() => edit('form', { ...draft, fields: addField(draft.fields, i) })}
+              onAddBelow={() => add(i)}
               onRemove={() => remove(i)}
             />
           ))}
@@ -387,12 +396,12 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
           {undo && (
             <p role="status" className="flex items-center gap-2 text-sm">
               Question removed.
-              <Button id="undo-removed" type="button" size="sm" variant="ghost" onClick={() => { setDraft({ ...draft, fields: restoreField(draft.fields, undo) }); setUndo(null); }}>
+              <Button id="undo-removed" type="button" size="sm" variant="ghost" onClick={() => { setDraft({ ...draft, fields: restoreField(draft.fields, undo) }); setUndo(null); focusSoon(`label-${undo.field.id}`); }}>
                 Undo
               </Button>
             </p>
           )}
-          <Button type="button" variant="outline" size="sm" disabled={draft.fields.length >= FORM_LIMITS.maxFields} onClick={() => edit('form', { ...draft, fields: addField(draft.fields, draft.fields.length - 1) })}>
+          <Button type="button" variant="outline" size="sm" disabled={draft.fields.length >= FORM_LIMITS.maxFields} onClick={() => add(draft.fields.length - 1)}>
             <Plus className="size-4" /> Add question
           </Button>
           <p className="text-xs text-muted-foreground">Need a photo? Ask technicians to add it in the technician app&apos;s Photos card.</p>

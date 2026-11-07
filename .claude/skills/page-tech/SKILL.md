@@ -347,8 +347,9 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
 
 **Forms + site view (M3d, `/tech/jobs/[id]/forms/[formId]`, `/tech/jobs/[id]/site`):**
 - **Files:** pages `src/app/tech/jobs/[id]/forms/[formId]/page.tsx`, `src/app/tech/jobs/[id]/site/page.tsx` ·
-  components `src/components/tech/forms/` (`forms-card.tsx`, `form-fill-client.tsx`,
-  `form-field-input.tsx`), `src/components/tech/site/` (`site-card.tsx`, `site-page-client.tsx`,
+  components `src/components/tech/forms/` (`forms-card.tsx`, `form-fill-client.tsx` (state and
+  saving), `form-fill-view.tsx` (markup), `use-form-save-effects.ts` (autosave timer, leave saves,
+  `leaveTo`), `form-fill-io.ts` (reads, leave mark), `form-fill-sheets.tsx`, `form-field-input.tsx`), `src/components/tech/site/` (`site-card.tsx`, `site-page-client.tsx`,
   `fetch-site.ts`), `job-photos-card.tsx` · writers `src/lib/tech/form-writes.ts`
   (`saveFormDraft`, `submitForm`), `src/lib/tech/photo-writes.ts` (`addJobPhoto`) · reads
   `src/lib/tech/form-reads.ts`, `src/lib/tech/site-queries.ts` · route guards
@@ -370,7 +371,7 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   submitted with this key's derived `submit_key` answers 200) runs before `formGateFail`, so a
   committed submit whose response was lost still answers 200 after the visit ended or the job
   was cancelled. A pre-read revision other than `baseRevision` is STALE before any decrypt.
-- **Visits counts** = live, or progressed/completed work on it, or a submission. Migration 0058
+- **Visit counts** = live, or progressed/completed work on it, or a submission. Migration 0058
   re-creates `sync_request_appointment()` with ONE added predicate: a visit with any
   `form_submissions` row (an empty draft included) is kept (times nulled, lead demoted) instead
   of deleted. `form_submissions.appointment_id` is NO ACTION.
@@ -387,15 +388,45 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   save or submit cancels a scheduled re-read, and nothing re-reads a submitted page or runs
   after unmount), and a recovered submit's changes are folded into the inputs as touched edits
   first, so answers typed during the back-off survive the re-read. On FORM_CHANGED a field the
-  new version drops leaves the touched set and is listed under "Not saved".
+  new version drops leaves the touched set and is listed under "Not saved". The re-read merge
+  itself is the pure `reconcileTransition` (`form-fill-state.ts`, tested); `reconcileOnce` only
+  assigns its result to the refs.
+- **Leaving (ruling R1, refines spec §4.2):** (a) `Back to job`, `Back` and `View visit #N's
+  answers` go through `leaveTo`: it waits for the write in flight and any re-read, sends what's
+  left (a STALE merge re-saves on the merged row; pure `settleStep` in `form-save-machine.ts`)
+  and navigates only when nothing is left; meanwhile the link reads "Saving…". A save that
+  fails (signed out, too large, bad request, network) keeps the page with its line; a blocked
+  or submitted page navigates at once. (b) Saves sent as the page is left (hidden, pagehide, or
+  an in-app unmount such as the browser's Back) carry `leave: true` and `bases` (the value this
+  page last saw for each changed field, null = absent). On a revision mismatch the server merges
+  field-wise under the same lock: it applies a field only when the stored value equals its base
+  and skips fields a colleague changed, answering 200 `{ revision, skipped }`. A non-leave save
+  keeps STALE. If the page is still open when a leave save merges, it re-reads (`leaveOutcome`).
+  (c) A leave save writes a `tech:form:leave:<formId>:<aid>` sessionStorage mark (removed when
+  it lands). A load that finds a recent mark and a row that doesn't hold the mark's changes yet
+  (a revision can't tell: a colleague's save moves it too) doesn't say "Saved" over the read;
+  it reads again for up to 3 s and applies the row that holds them (a skipped field never
+  will: the line stays blank until the next save). Without a mark the
+  loaded draft shows "Saved · <time>" as the spec table says. After `Clear answers` lands the
+  line is blank.
+- **Read-only answers:** an erased row shows "Answers removed" and no field values; an
+  unreadable one "These answers can't be shown." (`answersHidden`). `±` never takes focus
+  (`onPointerDown` / `onMouseDown` preventDefault), so it works while the number is focused and
+  sits beside the input.
+- **Unreadable job (ruling R3):** every technician form route answers "This job isn't yours."
+  for a job the technician can't read; a missing or foreign form on a readable job is "This
+  form is no longer on this job.", which the fill page also shows for any 404.
   The submit intent lives in `tech:estimate:<rid>:intents` as `form:submit:<formId>:<aid>`;
   the fill page re-sends only an intent restored at mount. A live submit is never re-sent
   automatically: a lost response locks the page on "Your last change may not have saved. Try
   again." and only Try again sends it again (same key).
 - **Close-out:** required forms not submitted on any visit that counts show as non-blocking
-  "Fill in “…”" links in `close-out-sheet.tsx`; nothing blocks (row 126 deferred).
+  "Fill in “…”" links in `close-out-sheet.tsx` (native jobs: the sheet takes `native` and
+  `reminderVisible` decides); nothing blocks (row 126 deferred). The Forms card on a closed job
+  with no visit to show says "This job is closed."
 - **Site:** match by `location_id`, else by `normalizeAddress` of the request's own address;
-  never the customer's other address, never a fallback. Membership `member | none | withheld`.
+  never the customer's other address, never a fallback. Membership `member | none | withheld`;
+  an erased customer is always `withheld`, never "Not a member." (ruling R2).
   `isLead` comes from `isActiveLead` (`ownership.ts`, shared with the M3c estimates GET); this
   job's open native estimates are links for the lead only (chevron row, as other tech links).
 - **Photos:** quality per device (`tech:photo-quality`), resized on the phone, PDFs via
