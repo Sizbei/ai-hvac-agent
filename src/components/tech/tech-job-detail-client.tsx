@@ -12,6 +12,7 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { EstimatesCard } from '@/components/tech/estimates/estimates-card';
 import { EquipmentCard } from '@/components/tech/equipment/equipment-card';
 import { FormsCard } from '@/components/tech/forms/forms-card';
+import { SiteCard } from '@/components/tech/site/site-card';
 import { cardVisit, fillHref } from '@/lib/tech/form-copy';
 import { unsubmittedRequired, type TechFormsView } from '@/lib/tech/form-view';
 import { materialOverlapWarning, soldPricebookItemIds } from '@/lib/tech/material-overlap';
@@ -472,6 +473,7 @@ export function TechJobDetailClient({
         }}
       />
       <FormsCard jobId={id} visitId={formsVisit} summaryFailed={summaryFailed} refreshKey={refreshKey} onLoaded={setFormsView} />
+      <SiteCard jobId={id} />
       <EstimatesCard jobId={id} refreshKey={refreshKey} onLoaded={onEstimatesLoaded} />
 
       {loadError && (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { JOB_NOT_FOUND, PHOTO_UPLOAD_FAILED, jobLoadOutcome } from "./job-page-state";
+import { JOB_NOT_FOUND, PHOTO_UPLOAD_FAILED, isImageMime, jobLoadOutcome } from "./job-page-state";
 
 describe("jobLoadOutcome", () => {
   it("2xx with success is ok", () => expect(jobLoadOutcome(200, true)).toBe("ok"));
@@ -18,6 +18,8 @@ describe("jobLoadOutcome", () => {
 describe("copy", () => {
   it("not found and photo failure lines", () => {
     expect(JOB_NOT_FOUND).toBe("This job isn't yours, or it no longer exists.");
-    expect(PHOTO_UPLOAD_FAILED).toBe("Couldn't upload that photo. Try again.");
+    expect(PHOTO_UPLOAD_FAILED).toBe("Couldn't upload that photo.");
+    expect(isImageMime("image/heic")).toBe(true);
+    expect(isImageMime("application/pdf")).toBe(false);
   });
 });

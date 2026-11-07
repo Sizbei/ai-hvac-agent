@@ -25,6 +25,7 @@ import { StatusBadge } from '@/components/admin/status-badge';
 import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
 import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
 import { AttachmentsSection } from '@/components/admin/attachments-section';
+import { RequestFormsSection } from '@/components/admin/request-forms-section';
 import {
   allowedTransitions,
   MANUAL_TARGET_STATUSES,
@@ -1157,6 +1158,13 @@ export function RequestDetailSheet({
                   void refreshDetail();
                   onAssigned();
                 }}
+              />
+
+              <RequestFormsSection
+                key={`forms-${detail.id}`}
+                requestId={detail.id}
+                requestStatus={detail.status}
+                refreshKey={[detail.status, detail.currentVisit.kind].join('|')}
               />
 
               <section>

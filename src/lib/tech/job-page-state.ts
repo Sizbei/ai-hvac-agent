@@ -15,5 +15,10 @@ export function jobLoadOutcome(status: number | null, success: boolean): JobLoad
 export const JOB_NOT_FOUND = "This job isn't yours, or it no longer exists.";
 export const JOB_NOT_FOUND_BACK = "Back to my jobs";
 
-/** Any failed photo upload (server text is never shown). */
-export const PHOTO_UPLOAD_FAILED = "Couldn't upload that photo. Try again.";
+/** A failed upload (server text is never shown); the card offers Try again and Discard (M3d spec §7.7). */
+export const PHOTO_UPLOAD_FAILED = "Couldn't upload that photo.";
+export const FILE_UPLOAD_FAILED = "Couldn't upload that file.";
+export const UPLOAD_CUSTOMER_REMOVED = "This job's customer was removed.";
+
+/** Image rows render as thumbnails; anything else (PDFs) as a file tile. */
+export const isImageMime = (mime: string): boolean => mime.startsWith("image/");
