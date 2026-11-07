@@ -30,7 +30,7 @@ vi.mock("@/lib/crypto", () => ({
   },
 }));
 
-import { createForm, missingRequiredFormsSql, reopenSubmission, requestSubmissionsSql, toOfficeSubmission, updateForm } from "./form-queries";
+import { createForm, getForm, getRequestForms, listForms, missingRequiredFormsSql, reopenSubmission, requestSubmissionsSql, toOfficeSubmission, updateForm } from "./form-queries";
 import { uuidArraySql } from "@/lib/db/sql-arrays";
 import { officeId } from "@/lib/http/idempotency";
 import type { FormDefinition } from "@/lib/forms/form-schema";
@@ -70,6 +70,8 @@ describe("createForm (spec §4.1)", () => {
   it("a replay (same token) returns the existing id with created:false; a full org → limit_reached", async () => {
     readQueue.push([], [{ id: "x" }]);
     expect(await createForm(ORG, ME, TOKEN, def())).toMatchObject({ ok: true, created: false });
+    expect(render(executed[1])).toContain("AND organization_id = $2::uuid");
+    expect(params(executed[1])[1]).toBe(ORG);
     readQueue.push([], []);
     expect(await createForm(ORG, ME, TOKEN, def())).toEqual({ ok: false, reason: "limit_reached" });
   });
@@ -92,8 +94,13 @@ describe("updateForm", () => {
     expect(render(executed[0])).toContain("SET version = version + 1, updated_at = now(), name = $");
     expect(render(executed[0])).toContain("WHERE id = $");
     expect(render(executed[0])).toContain("AND version = $");
+    expect(render(executed[0])).toMatch(/WHERE id = \$\d+::uuid AND organization_id = \$\d+::uuid AND version = \$\d+::int/);
+    expect(params(executed[0])).toContain(ORG);
+    executed.length = 0;
     readQueue.push([], [{ "?column?": 1 }]);
     expect(await updateForm(ORG, FID, { version: 2, active: false })).toEqual({ ok: false, reason: "stale" });
+    expect(render(executed[1])).toContain("AND organization_id = $2::uuid");
+    expect(params(executed[1])[1]).toBe(ORG);
     readQueue.push([], []);
     expect(await updateForm(ORG, FID, { version: 2, active: false })).toEqual({ ok: false, reason: "not_found" });
   });
@@ -112,12 +119,60 @@ describe("reopenSubmission (spec §5.5)", () => {
     expect(render(executed[0])).toContain("WHERE id = $1::uuid AND organization_id = $2::uuid AND service_request_id = $3::uuid");
     readQueue.push([], [{ status: "draft", revision: 5, erased: false, form_id: FID, appointment_id: "a" }]);
     expect(await reopenSubmission(ORG, RID, SID, 4)).toMatchObject({ ok: true, changed: false, revision: 5 });
+    expect(render(executed[2])).toContain("WHERE id = $1::uuid AND organization_id = $2::uuid AND service_request_id = $3::uuid");
     readQueue.push([], [{ status: "submitted", revision: 6, erased: true }]);
     expect(await reopenSubmission(ORG, RID, SID, 4)).toEqual({ ok: false, reason: "answers_removed" });
     readQueue.push([], [{ status: "submitted", revision: 6, erased: false }]);
     expect(await reopenSubmission(ORG, RID, SID, 4)).toEqual({ ok: false, reason: "stale" });
     readQueue.push([], []);
     expect(await reopenSubmission(ORG, RID, SID, 4)).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("create replay, dedupe, corrupt snapshots", () => {
+  it("a name collision on a replayed token returns the existing row; otherwise name_taken", async () => {
+    failNext.error = unique;
+    readQueue.push([{ id: "x" }]);
+    expect(await createForm(ORG, ME, TOKEN, def())).toMatchObject({ ok: true, created: false });
+    failNext.error = unique;
+    readQueue.push([]);
+    expect(await createForm(ORG, ME, TOKEN, def())).toEqual({ ok: false, reason: "name_taken" });
+  });
+
+  it("job type ids are stored deduplicated, create and update", async () => {
+    readQueue.push([{ n: 1 }], [{ id: "x" }]);
+    await createForm(ORG, ME, TOKEN, def({ jobTypeIds: [JT, JT.toUpperCase()] }));
+    expect(params(executed[1]).filter((p) => p === JT)).toHaveLength(1);
+    executed.length = 0;
+    readQueue.push([{ n: 1 }], [{ version: 3 }]);
+    await updateForm(ORG, FID, { version: 2, definition: def({ jobTypeIds: [JT, JT] }) });
+    expect(params(executed[1]).filter((p) => p === JT)).toHaveLength(1);
+  });
+
+  it("a snapshot that fails to parse reads unreadable with null values", () => {
+    const o = toOfficeSubmission({
+      id: SID, form_id: FID, form_name: "M", form_version: 1, appointment_id: "a", appointment_number: 1, visit_live: true,
+      status: "submitted", revision: 2, erased: false, fields: "garbage", values_encrypted: "ENC:{}", updated_at: "2026-11-07T00:00:00Z",
+    });
+    expect(o).toMatchObject({ unreadable: true, values: null, fields: [] });
+  });
+});
+
+describe("org binding on every read", () => {
+  it("listForms, getForm, getRequestForms bind organization_id to ORG; the count subquery is org-bound", async () => {
+    await listForms(ORG);
+    await getForm(ORG, FID);
+    await getRequestForms(ORG, RID);
+    expect(executed.length).toBeGreaterThanOrEqual(3);
+    for (const q of executed) {
+      expect(render(q)).toMatch(/organization_id = \$\d+::uuid/);
+      expect(params(q)).toContain(ORG);
+    }
+    expect(render(executed[0])).toContain("s.organization_id = f.organization_id");
+    expect(render(executed[0])).toContain("f.organization_id = $1::uuid");
+    expect(render(executed[1])).toContain("s.organization_id = f.organization_id");
+    expect(render(executed[1])).toContain("f.organization_id = $");
+    expect(render(executed[2])).toContain("organization_id = $2::uuid");
   });
 });
 

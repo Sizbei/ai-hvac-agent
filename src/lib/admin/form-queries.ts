@@ -17,6 +17,8 @@ type Row = Record<string, unknown>;
 const iso = (v: unknown): string => new Date(v as string | Date).toISOString();
 const isoOrNull = (v: unknown): string | null => (v == null ? null : iso(v));
 
+const dedupeIds = (ids: readonly string[]): string[] => [...new Set(ids.map((i) => i.toLowerCase()))];
+
 export const NAME_INDEX = "forms_org_name_active_unique";
 
 export interface FormRecord {
@@ -83,7 +85,7 @@ export async function getForm(org: string, id: string): Promise<{ form: FormReco
 
 /** Every id must be one of the org's job types, archived ones included. */
 export async function hasUnknownJobType(org: string, ids: readonly string[]): Promise<boolean> {
-  const unique = [...new Set(ids.map((i) => i.toLowerCase()))];
+  const unique = dedupeIds(ids);
   if (unique.length === 0) return false;
   const [r] = await readRows(sql`SELECT count(*)::int AS n FROM job_types
     WHERE organization_id = ${org}::uuid AND id = ANY(${uuidArraySql(unique)})`);
@@ -94,6 +96,10 @@ export type CreateFormResult =
   | { readonly ok: true; readonly id: string; readonly created: boolean }
   | { readonly ok: false; readonly reason: "limit_reached" | "name_taken" | "unknown_job_type" };
 
+/**
+ * The 100-form cap is a soft cap: the count and the insert are one statement but
+ * not serialized, so concurrent creates can overshoot it by a few.
+ */
 /** First valid Save (spec §4.1): id = officeId("form", org, clientToken); a replay returns the same id. */
 export async function createForm(org: string, me: string, clientToken: string, def: FormDefinition): Promise<CreateFormResult> {
   const id = officeId("form", org, clientToken);
@@ -102,12 +108,14 @@ export async function createForm(org: string, me: string, clientToken: string, d
   try {
     inserted = await readRows(sql`INSERT INTO forms (id, organization_id, name, description, fields, job_type_ids, required, created_by)
       SELECT ${id}::uuid, ${org}::uuid, ${def.name}, ${def.description}::text, ${JSON.stringify(def.fields)}::jsonb,
-        ${uuidArraySql(def.jobTypeIds.map((j) => j.toLowerCase()))}, ${def.required}, ${me}::uuid
+        ${uuidArraySql(dedupeIds(def.jobTypeIds))}, ${def.required}, ${me}::uuid
       WHERE (SELECT count(*) FROM forms WHERE organization_id = ${org}::uuid) < ${FORM_LIMITS.maxForms}
       ON CONFLICT (id) DO NOTHING RETURNING id`);
   } catch (error) {
-    if (isUniqueViolation(error, NAME_INDEX)) return { ok: false, reason: "name_taken" };
-    throw error;
+    if (!isUniqueViolation(error, NAME_INDEX)) throw error;
+    // A replay of the same token whose name now collides still resolves to the existing row.
+    const [again] = await readRows(sql`SELECT id FROM forms WHERE id = ${id}::uuid AND organization_id = ${org}::uuid`);
+    return again ? { ok: true, id, created: false } : { ok: false, reason: "name_taken" };
   }
   if (inserted.length > 0) return { ok: true, id, created: true };
   const [existing] = await readRows(sql`SELECT id FROM forms WHERE id = ${id}::uuid AND organization_id = ${org}::uuid`);
@@ -134,7 +142,7 @@ export async function updateForm(org: string, id: string, patch: FormPatch): Pro
       sql`name = ${d.name}`,
       sql`description = ${d.description}::text`,
       sql`fields = ${JSON.stringify(d.fields)}::jsonb`,
-      sql`job_type_ids = ${uuidArraySql(d.jobTypeIds.map((j) => j.toLowerCase()))}`,
+      sql`job_type_ids = ${uuidArraySql(dedupeIds(d.jobTypeIds))}`,
       sql`required = ${d.required}`,
     );
   }
@@ -156,7 +164,11 @@ export type ReopenResult =
   | { readonly ok: true; readonly revision: number; readonly changed: boolean; readonly formId: string; readonly appointmentId: string }
   | { readonly ok: false; readonly reason: "not_found" | "answers_removed" | "stale" };
 
-/** Office reopen (spec §5.5): submitted → draft under a revision CAS. */
+/**
+ * Office reopen (spec §5.5): submitted → draft under a revision CAS. On the
+ * fallback, erased is checked before draft on purpose: an erased row is a
+ * removed-answers state and must never read as a plain draft.
+ */
 export async function reopenSubmission(org: string, rid: string, sid: string, revision: number): Promise<ReopenResult> {
   const [r] = await readRows(sql`UPDATE form_submissions SET status = 'draft', submitted_at = NULL, submitted_by = NULL, submit_key = NULL,
       revision = revision + 1, updated_at = now()
@@ -234,6 +246,7 @@ export function missingRequiredFormsSql(org: string, rid: string): SQL {
 
 export function toOfficeSubmission(r: Row): OfficeSubmission {
   const erased = r.erased === true;
+  const fields = parseStoredFields(r.fields);
   const dec = erased ? null : decryptValues(r.values_encrypted == null ? null : String(r.values_encrypted));
   return {
     id: String(r.id),
@@ -246,9 +259,9 @@ export function toOfficeSubmission(r: Row): OfficeSubmission {
     status: r.status === "submitted" ? "submitted" : "draft",
     revision: Number(r.revision),
     erased,
-    unreadable: dec === "unreadable",
-    fields: parseStoredFields(r.fields) ?? [],
-    values: dec === null || dec === "unreadable" ? null : dec,
+    unreadable: dec === "unreadable" || (!erased && fields === null),
+    fields: fields ?? [],
+    values: fields === null || dec === null || dec === "unreadable" ? null : dec,
     updatedAt: iso(r.updated_at),
     updatedByName: r.updated_by_name == null ? null : String(r.updated_by_name),
     submittedAt: isoOrNull(r.submitted_at),
