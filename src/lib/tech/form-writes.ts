@@ -297,7 +297,7 @@ export async function submitForm(a: FormActor, raw: SubmitInput, ids: { submitKe
   const up = updated![0];
   if (up) return { ok: true, submissionId: String(up.id), revision: Number(up.revision), submittedAt: iso(up.submitted_at) };
   const tail = toSubmissionRow(tailRows![0]);
-  const z = zeroRowOutcome(tail, await readGates(a, input), { ...input, submitKey });
+  const z = zeroRowOutcome(tail, await readGates(a, input), { formVersion: input.formVersion, baseRevision: input.baseRevision, submitKey });
   if (z.kind === "replay") return { ok: true, submissionId: tail!.id, revision: tail!.revision, submittedAt: tail!.submittedAt! };
   return z.fail;
 }

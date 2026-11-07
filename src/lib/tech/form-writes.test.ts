@@ -125,6 +125,7 @@ describe("saveFormDraft (spec §5.2)", () => {
       [row({ status: "submitted", submitted_at: T0 }), "form_submitted"],
       [row({ form_version: 2 }), "form_changed"],
       [row({ values_encrypted: "BAD" }), "answers_unreadable"],
+      [row({ fields: "nope" }), "answers_unreadable"],
     ] as const) {
       readQueue.push([r]);
       expect(await saveFormDraft(actor, draft({ baseRevision: 1 }))).toEqual({ ok: false, reason });
@@ -229,6 +230,12 @@ describe("submitForm (spec §5.3)", () => {
     readQueue.push([row({ status: "submitted", submit_key: KEY, submitted_at: T0, revision: 2 })]);
     expect(await submitForm(actor, draft({ baseRevision: 1 }), { submitKey: KEY })).toEqual({ ok: true, submissionId: SID, revision: 2, submittedAt: T0 });
     expect(batch).not.toHaveBeenCalled();
+  });
+
+  it("zero rows: a concurrent run of this submit key that committed → 200 from the tail", async () => {
+    readQueue.push([row()], [{ status: "arrived", native: true, visit_found: true, visit_live: true, my_row: true, my_live_row: true, form_found: true, form_active: true, form_version: 1 }]);
+    batch.mockResolvedValueOnce(rowsOf([], [], [], [], [row({ status: "submitted", submit_key: KEY, submitted_at: T0, revision: 2 })]));
+    expect(await submitForm(actor, draft({ baseRevision: 1 }), { submitKey: KEY })).toEqual({ ok: true, submissionId: SID, revision: 2, submittedAt: T0 });
   });
 
   it("submitted by someone else → form_submitted", async () => {
