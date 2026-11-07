@@ -51,10 +51,19 @@ describe("the changes builder (spec §7.3)", () => {
 
 describe("merge and carry", () => {
   it("untouched inputs follow theirs; touched keep mine; banner only for a foreign change", () => {
-    const r = mergeIntoInputs(FIELDS, {}, { [TEXT.id]: "mine" }, { [TICK.id]: true, [TEXT.id]: "theirs" }, { [TEXT.id]: "mine", [TICK.id]: false }, new Set([TEXT.id]));
+    const r = mergeIntoInputs(FIELDS, {}, { [TEXT.id]: "mine" }, { [TICK.id]: true, [TEXT.id]: "theirs" }, { [TEXT.id]: "mine", [TICK.id]: false }, new Set([TEXT.id]), {});
     expect(r.inputs[TICK.id]).toBe(true);
     expect(r.inputs[TEXT.id]).toBe("mine");
     expect(r.foreignChange).toBe(true);
+  });
+  it("a merged-in number reseeds lastValid: 12 saved, their 15 merged, then my '15.' sends 15", () => {
+    const r = mergeIntoInputs(FIELDS, { [NUM.id]: 12 }, {}, { [NUM.id]: 15 }, { [NUM.id]: "12" }, new Set(), { [NUM.id]: 12 });
+    expect(r.inputs[NUM.id]).toBe("15");
+    expect(r.lastValid).toEqual({ [NUM.id]: 15 });
+    const lv = nextLastValid(r.lastValid, NUM, "15.");
+    expect(buildChanges(FIELDS, { [NUM.id]: "15." }, new Set([NUM.id]), lv)).toEqual({ [NUM.id]: 15 });
+    const gone = mergeIntoInputs(FIELDS, { [NUM.id]: 12 }, {}, {}, { [NUM.id]: "12" }, new Set(), { [NUM.id]: 12 });
+    expect(gone.lastValid).toEqual({});
   });
   it("carry drops answers that no longer fit and lists them", () => {
     const v2: FormField[] = [TICK, { ...YN, allowNa: false }];

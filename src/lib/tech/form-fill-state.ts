@@ -116,12 +116,21 @@ export function afterLanded(
 /** Merge a re-read row under my touched fields; untouched inputs follow the merged values. */
 export function mergeIntoInputs(
   fields: readonly FormField[], base: FormValues, mine: Changes, theirs: FormValues, inputs: Inputs, touched: ReadonlySet<string>,
-): { inputs: Inputs; base: FormValues; foreignChange: boolean } {
+  lastValid: Readonly<Record<string, number>>,
+): { inputs: Inputs; base: FormValues; foreignChange: boolean; lastValid: Record<string, number> } {
   const m = mergeDraft(base, mine, theirs);
   const fresh = inputsFromValues(fields, m.values);
   const out: Record<string, InputValue> = { ...fresh };
   for (const id of touched) if (id in inputs) out[id] = inputs[id]!;
-  return { inputs: out, base: theirs, foreignChange: m.foreignChange };
+  // Untouched numbers follow the merged value, so a half-typed edit never sends a stale last-valid.
+  const nextValid: Record<string, number> = { ...lastValid };
+  for (const fl of fields) {
+    if (fl.type !== "number" || touched.has(fl.id)) continue;
+    const v = m.values[fl.id];
+    if (typeof v === "number") nextValid[fl.id] = v;
+    else delete nextValid[fl.id];
+  }
+  return { inputs: out, base: theirs, foreignChange: m.foreignChange, lastValid: nextValid };
 }
 
 /** FORM_CHANGED: carry base and mine to the new fields (spec §4.4); `dropped` = answers that no longer fit. */

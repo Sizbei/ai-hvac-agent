@@ -123,7 +123,7 @@ export function formChips(f: CardForm): { readonly status: string; readonly requ
 
 /** The card's visit: `?visit=`, else my assignment's visit, else the job's active visit. */
 export function cardVisit(param: string | undefined, assignmentVisitId: string | null, activeVisitId: string | null): string | null {
-  return param ?? assignmentVisitId ?? activeVisitId ?? null;
+  return param || assignmentVisitId || activeVisitId || null;
 }
 
 /** The fill page's back link (spec §7.3). */

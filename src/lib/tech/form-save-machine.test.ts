@@ -68,6 +68,12 @@ describe("nextSaveState / saveDue (spec §7.3)", () => {
     expect(nextWakeAt(s, true)).toBeNull();
     expect(saveDue(nextSaveState(s, { type: "edit", now: 70_000 }), 80_000, true)).toBeNull();
   });
+  it("submitted is final: resume and try_again leave it alone", () => {
+    const s = run([{ type: "submitted" }]);
+    expect(nextSaveState(s, { type: "resume" }).stop).toBe("submitted");
+    expect(nextSaveState(s, { type: "try_again" }).stop).toBe("submitted");
+    expect(saveDue(nextSaveState(s, { type: "resume" }), 9000, true)).toBeNull();
+  });
   it("nothing dirty, nothing sent", () => {
     expect(saveDue(run([{ type: "edit", now: 0 }]), 5000, false)).toBeNull();
   });

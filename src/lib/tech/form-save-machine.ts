@@ -11,7 +11,7 @@ export const FLOOR_MS = 3000;
 export const FIRST_RETRY_MS = 3000;
 export const MAX_RETRY_MS = 30_000;
 
-export type StopReason = "signed_out" | "too_large" | "bad_request" | "blocked";
+export type StopReason = "signed_out" | "too_large" | "bad_request" | "blocked" | "submitted";
 
 export interface SaveState {
   readonly inFlight: boolean;
@@ -67,13 +67,13 @@ export function nextSaveState(s: SaveState, e: SaveEvent): SaveState {
       // `Couldn't save your answers.` + Try again: the same body and saveId go again now.
       return s.stop === "bad_request" ? { ...s, stop: null, retryPending: true, waitUntil: 0 } : s;
     case "resume":
-      return { ...s, stop: null };
+      return s.stop === "submitted" ? s : { ...s, stop: null };
     case "lock":
       return { ...s, locked: true };
     case "unlock":
       return { ...s, locked: false };
     case "submitted":
-      return { ...s, inFlight: false, retryPending: false, dueAt: null, immediate: false, stop: "blocked" };
+      return { ...s, inFlight: false, retryPending: false, dueAt: null, immediate: false, stop: "submitted" };
   }
 }
 
@@ -83,7 +83,9 @@ export type SubmitStep = "await_flight" | "resend_pending" | "send_submit";
  * What a confirmed Submit does next (spec §4.2 / §7.3: an unknown result is
  * retried with its own body and saveId before any newer write — the submit
  * included): wait for the write in flight, then re-send a pending draft, then
- * submit.
+ * submit. The caller must bound the re-sends (`resend_pending` can repeat
+ * while the draft keeps coming back unknown), e.g. by giving up with the
+ * "may not have saved" state after a few attempts.
  */
 export function submitStep(s: SaveState, hasPendingDraft: boolean, flightOpen: boolean): SubmitStep {
   if (s.inFlight || flightOpen) return "await_flight";

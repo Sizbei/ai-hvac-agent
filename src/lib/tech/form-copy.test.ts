@@ -70,6 +70,7 @@ describe("navigation and reminders", () => {
     expect(cardVisit("p", "a", "b")).toBe("p");
     expect(cardVisit(undefined, null, "b")).toBe("b");
     expect(cardVisit(undefined, null, null)).toBeNull();
+    expect(cardVisit("", "a", "b")).toBe("a");
   });
   it("backHref: ?visit only when it is my visit; from= returns to that visit's page", () => {
     expect(backHref({ jobId: "j", formId: "f", visitId: "v", myVisit: true, from: null })).toEqual({ label: "Back to job", href: "/tech/jobs/j?visit=v" });
