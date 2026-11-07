@@ -12,10 +12,10 @@ const INTEGRATION_SUITES = [
   "tests/api/fieldpulse-connect.test.ts",
   "tests/api/fieldpulse-job-sync.test.ts",
   "tests/api/fieldpulse-webhook-security.test.ts",
-  // Technician field-app API suites: import real DB-backed query modules
-  // (DATABASE_URL) and throw at import in the offline gate — same class as the
-  // FieldPulse suites above.
-  "tests/api/tech-photo.test.ts",
+  // Technician field-app API suite: imports real DB-backed query modules
+  // (DATABASE_URL) and throws at import in the offline gate — same class as the
+  // FieldPulse suites above. (tests/api/tech-photo.test.ts is fully mocked and
+  // runs in the unit gate.)
   "tests/api/tech-timeline.test.ts",
   // Setup guide stamps/flags against the dev DB (throwaway orgs; refuses prod).
   "tests/integration/onboarding-state.test.ts",
@@ -27,6 +27,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/hold-next-visit.test.ts",
   // M3c sell on site: estimates, bill once, equipment against the dev DB (two throwaway orgs).
   "tests/integration/field-estimate.test.ts",
+  // M3d forms + site view: writers, trigger, erase and site reads against the dev DB (throwaway orgs).
+  "tests/integration/field-forms.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the
