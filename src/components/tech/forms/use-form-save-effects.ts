@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import { sleep } from '@/components/tech/forms/form-fill-io';
-import { nextWakeAt, saveDue, settleStep, type SaveEvent, type SaveState } from '@/lib/tech/form-save-machine';
+import { nextWakeAt, saveDue, settleStep, TIMED_OUT, withDeadline, type SaveEvent, type SaveState } from '@/lib/tech/form-save-machine';
 
-/** How long an in-app leave waits for the save to settle before staying put. */
-const SETTLE_MS = 20_000;
+/** How long an in-app leave waits for the save to settle before staying put (as the read timeout). */
+const SETTLE_MS = 15_000;
 /** Sends an in-app leave makes before giving up (a STALE merge needs a second). */
 const SETTLE_SENDS = 4;
 
@@ -85,7 +85,10 @@ export function useFormSaveEffects(o: SaveRefs & {
     });
   }, [flightRef, saveRef, pendingRef, unsaved]);
 
-  /** Wait for the write in flight and any re-read, then send what's left until nothing is. False = stay. */
+  /**
+   * Wait for the write in flight and any re-read, then send what's left until nothing is. False = stay.
+   * Every wait is bounded by the deadline: a stalled connection leaves the page where it is, never on "Saving…".
+   */
   const settle = useCallback(async (): Promise<boolean> => {
     const until = Date.now() + SETTLE_MS;
     let sends = 0;
@@ -95,7 +98,7 @@ export function useFormSaveEffects(o: SaveRefs & {
         // A re-read is backing off after a failure: run it now, once.
         if (reread) return false;
         reread = true;
-        await reconcile(null);
+        if ((await withDeadline(reconcile(null), until)) === TIMED_OUT) return false;
         continue;
       }
       const step = settleStep(saveRef.current, {
@@ -104,11 +107,12 @@ export function useFormSaveEffects(o: SaveRefs & {
       if (step === 'done') return true;
       if (step === 'fail') return false;
       if (step === 'wait') {
-        await (flightRef.current ?? sleep(100));
+        if ((await withDeadline<unknown>(flightRef.current ?? sleep(100), until)) === TIMED_OUT) return false;
         continue;
       }
       if (sends++ >= SETTLE_SENDS) return false;
-      if (!(await sendDraft(step)) && saveRef.current.retryPending) return false;
+      const landed = await withDeadline(sendDraft(step), until);
+      if (landed === TIMED_OUT || (!landed && saveRef.current.retryPending)) return false;
     }
     return false;
   }, [reconcile, sendDraft, unsaved, mountedRef, rereadRef, rereadingRef, saveRef, pendingRef, flightRef]);

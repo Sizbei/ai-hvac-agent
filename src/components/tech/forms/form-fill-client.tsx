@@ -27,16 +27,21 @@ interface DraftBody {
   readonly baseRevision: number;
   readonly saveId: string;
   readonly changes: Changes;
+  /** A leave save (R1b) keeps its flag and the bases it was built on through retries (re-review M-2). */
+  readonly leave?: true;
+  readonly bases?: Changes;
 }
 interface SubmitIntent {
   readonly path: string;
-  readonly payload: Omit<DraftBody, 'saveId'>;
+  readonly payload: Omit<DraftBody, 'saveId' | 'leave' | 'bases'>;
   /** The base the changes were made against: STALE / FORM_CHANGED recovery merges `payload.changes` over the re-read row. */
   readonly base: FormValues;
 }
 
 const FIX_NUMBERS = 'Fix the highlighted answers.';
 const ANSWER_THIS = 'Answer this.';
+/** A draft PUT that hasn't answered by then is treated as unknown (re-sent with its saveId). */
+const DRAFT_TIMEOUT_MS = 15_000;
 
 type Load = { kind: 'loading' } | FillLoad;
 
@@ -290,17 +295,24 @@ export function FormFillClient({
       }
       body = { appointmentId: visitId, formVersion: versionRef.current, baseRevision: revisionRef.current, saveId: mintKey(), changes };
     }
+    // A leave save stays one on retry, with the bases it was first built on (the pending body hasn't landed, so
+    // `baseRef` hasn't moved; an upgraded retry computes them now from the same base).
+    if (leave && !body.leave) body = { ...body, leave: true, bases: leaveBases(body.changes, baseRef.current) };
+    const isLeave = body.leave === true;
     pendingRef.current = body;
     syncFlags();
     dispatchSave({ type: 'sent', now: Date.now() });
     setPhase('saving');
-    if (leave) writeLeaveMark(markKey, body.changes);
-    const text = JSON.stringify(leave ? { ...body, leave: true, bases: leaveBases(body.changes, baseRef.current) } : body);
+    if (isLeave) writeLeaveMark(markKey, body.changes);
+    const text = JSON.stringify(body);
     const flight = (async () => {
       let res: Response | null = null;
       try {
+        // A stalled connection times out into the back-off (same body and saveId: a replay if it landed). The leave
+        // save sent as the page goes stays fire-and-forget: no timeout on it.
         res = await fetch(`/api/tech/jobs/${jobId}/forms/${formId}/draft`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: text, keepalive: utf8Bytes(text) <= KEEPALIVE_MAX_BYTES,
+          ...(leave ? {} : { signal: AbortSignal.timeout(DRAFT_TIMEOUT_MS) }),
         });
       } catch {
         res = null;
@@ -310,13 +322,15 @@ export function FormFillClient({
       if (res && res.ok && env?.success) {
         const revision = Number(env.data.revision);
         // A leave save may skip fields a colleague changed: only what it applied counts as landed.
-        const out = leave ? leaveOutcome(sent.changes, sent.baseRevision, revision, env.data.skipped) : { merged: false, applied: sent.changes };
-        revisionRef.current = revision;
+        const out = isLeave ? leaveOutcome(sent.changes, sent.baseRevision, revision, env.data.skipped) : { merged: false, applied: sent.changes };
+        // A merged answer's revision holds a colleague's changes this page hasn't read: keep the old revision, so
+        // any save before the re-read below is STALE (or merges field-wise) instead of overwriting them (M-1).
+        if (!out.merged) revisionRef.current = revision;
         const r = afterLanded(fieldsRef.current, baseRef.current, out.applied, inputsRef.current, touchedRef.current);
         baseRef.current = r.base;
         touchedRef.current = r.touched;
         pendingRef.current = null;
-        if (leave) clearLeaveMark(markKey);
+        if (isLeave) clearLeaveMark(markKey);
         syncFlags();
         setSavedAt(env.data.savedAt ? String(env.data.savedAt) : new Date().toISOString());
         setSavedByOther(null);

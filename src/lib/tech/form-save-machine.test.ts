@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextSaveState, nextWakeAt, saveDue, SAVE_IDLE, settleStep, submitStep, type SaveEvent, type SaveState } from "./form-save-machine";
+import { nextSaveState, nextWakeAt, remainingMs, saveDue, SAVE_IDLE, settleStep, submitStep, TIMED_OUT, withDeadline, type SaveEvent, type SaveState } from "./form-save-machine";
 
 const run = (events: SaveEvent[], s: SaveState = SAVE_IDLE) => events.reduce(nextSaveState, s);
 
@@ -100,5 +100,19 @@ describe("settleStep (in-app leave, ruling R1a)", () => {
     expect(settleStep(run([{ type: "stop", reason: "blocked" }]), { ...o, dirty: true })).toBe("done");
     expect(settleStep(run([{ type: "submitted" }]), { ...o, dirty: true })).toBe("done");
     expect(settleStep(run([{ type: "lock" }]), { ...o, dirty: true, flight: true })).toBe("done");
+  });
+});
+
+describe("withDeadline (an in-app leave never hangs)", () => {
+  it("remainingMs never goes negative", () => {
+    expect(remainingMs(1000, 400)).toBe(600);
+    expect(remainingMs(1000, 1500)).toBe(0);
+  });
+  it("a never-settling promise yields TIMED_OUT at the deadline; a settled one its value", async () => {
+    const never = new Promise<boolean>(() => {});
+    expect(await withDeadline(never, Date.now() + 20)).toBe(TIMED_OUT);
+    expect(await withDeadline(never, Date.now() - 5)).toBe(TIMED_OUT);
+    expect(await withDeadline(Promise.resolve(true), Date.now() + 1000)).toBe(true);
+    expect(await withDeadline(Promise.resolve(false), Date.now() + 1000)).toBe(false);
   });
 });

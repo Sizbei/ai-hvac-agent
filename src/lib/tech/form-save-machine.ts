@@ -135,3 +135,21 @@ export function settleStep(s: SaveState, o: { readonly pending: boolean; readonl
   if (s.stop !== null) return "fail";
   return o.pending || s.retryPending ? "send_retry" : "send_new";
 }
+
+/** What a wait bounded by a deadline yields when the deadline passes first. */
+export const TIMED_OUT: unique symbol = Symbol("timed out");
+
+/** Milliseconds left before `until` (never negative). */
+export const remainingMs = (until: number, now: number): number => Math.max(0, until - now);
+
+/**
+ * `p`, or TIMED_OUT once `until` passes (an in-app leave never waits forever on
+ * a stalled connection). `p` itself is not cancelled: a PUT may still land.
+ */
+export function withDeadline<T>(p: Promise<T>, until: number, now: () => number = Date.now): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), remainingMs(until, now()));
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}

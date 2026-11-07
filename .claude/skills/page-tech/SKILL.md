@@ -396,7 +396,11 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   left (a STALE merge re-saves on the merged row; pure `settleStep` in `form-save-machine.ts`)
   and navigates only when nothing is left; meanwhile the link reads "Saving…". A save that
   fails (signed out, too large, bad request, network) keeps the page with its line; a blocked
-  or submitted page navigates at once. (b) Saves sent as the page is left (hidden, pagehide, or
+  or submitted page navigates at once. Every wait is bounded by a 15 s deadline (`withDeadline`):
+  a stalled connection leaves the page with "Not saved yet. Retrying…", never on "Saving…".
+  Draft PUTs time out after 15 s into the back-off (same body and saveId), except the leave save
+  sent as the page goes, which stays fire-and-forget. A leave body keeps `leave` and its `bases`
+  through retries, and a merged answer doesn't move the page's revision until the re-read lands. (b) Saves sent as the page is left (hidden, pagehide, or
   an in-app unmount such as the browser's Back) carry `leave: true` and `bases` (the value this
   page last saw for each changed field, null = absent). On a revision mismatch the server merges
   field-wise under the same lock: it applies a field only when the stored value equals its base
