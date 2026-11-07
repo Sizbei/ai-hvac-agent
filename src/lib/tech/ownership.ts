@@ -33,6 +33,14 @@ export interface ActiveVisit {
   readonly leadTechnicianId: string | null;
 }
 
+/**
+ * The ONE "is the caller the lead" rule (M3c's estimates GET, M3d's Site GET):
+ * the lead of the request's active visit (pickActiveVisit).
+ */
+export function isActiveLead(visit: ActiveVisit | null, me: string): boolean {
+  return visit?.leadTechnicianId === me;
+}
+
 export function hasProgress(
   r: Pick<TechAssignmentRow, "enRouteAt" | "arrivedAt" | "startedAt" | "completedAt">,
 ): boolean {

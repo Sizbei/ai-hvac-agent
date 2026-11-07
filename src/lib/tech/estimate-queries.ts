@@ -11,7 +11,7 @@ import { ERASED_PLACEHOLDER } from "@/lib/admin/report-format";
 import { errorCode, logger } from "@/lib/logger";
 import { P_LIVE, P_NATIVE } from "@/lib/admin/invoice-field-writes";
 import { billingInvoiceIdSql, jobBilledSql, officeBilledSql } from "@/lib/admin/estimate-billing-sql";
-import { findActiveVisit, findReadableJob } from "@/lib/tech/ownership";
+import { findActiveVisit, findReadableJob, isActiveLead } from "@/lib/tech/ownership";
 import { billingOf, createBlockedReason, derivedStatus, estimateLabel } from "@/lib/tech/estimate-display";
 import type { TechEstimate, TechEstimateOption, TechEstimatesView, TechJobInvoiceRef } from "@/lib/tech/estimate-view";
 
@@ -147,7 +147,7 @@ export async function getTechEstimatesView(
     companyNameOf(org),
     customerNameOf(org, job.customerId),
   ]);
-  const isLead = visit?.leadTechnicianId === me;
+  const isLead = isActiveLead(visit, me);
   const reason = createBlockedReason({ isLead, status: job.status, hasCustomer: job.customerId !== null });
   const estimates = assembleEstimates(estRows, optRows, lineRows, now);
   const inv = invRows[0];

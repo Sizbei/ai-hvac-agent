@@ -31,6 +31,7 @@ import {
   pickActiveVisit,
   techCanReadSql,
   type TechAssignmentRow,
+  isActiveLead,
 } from "./ownership";
 
 let n = 0;
@@ -177,5 +178,14 @@ describe("queries", () => {
   it("findActiveVisit picks from the fetched rows", async () => {
     selectQueue.push([row({ appointmentNumber: 1, isLead: true, technicianId: "lead" })]);
     expect(await findActiveVisit("o", "j")).toEqual({ appointmentId: "appt-1", leadTechnicianId: "lead" });
+  });
+});
+
+describe("isActiveLead (the one lead rule, shared by M3c's estimates GET and M3d's Site GET)", () => {
+  it("the caller leads the active visit; no visit or no lead is false", () => {
+    expect(isActiveLead({ appointmentId: "a", leadTechnicianId: "me" }, "me")).toBe(true);
+    expect(isActiveLead({ appointmentId: "a", leadTechnicianId: "other" }, "me")).toBe(false);
+    expect(isActiveLead({ appointmentId: "a", leadTechnicianId: null }, "me")).toBe(false);
+    expect(isActiveLead(null, "me")).toBe(false);
   });
 });
