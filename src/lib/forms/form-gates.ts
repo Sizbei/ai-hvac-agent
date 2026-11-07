@@ -26,6 +26,7 @@ function ownProgressSql(org: string, aid: string, me: string): SQL {
  * The request is in the org and not cancelled; native: on site (BILL_STATUSES)
  * or the caller's own row has arrived; synced (FieldPulse or HCP): any status
  * but cancelled; and its customer is not erased.
+ * Always AND with `visitGateSql`; `$aid` is not tied to `$rid` here.
  */
 export function requestGateSql(org: string, rid: string, aid: string, me: string): SQL {
   return sql`EXISTS (SELECT 1 FROM service_requests rg WHERE rg.id = ${rid}::uuid AND rg.organization_id = ${org}::uuid

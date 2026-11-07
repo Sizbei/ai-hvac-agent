@@ -65,7 +65,7 @@ function canonical(value: unknown): unknown {
 
 const sha256Hex = (s: string) => createHash("sha256").update(s).digest("hex");
 
-/** The canonical JSON text: object keys sorted recursively, undefined dropped, arrays in order; null/undefined → "{}". */
+/** The canonical JSON text: object keys sorted recursively, undefined dropped, arrays in order; null/undefined → "{}". JSON-parsed input only; NaN/Infinity become null. */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonical(value ?? {}));
 }

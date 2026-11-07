@@ -189,4 +189,8 @@ describe('macHex (M3d)', () => {
     expect(macHex('hvac-form-changes-v1', '{}')).toMatch(/^[0-9a-f]{64}$/);
     expect(macHex('hvac-form-changes-v1', '')).toMatch(/^[0-9a-f]{64}$/);
   });
+  it('rejects an empty label or one containing NUL', () => {
+    expect(() => macHex('', 'x')).toThrow('macHex label must be non-empty and NUL-free');
+    expect(() => macHex('a\0b', 'x')).toThrow('macHex label must be non-empty and NUL-free');
+  });
 });

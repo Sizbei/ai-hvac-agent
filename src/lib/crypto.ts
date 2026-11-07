@@ -110,6 +110,7 @@ export function blindIndex(normalizedValue: string): string {
  * blind-index domain. Unlike blindIndex it takes any string, empty included.
  */
 export function macHex(label: string, value: string): string {
+  if (!label || label.includes("\0")) throw new Error("macHex label must be non-empty and NUL-free");
   return createHmac("sha256", getEncryptionKey())
     .update(label)
     .update("\0")

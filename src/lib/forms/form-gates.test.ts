@@ -25,14 +25,12 @@ describe("gate SQL (spec §5.1)", () => {
     expect(orgCount(s)).toBe(2);
   });
 
-  it("requestGateSql: not cancelled; synced OR on site OR own arrival (parenthesised); customer not erased", () => {
+  it("requestGateSql pins every predicate and binds the org three times", () => {
     const s = requestGateSql(ORG, RID, AID, ME);
-    const t = text(s);
-    expect(t).toContain("rg.status <> 'cancelled'::request_status");
-    expect(t).toContain("AND ((rg.fieldpulse_job_id IS NOT NULL OR rg.hcp_job_id IS NOT NULL) OR rg.status IN ('arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status) OR EXISTS (SELECT 1 FROM appointment_assignments ga");
-    expect(t).toContain("(ga.arrived_at IS NOT NULL OR ga.started_at IS NOT NULL OR ga.completed_at IS NOT NULL))");
-    expect(t).toContain("NOT EXISTS (SELECT 1 FROM customers gc WHERE gc.id = rg.customer_id AND gc.organization_id = $");
-    expect(t).toContain("gc.anonymized_at IS NOT NULL");
+    expect(text(s)).toBe(
+      "EXISTS (SELECT 1 FROM service_requests rg WHERE rg.id = $1::uuid AND rg.organization_id = $2::uuid AND rg.status <> 'cancelled'::request_status AND ((rg.fieldpulse_job_id IS NOT NULL OR rg.hcp_job_id IS NOT NULL) OR rg.status IN ('arrived'::request_status, 'in_progress'::request_status, 'on_hold'::request_status, 'completed'::request_status) OR EXISTS (SELECT 1 FROM appointment_assignments ga WHERE ga.appointment_id = $3::uuid AND ga.organization_id = $4::uuid AND ga.technician_id = $5::uuid AND (ga.arrived_at IS NOT NULL OR ga.started_at IS NOT NULL OR ga.completed_at IS NOT NULL))) AND NOT EXISTS (SELECT 1 FROM customers gc WHERE gc.id = rg.customer_id AND gc.organization_id = $6::uuid AND gc.anonymized_at IS NOT NULL))",
+    );
+    expect(q(s).params).toEqual([RID, ORG, AID, ORG, ME, ORG]);
     expect(orgCount(s)).toBe(3);
   });
 
@@ -43,23 +41,20 @@ describe("gate SQL (spec §5.1)", () => {
     expect(formApplies(["jt-1"], "jt-1")).toBe(true);
   });
 
-  it("visitCountsSql: live OR progressed/completed row OR a submission, org-bound twice", () => {
+  it("visitCountsSql pins live OR progressed/completed row OR a submission, org-bound twice", () => {
     const s = visitCountsSql(ORG, "p");
-    const t = text(s);
-    expect(t.startsWith("(p.cancelled_at IS NULL OR EXISTS (SELECT 1 FROM appointment_assignments vca WHERE vca.appointment_id = p.id")).toBe(true);
-    expect(t).toContain("vca.status = 'completed'::request_status))");
-    expect(t).toContain("OR EXISTS (SELECT 1 FROM form_submissions vcs WHERE vcs.appointment_id = p.id AND vcs.organization_id = $2::uuid))");
-    expect(orgCount(s)).toBe(2);
+    expect(text(s)).toBe(
+      "(p.cancelled_at IS NULL OR EXISTS (SELECT 1 FROM appointment_assignments vca WHERE vca.appointment_id = p.id AND vca.organization_id = $1::uuid AND (vca.en_route_at IS NOT NULL OR vca.arrived_at IS NOT NULL OR vca.started_at IS NOT NULL OR vca.completed_at IS NOT NULL OR vca.status = 'completed'::request_status)) OR EXISTS (SELECT 1 FROM form_submissions vcs WHERE vcs.appointment_id = p.id AND vcs.organization_id = $2::uuid))",
+    );
+    expect(q(s).params).toEqual([ORG, ORG]);
   });
 
-  it("readFormGatesSql reads the visit and the form org-scoped", () => {
+  it("readFormGatesSql pins the visit and form reads, org-scoped", () => {
     const s = readFormGatesSql(ORG, RID, AID, ME, FORM);
-    const t = text(s);
-    expect(t).toContain("LEFT JOIN appointments p ON p.id = $");
-    expect(t).toContain("p.service_request_id = r.id AND p.organization_id = $");
-    expect(t).toContain("LEFT JOIN forms f ON f.id = $");
-    expect(t).toContain("WHERE r.id = $");
-    expect(orgCount(s)).toBe(7);
+    expect(text(s)).toBe(
+      "SELECT r.status::text AS status, (r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL) AS native, EXISTS (SELECT 1 FROM customers c WHERE c.id = r.customer_id AND c.organization_id = $1::uuid AND c.anonymized_at IS NOT NULL) AS customer_erased, p.id IS NOT NULL AS visit_found, COALESCE(p.cancelled_at IS NULL, false) AS visit_live, EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = p.id AND a.organization_id = $2::uuid AND a.technician_id = $3::uuid) AS my_row, EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = p.id AND a.organization_id = $4::uuid AND a.technician_id = $5::uuid AND a.status <> 'cancelled'::request_status) AS my_live_row, EXISTS (SELECT 1 FROM appointment_assignments a WHERE a.appointment_id = p.id AND a.organization_id = $6::uuid AND a.technician_id = $7::uuid AND (a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL)) AS my_progress, f.id IS NOT NULL AS form_found, COALESCE(f.active, false) AS form_active, f.version AS form_version FROM service_requests r LEFT JOIN appointments p ON p.id = $8::uuid AND p.service_request_id = r.id AND p.organization_id = $9::uuid LEFT JOIN forms f ON f.id = $10::uuid AND f.organization_id = $11::uuid WHERE r.id = $12::uuid AND r.organization_id = $13::uuid",
+    );
+    expect(q(s).params).toEqual([ORG, ORG, ME, ORG, ME, ORG, ME, AID, ORG, FORM, ORG, RID, ORG]);
     expect(q(readFormGatesSql(ORG, RID, AID, ME, null)).params).toContain(null);
   });
 });
