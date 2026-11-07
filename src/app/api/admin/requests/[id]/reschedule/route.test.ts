@@ -134,7 +134,7 @@ describe("POST reschedule — HCP wiring", () => {
     );
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.error).toMatchObject({ code: "HAS_PROGRESS", message: "A technician has already started this visit." });
+    expect(body.error).toMatchObject({ code: "HAS_PROGRESS", message: "A technician has started this visit. To move it anyway, use Move… on the calendar." });
     expect(pushJobToHcp).not.toHaveBeenCalled();
   });
 });

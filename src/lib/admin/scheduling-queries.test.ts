@@ -216,10 +216,20 @@ vi.mock("./shift-queries", () => ({
   listCapacityBlocks: capacityBlocksMock,
 }));
 
-// Marker for the visit-#1 guard so tests can find it in the guarded WHERE.
+// Markers for the visit-#1 guards so tests can find them in the guarded WHERE.
 vi.mock("./visit-one-guard", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./visit-one-guard")>()),
   visitOneGuardSql: () => "VISIT_ONE_GUARD",
+  visitOneStartedGuardSql: () => "VISIT_ONE_STARTED_GUARD",
+}));
+vi.mock("./visit-move-sql", () => ({
+  reviveLeadSql: () => "REVIVE_LEAD",
+  requestXminGateSql: () => "XMIN_GATE",
+  leadDoneSql: () => "LEAD_DONE",
+  startedOnVisitOneSql: () => "STARTED_ON_V1",
+  versionGateSql: () => "VERSION_GATE",
+  noWorkLoggedSql: () => "NO_WORK_LOGGED",
+  fieldpulseFreeSql: () => "FIELDPULSE_FREE",
 }));
 
 import {
@@ -1124,27 +1134,29 @@ describe("autoAssignBookedRequest (scored vs first-fit)", () => {
 });
 
 describe("visit-#1 guarded writers lock the request first", () => {
-  const isLockThenUpdate = () => {
+  const isLockThenUpdate = (count: number, marker: string) => {
     expect(batchMock).toHaveBeenCalledTimes(1);
     const statements = batchMock.mock.calls[0]![0] as unknown[];
-    expect(statements).toHaveLength(2);
+    expect(statements).toHaveLength(count);
     expect(statements[0]).toHaveProperty("__lock");
-    expect(JSON.stringify(whereCalls)).toContain("VISIT_ONE_GUARD");
+    expect(JSON.stringify(whereCalls)).toContain(marker);
   };
 
-  it("placeAndAssignRequest: [lock, guarded update]", async () => {
+  it("placeAndAssignRequest: [lock, guarded update (started rule), revive]", async () => {
     selectQueue.push([{ status: "scheduled", assignedTo: null }]);
     updateQueue.push([{ status: "scheduled", assignedTo: null, scheduledDate: new Date(), arrivalWindowStart: new Date(), arrivalWindowEnd: new Date() }]);
     const window = { start: new Date("2026-07-01T12:00:00.000Z"), end: new Date("2026-07-01T16:00:00.000Z") };
     const result = await placeAndAssignRequest(ORG, REQ, window, { isoDay: "2026-07-01", window: "morning" });
     expect(result.ok).toBe(true);
-    isLockThenUpdate();
+    isLockThenUpdate(3, "VISIT_ONE_STARTED_GUARD");
+    const statements = batchMock.mock.calls[0]![0] as unknown[];
+    expect((statements[2] as { __lock: unknown }).__lock).toBe("REVIVE_LEAD");
   });
 
   it("unscheduleRequest: [lock, guarded update]", async () => {
     selectQueue.push([{ status: "assigned" }]);
     updateQueue.push([{ id: REQ }]);
     expect(await unscheduleRequest(ORG, REQ)).toEqual({ ok: true });
-    isLockThenUpdate();
+    isLockThenUpdate(2, "VISIT_ONE_GUARD");
   });
 });

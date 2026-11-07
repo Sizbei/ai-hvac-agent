@@ -83,9 +83,13 @@ export async function POST(
             "TIME_OFF",
             409,
           );
+        case "managed_externally":
+          return errorResponse("Change the technician for this request in FieldPulse.", "MANAGED_EXTERNALLY", 409);
+        case "technician_done":
+          return errorResponse("That technician has finished on this visit.", "TECHNICIAN_DONE", 409, { technicianId });
         case "has_progress":
         case "visit_ended":
-          return visitOneRefusalResponse(result.reason);
+          return visitOneRefusalResponse(result.reason, { surface: "sheet" });
       }
     }
 
@@ -176,9 +180,13 @@ export async function PATCH(
             "TIME_OFF",
             409,
           );
+        case "managed_externally":
+          return errorResponse("Change the technician for this request in FieldPulse.", "MANAGED_EXTERNALLY", 409);
+        case "technician_done":
+          return errorResponse("That technician has finished on this visit.", "TECHNICIAN_DONE", 409, { technicianId });
         case "has_progress":
         case "visit_ended":
-          return visitOneRefusalResponse(result.reason);
+          return visitOneRefusalResponse(result.reason, { surface: "sheet" });
       }
     }
 

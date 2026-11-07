@@ -58,7 +58,8 @@ import {
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { stampDispatchOverride } from "./dispatch-override";
-import { classifyVisitOne, lockedUpdate, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { classifyVisitOne, lockedUpdate, visitOneGuardSql, visitOneStartedGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { requestXminGateSql, reviveLeadSql } from "./visit-move-sql";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import {
   listCapacityBlocks,
@@ -786,8 +787,8 @@ export async function placeAndAssignRequest(
             : undefined,
           noDoubleBookGuard,
           noTimeOffGuard,
-          // Visit #1 mirrors the window/lead: never rewrite a started or ended visit.
-          visitOneGuardSql(),
+          // Visit #1 mirrors the window/lead: never rewrite a started or ended visit (M2 §3.2).
+          visitOneStartedGuardSql(organizationId),
         )!,
       ),
     )
@@ -797,7 +798,9 @@ export async function placeAndAssignRequest(
       scheduledDate: serviceRequests.scheduledDate,
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
-    }));
+    }),
+    // Autopilot and office booking: a lead row starts clean (M2 §5.5).
+    [reviveLeadSql(organizationId, requestId, requestXminGateSql(organizationId, requestId))]);
 
   if (!updated) {
     // The guarded UPDATE matched nothing. Disambiguate: a concurrent overlapping
@@ -824,7 +827,7 @@ export async function placeAndAssignRequest(
       }
     }
     // CAS miss first: a moved status stays request_not_found.
-    const now = await classifyVisitOne(organizationId, requestId);
+    const now = await classifyVisitOne(organizationId, requestId, "started");
     if (now?.refusal && now.status === currentStatus) {
       return { ok: false, reason: now.refusal };
     }

@@ -35,6 +35,10 @@ vi.mock("@/lib/rate-limit", () => ({
   RATE_LIMITS: { adminMutation: { maxRequests: 30, windowMs: 60000 }, adminRead: { maxRequests: 60, windowMs: 60000 } },
 }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }));
+vi.mock("@/lib/admin/visit-one-guard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/admin/visit-one-guard")>()),
+  isFieldpulseMapped: vi.fn(async () => false),
+}));
 
 import { PATCH } from "./route";
 import { getAdminSession } from "@/lib/auth/session";
@@ -174,7 +178,7 @@ describe("PATCH /api/admin/requests/[id] — resuming a hold (round-2 P0)", () =
 
 describe("PATCH /api/admin/requests/[id] — schedule branch", () => {
   it.each([
-    ["has_progress", "HAS_PROGRESS", "A technician has already started this visit."],
+    ["has_progress", "HAS_PROGRESS", "A technician has started this visit. To move it anyway, use Move… on the calendar."],
     ["visit_ended", "VISIT_ENDED", "This visit has ended. Add a new visit instead."],
   ])("%s → 409 %s", async (reason, code, message) => {
     mocked(scheduleRequest).mockResolvedValue({ ok: false, reason });

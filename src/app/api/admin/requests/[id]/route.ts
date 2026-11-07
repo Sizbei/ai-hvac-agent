@@ -29,7 +29,7 @@ import {
   type HoldReason,
   type RequestStatus,
 } from "@/lib/admin/request-status";
-import { visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
+import { isFieldpulseMapped, visitOneRefusalResponse } from "@/lib/admin/visit-one-guard";
 import { findActiveVisit } from "@/lib/tech/ownership";
 import {
   completeRequestFromAdmin,
@@ -340,7 +340,10 @@ export async function PATCH(
         if (result.reason === "request_not_found") {
           return errorResponse("Request not found", "NOT_FOUND", 404);
         }
-        return visitOneRefusalResponse(result.reason);
+        // The writer is unchanged (M2 §3.2); only the copy names FieldPulse for a mapped request.
+        return visitOneRefusalResponse(result.reason, {
+          fieldpulse: await isFieldpulseMapped(session.organizationId, id),
+        });
       }
       await logAudit({
         organizationId: session.organizationId,

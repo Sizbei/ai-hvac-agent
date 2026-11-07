@@ -242,6 +242,14 @@ vi.mock('@/lib/db/schema', () => ({
 vi.mock('./visit-one-guard', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./visit-one-guard')>()),
   visitOneGuardSql: () => 'VISIT_ONE_GUARD',
+  visitOneStartedGuardSql: () => 'VISIT_ONE_STARTED_GUARD',
+}));
+// The shared move SQL uses sql.raw, which this file's drizzle mock lacks: markers instead.
+vi.mock('./visit-move-sql', () => ({
+  reviveLeadSql: () => 'REVIVE_LEAD',
+  requestXminGateSql: () => 'XMIN_GATE',
+  leadDoneSql: (_org: string, tech: string) => `LEAD_DONE:${tech}`,
+  startedOnVisitOneSql: () => 'STARTED_ON_V1',
 }));
 
 import { and } from 'drizzle-orm';
@@ -678,6 +686,54 @@ describe('assignTechnician', () => {
     const result = await assignTechnician(ORG_ID, 'req-1', 'req-nonexistent');
     expect(result).toEqual({ ok: false, reason: 'request_not_found' });
   });
+
+  it('guards on FieldPulse, the started rule and the new lead not being done; revives the lead row in the same batch', async () => {
+    const { and, isNull, sql: sqlTag } = await import('drizzle-orm');
+    vi.mocked(and).mockClear();
+    vi.mocked(isNull).mockClear();
+    vi.mocked(sqlTag).mockClear();
+    batchCallArgs = [];
+    selectResolutions = [[{ id: 'tech-1', name: 'John Tech' }], [{ status: 'pending', arrivalWindowStart: null, arrivalWindowEnd: null }]];
+    updateResolution = [{ id: 'req-1', status: 'assigned', issueType: 'x', urgency: 'low', description: 'd', referenceNumber: 'HVAC-1', customerNameEncrypted: null, createdAt: new Date(), updatedAt: new Date() }];
+    await assignTechnician(ORG_ID, 'req-1', 'tech-1');
+    expect(vi.mocked(isNull).mock.calls.some((c) => (c[0] as unknown) === 'sr.fieldpulseJobId')).toBe(true);
+    expect(JSON.stringify(vi.mocked(and).mock.calls)).toContain('VISIT_ONE_STARTED_GUARD');
+    expect(JSON.stringify(vi.mocked(sqlTag).mock.calls)).toContain('LEAD_DONE:tech-1');
+    const statements = batchCallArgs.at(-1)!;
+    expect(statements).toHaveLength(3);
+    expect((statements[2] as { __lock: unknown }).__lock).toBe('REVIVE_LEAD');
+  });
+
+  it('a FieldPulse-mapped request → managed_externally (checked first)', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ status: 'scheduled', arrivalWindowStart: null, arrivalWindowEnd: null }],
+      [{ status: 'scheduled', progressed: true, ended: false, fieldpulse: true, technicianDone: false }],
+    ];
+    updateResolution = [];
+    expect(await assignTechnician(ORG_ID, 'req-1', 'tech-1')).toEqual({ ok: false, reason: 'managed_externally' });
+  });
+
+  it('FieldPulse is answered before time off (spec §5.5)', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ status: 'scheduled', arrivalWindowStart: new Date('2026-07-01T12:00:00.000Z'), arrivalWindowEnd: new Date('2026-07-01T16:00:00.000Z'), fieldpulseJobId: 'fp-1' }],
+    ];
+    timeOffMock.mockResolvedValueOnce([TIME_OFF_SHIFT]);
+    expect(await assignTechnician(ORG_ID, 'req-1', 'tech-1')).toEqual({ ok: false, reason: 'managed_externally' });
+    timeOffMock.mockReset();
+    timeOffMock.mockResolvedValue([]);
+  });
+
+  it('a technician done on visit #1 → technician_done', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ status: 'scheduled', arrivalWindowStart: null, arrivalWindowEnd: null }],
+      [{ status: 'scheduled', progressed: false, ended: false, fieldpulse: false, technicianDone: true }],
+    ];
+    updateResolution = [];
+    expect(await assignTechnician(ORG_ID, 'req-1', 'tech-1')).toEqual({ ok: false, reason: 'technician_done' });
+  });
 });
 
 describe('time off on assign / reassign', () => {
@@ -799,6 +855,52 @@ describe('reassignTechnician', () => {
 
     const result = await reassignTechnician(ORG_ID, 'req-x', 'tech-2');
     expect(result).toEqual({ ok: false, reason: 'request_not_found' });
+  });
+
+  it('reassign carries the same guards and the revive', async () => {
+    const { and, isNull } = await import('drizzle-orm');
+    vi.mocked(and).mockClear();
+    vi.mocked(isNull).mockClear();
+    batchCallArgs = [];
+    selectResolutions = [[{ id: 'tech-2', name: 'Jane Tech' }], [{ arrivalWindowStart: null, arrivalWindowEnd: null }]];
+    updateResolution = [{ id: 'req-1', status: 'scheduled', issueType: 'x', urgency: 'low', description: 'd', referenceNumber: 'HVAC-1', customerNameEncrypted: null, createdAt: new Date(), updatedAt: new Date() }];
+    await reassignTechnician(ORG_ID, 'req-1', 'tech-2');
+    expect(vi.mocked(isNull).mock.calls.some((c) => (c[0] as unknown) === 'sr.fieldpulseJobId')).toBe(true);
+    expect(JSON.stringify(vi.mocked(and).mock.calls)).toContain('VISIT_ONE_STARTED_GUARD');
+    expect((batchCallArgs.at(-1)![2] as { __lock: unknown }).__lock).toBe('REVIVE_LEAD');
+  });
+
+  it('reassign puts the new lead not being done in the guarded WHERE', async () => {
+    const { sql: sqlTag } = await import('drizzle-orm');
+    vi.mocked(sqlTag).mockClear();
+    selectResolutions = [[{ id: 'tech-2', name: 'Jane Tech' }], [{ arrivalWindowStart: null, arrivalWindowEnd: null }]];
+    updateResolution = [{ id: 'req-1', status: 'scheduled', issueType: 'x', urgency: 'low', description: 'd', referenceNumber: 'HVAC-1', customerNameEncrypted: null, createdAt: new Date(), updatedAt: new Date() }];
+    await reassignTechnician(ORG_ID, 'req-1', 'tech-2');
+    expect(JSON.stringify(vi.mocked(sqlTag).mock.calls)).toContain('LEAD_DONE:tech-2');
+  });
+
+  it('reassign: FieldPulse is answered before time off (spec §5.5)', async () => {
+    selectResolutions = [
+      [{ id: 'tech-2', name: 'Jane Tech' }],
+      [{ arrivalWindowStart: new Date('2026-07-01T12:00:00.000Z'), arrivalWindowEnd: new Date('2026-07-01T16:00:00.000Z'), fieldpulseJobId: 'fp-1' }],
+    ];
+    timeOffMock.mockResolvedValueOnce([TIME_OFF_SHIFT]);
+    expect(await reassignTechnician(ORG_ID, 'req-1', 'tech-2')).toEqual({ ok: false, reason: 'managed_externally' });
+    timeOffMock.mockReset();
+    timeOffMock.mockResolvedValue([]);
+  });
+
+  it('reassign: FieldPulse → managed_externally; done → technician_done; started → has_progress', async () => {
+    for (const [row, reason] of [
+      [{ status: 'scheduled', progressed: false, ended: false, fieldpulse: true, technicianDone: false }, 'managed_externally'],
+      [{ status: 'scheduled', progressed: false, ended: false, fieldpulse: false, technicianDone: true }, 'technician_done'],
+      [{ status: 'scheduled', progressed: true, ended: false, fieldpulse: false, technicianDone: false }, 'has_progress'],
+    ] as const) {
+      selectCallIndex = 0;
+      selectResolutions = [[{ id: 'tech-2', name: 'Jane Tech' }], [{ arrivalWindowStart: null, arrivalWindowEnd: null }], [row]];
+      updateResolution = [];
+      expect(await reassignTechnician(ORG_ID, 'req-1', 'tech-2')).toEqual({ ok: false, reason });
+    }
   });
 });
 
@@ -1878,9 +1980,9 @@ describe('visit-#1 guarded writers lock the request first', () => {
       updateResolution = [row];
       expect((await run()).ok).toBe(true);
       expect(batchCallArgs).toHaveLength(1);
-      expect(batchCallArgs[0]).toHaveLength(2);
+      expect(batchCallArgs[0]).toHaveLength(3); // M2: + reviveLeadSql
       expect(lockText(batchCallArgs[0]![0])).toMatch(/SELECT 1 FROM service_requests WHERE id = \?::uuid AND organization_id = \?::uuid FOR NO KEY UPDATE/);
-      expect(guardInWhere()).toBe(true);
+      expect(vi.mocked(and).mock.calls.some((c) => (c as unknown[]).includes('VISIT_ONE_STARTED_GUARD'))).toBe(true);
     });
   }
 

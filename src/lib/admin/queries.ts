@@ -53,7 +53,8 @@ import {
 } from "./request-status";
 import { recordStatusEvent, type ActorType } from "./status-events";
 import { stampDispatchOverride } from "./dispatch-override";
-import { classifyVisitOne, lockedUpdate, visitOneGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { classifyVisitOne, lockedUpdate, visitOneGuardSql, visitOneStartedGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { leadDoneSql, requestXminGateSql, reviveLeadSql } from "./visit-move-sql";
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 
 export type HoldReason = (typeof holdReasonEnum.enumValues)[number];
@@ -482,6 +483,8 @@ export type AssignTechnicianResult =
       readonly currentStatus: AdminRequest["status"];
     }
   | { readonly ok: false; readonly reason: "time_off" }
+  | { readonly ok: false; readonly reason: "managed_externally" }
+  | { readonly ok: false; readonly reason: "technician_done" }
   | { readonly ok: false; readonly reason: VisitOneRefusal };
 
 /** True when the technician has a capacity-removing shift overlapping the
@@ -537,11 +540,13 @@ export async function assignTechnician(
       status: serviceRequests.status,
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
     })
     .from(serviceRequests)
     .where(
       withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
     );
+  if (before?.fieldpulseJobId) return { ok: false, reason: "managed_externally" };
 
   if (
     await windowHitsTimeOff(
@@ -572,23 +577,29 @@ export async function assignTechnician(
         and(
           eq(serviceRequests.id, requestId),
           inArray(serviceRequests.status, [...ASSIGNABLE_STATUSES]),
-          // Visit #1 mirrors the lead: never rewrite a started or ended visit.
-          visitOneGuardSql(),
+          // FieldPulse owns a mapped request's technician (M2 §5.1).
+          isNull(serviceRequests.fieldpulseJobId),
+          // Visit #1 mirrors the lead: never rewrite a started or ended visit (M2 §3.2).
+          visitOneStartedGuardSql(organizationId),
+          // A technician who finished on visit #1 never becomes its lead (TECHNICIAN_DONE).
+          sql`NOT ${leadDoneSql(organizationId, technicianId)}`,
         )!,
       ),
     )
-    .returning());
+    .returning(),
+    // The new lead's row starts clean, never a cancelled leftover (M2 §5.5).
+    [reviveLeadSql(organizationId, requestId, requestXminGateSql(organizationId, requestId))]);
 
   if (!updated) {
-    // Either the request doesn't exist (in this org), it's in a
-    // non-assignable state (the CAS miss, checked first), or visit #1 refuses.
     if (!before) {
       return { ok: false, reason: "request_not_found" };
     }
-    const now = await classifyVisitOne(organizationId, requestId);
+    const now = await classifyVisitOne(organizationId, requestId, "started", technicianId);
+    if (now?.fieldpulse) return { ok: false, reason: "managed_externally" };
     const currentStatus = now?.status ?? before.status;
-    if (now?.refusal && (ASSIGNABLE_STATUSES as readonly string[]).includes(currentStatus)) {
-      return { ok: false, reason: now.refusal };
+    if ((ASSIGNABLE_STATUSES as readonly string[]).includes(currentStatus)) {
+      if (now?.technicianDone) return { ok: false, reason: "technician_done" };
+      if (now?.refusal) return { ok: false, reason: now.refusal };
     }
     return {
       ok: false,
@@ -648,6 +659,8 @@ export type ReassignTechnicianResult =
       readonly currentStatus: AdminRequest["status"];
     }
   | { readonly ok: false; readonly reason: "time_off" }
+  | { readonly ok: false; readonly reason: "managed_externally" }
+  | { readonly ok: false; readonly reason: "technician_done" }
   | { readonly ok: false; readonly reason: VisitOneRefusal };
 
 /**
@@ -689,11 +702,13 @@ export async function reassignTechnician(
     .select({
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
     })
     .from(serviceRequests)
     .where(
       withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
     );
+  if (windowed?.fieldpulseJobId) return { ok: false, reason: "managed_externally" };
   if (
     await windowHitsTimeOff(
       organizationId,
@@ -720,21 +735,26 @@ export async function reassignTechnician(
         and(
           eq(serviceRequests.id, requestId),
           inArray(serviceRequests.status, [...REASSIGNABLE_STATUSES]),
-          visitOneGuardSql(),
+          isNull(serviceRequests.fieldpulseJobId),
+          visitOneStartedGuardSql(organizationId),
+          sql`NOT ${leadDoneSql(organizationId, technicianId)}`,
         )!,
       ),
     )
-    .returning());
+    .returning(),
+    [reviveLeadSql(organizationId, requestId, requestXminGateSql(organizationId, requestId))]);
 
   if (!updated) {
-    const existing = await classifyVisitOne(organizationId, requestId);
+    const existing = await classifyVisitOne(organizationId, requestId, "started", technicianId);
 
     if (!existing) {
       return { ok: false, reason: "request_not_found" };
     }
+    if (existing.fieldpulse) return { ok: false, reason: "managed_externally" };
     // CAS miss first: a status that is no longer reassignable wins.
-    if (existing.refusal && (REASSIGNABLE_STATUSES as readonly string[]).includes(existing.status)) {
-      return { ok: false, reason: existing.refusal };
+    if ((REASSIGNABLE_STATUSES as readonly string[]).includes(existing.status)) {
+      if (existing.technicianDone) return { ok: false, reason: "technician_done" };
+      if (existing.refusal) return { ok: false, reason: existing.refusal };
     }
     return {
       ok: false,

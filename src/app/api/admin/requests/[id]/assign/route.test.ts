@@ -65,3 +65,23 @@ describe("assign route — status refusals read as human copy", () => {
     expect(body.error.message).not.toMatch(/_|'/);
   });
 });
+
+describe("assign route — M2 refusals", () => {
+  it.each([
+    ["POST", POST, assignTechnician],
+    ["PATCH", PATCH, reassignTechnician],
+  ] as const)("%s maps managed_externally and technician_done; HAS_PROGRESS points to Move…", async (method, fn, writer) => {
+    (writer as unknown as Mock).mockResolvedValue({ ok: false, reason: "managed_externally" });
+    let body = await (await call(fn, method)).json();
+    expect(body.error).toEqual({ code: "MANAGED_EXTERNALLY", message: "Change the technician for this request in FieldPulse." });
+    (writer as unknown as Mock).mockResolvedValue({ ok: false, reason: "technician_done" });
+    const res = await call(fn, method);
+    expect(res.status).toBe(409);
+    body = await res.json();
+    expect(body.error).toEqual({ code: "TECHNICIAN_DONE", message: "That technician has finished on this visit.", details: { technicianId: TECH } });
+    (writer as unknown as Mock).mockResolvedValue({ ok: false, reason: "has_progress" });
+    body = await (await call(fn, method)).json();
+    expect(body.error.message).toBe("A technician has started this visit. To move it anyway, use Move… on the calendar.");
+    expect(logAudit).not.toHaveBeenCalled();
+  });
+});
