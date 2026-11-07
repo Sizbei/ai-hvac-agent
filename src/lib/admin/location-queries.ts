@@ -12,7 +12,7 @@ import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { encrypt, decrypt, blindIndex } from "@/lib/crypto";
 
 /** Normalize an address string for blind-index matching (case/space-insensitive). */
-function normalizeAddress(addr: string): string {
+export function normalizeAddress(addr: string): string {
   return addr.trim().toLowerCase().replace(/\s+/g, " ");
 }
 

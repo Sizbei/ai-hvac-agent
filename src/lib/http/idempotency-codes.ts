@@ -9,7 +9,7 @@
  * SEND_FAILED is stored because a pay-link message may already have gone out.
  * M3c adds the estimate and equipment terminal codes (spec §4) and INVOICE_CHANGED
  * (plan ruling 11: the bill's derived invoice was paid or voided, so the next try
- * needs a new key). */
+ * needs a new key). M3d adds the form-submit terminal codes. */
 export const STORED_CODES: ReadonlySet<string> = new Set([
   "INVOICE_LOCKED",
   "NO_LINES",
@@ -24,6 +24,12 @@ export const STORED_CODES: ReadonlySet<string> = new Set([
   "INVALID_OPTION",
   "EQUIPMENT_RETIRED",
   "INVOICE_CHANGED",
+  // M3d form submit (spec §4.3): terminal for this body; a new tap mints a new key.
+  "FORM_SUBMITTED",
+  "FORM_INCOMPLETE",
+  "ANSWERS_REMOVED",
+  "CUSTOMER_REMOVED",
+  "ANSWERS_UNREADABLE",
 ]);
 
 /** On the client a stored code means "this key is spent": mint a new one. */

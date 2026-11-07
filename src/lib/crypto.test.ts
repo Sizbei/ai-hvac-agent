@@ -5,6 +5,7 @@ import {
   encryptFields,
   decryptFields,
   blindIndex,
+  macHex,
 } from '@/lib/crypto';
 
 const TEST_KEY = 'a'.repeat(64); // 64 hex chars = 32 bytes
@@ -178,5 +179,14 @@ describe('encryptFields / decryptFields', () => {
     const encrypted = encryptFields(data, ['name', 'email']);
     expect(encrypted.name).toBe(''); // empty string left as-is
     expect(encrypted.email).not.toBe('test@test.com');
+  });
+});
+
+describe('macHex (M3d)', () => {
+  it('is blindIndex under the blind-index label, and a different label gives a different digest', () => {
+    expect(macHex('hvac-blind-index-v1', 'pat@example.com')).toBe(blindIndex('pat@example.com'));
+    expect(macHex('hvac-form-changes-v1', 'pat@example.com')).not.toBe(blindIndex('pat@example.com'));
+    expect(macHex('hvac-form-changes-v1', '{}')).toMatch(/^[0-9a-f]{64}$/);
+    expect(macHex('hvac-form-changes-v1', '')).toMatch(/^[0-9a-f]{64}$/);
   });
 });

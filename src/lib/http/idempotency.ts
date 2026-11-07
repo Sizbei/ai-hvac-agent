@@ -65,9 +65,14 @@ function canonical(value: unknown): unknown {
 
 const sha256Hex = (s: string) => createHash("sha256").update(s).digest("hex");
 
+/** The canonical JSON text: object keys sorted recursively, undefined dropped, arrays in order; null/undefined → "{}". */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonical(value ?? {}));
+}
+
 /** sha256 hex of the canonical JSON; null/undefined/empty bodies hash "{}". */
 export function canonicalHash(body: unknown): string {
-  return sha256Hex(JSON.stringify(canonical(body ?? {})));
+  return sha256Hex(canonicalJson(body));
 }
 
 export function multipartHash(p: { route: string; requestId: string; fileSha256: string; name: string }): string {
@@ -86,7 +91,7 @@ export function materialLineId(invoiceId: string, jobMaterialId: string): string
   return uuidv5(`${invoiceId}|material|${jobMaterialId}`, M3B_NAMESPACE);
 }
 
-export function officeId(kind: "payment" | "refund", organizationId: string, clientToken: string): string {
+export function officeId(kind: "payment" | "refund" | "form", organizationId: string, clientToken: string): string {
   return uuidv5(`${organizationId}|${kind}|${clientToken}`, M3B_NAMESPACE);
 }
 

@@ -11,6 +11,7 @@ import {
   M3B_NAMESPACE,
   parseIdempotencyKey,
   canonicalHash,
+  canonicalJson,
   multipartHash,
   derivedIdInput,
   derivedId,
@@ -460,7 +461,7 @@ describe("toResponse", () => {
 describe("idempotency-codes", () => {
   it("STORED_CODES is exactly the deterministic set, shared with the client", () => {
     expect([...STORED_CODES].sort()).toEqual(
-      ["ALREADY_BILLED", "ALREADY_DECIDED", "EQUIPMENT_RETIRED", "ESTIMATE_EXPIRED", "INVALID_INPUT", "INVALID_OPTION", "INVOICE_CHANGED", "INVOICE_LOCKED", "INVOICE_VOIDED", "ITEM_NOT_FOUND", "NO_LINES", "SEND_FAILED", "VALIDATION_ERROR"],
+      ["ALREADY_BILLED", "ALREADY_DECIDED", "ANSWERS_REMOVED", "ANSWERS_UNREADABLE", "CUSTOMER_REMOVED", "EQUIPMENT_RETIRED", "ESTIMATE_EXPIRED", "FORM_INCOMPLETE", "FORM_SUBMITTED", "INVALID_INPUT", "INVALID_OPTION", "INVOICE_CHANGED", "INVOICE_LOCKED", "INVOICE_VOIDED", "ITEM_NOT_FOUND", "NO_LINES", "SEND_FAILED", "VALIDATION_ERROR"],
     );
     expect(CLIENT_SPENT_CODES).toBe(STORED_CODES);
   });
@@ -512,5 +513,18 @@ describe("tech derived ids vs office ids (no collision)", () => {
     expect(derivedId(scope, "payment")).not.toBe(officeId("payment", ORG, TOKEN));
     expect(derivedId(scope, "refund")).not.toBe(officeId("refund", ORG, TOKEN));
     expect(officeId("payment", ORG, TOKEN)).toBe(officeId("payment", ORG, TOKEN));
+  });
+});
+
+describe("canonicalJson (M3d)", () => {
+  it("sorts keys recursively, drops undefined, keeps array order; canonicalHash hashes it", () => {
+    expect(canonicalJson({ b: 1, a: { d: [3, 1], c: undefined } })).toBe('{"a":{"d":[3,1]},"b":1}');
+    expect(canonicalJson(undefined)).toBe("{}");
+    expect(canonicalHash({ b: 1, a: 2 })).toBe(canonicalHash({ a: 2, b: 1 }));
+  });
+  it("officeId takes the form kind and differs from the payment kind", () => {
+    const ORG = "11111111-1111-4111-8111-111111111111";
+    const TOKEN = "22222222-2222-4222-8222-222222222222";
+    expect(officeId("form", ORG, TOKEN)).not.toBe(officeId("payment", ORG, TOKEN));
   });
 });

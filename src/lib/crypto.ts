@@ -103,6 +103,21 @@ export function blindIndex(normalizedValue: string): string {
 }
 
 /**
+ * HMAC-SHA256 hex under ENCRYPTION_KEY, domain-separated by `label` exactly as
+ * `blindIndex` is by "hvac-blind-index-v1" (label, NUL, value). M3d hashes a
+ * form submit's answers with "hvac-form-changes-v1" so the stored request hash
+ * can't be dictionary-attacked back to answers and never shares the contact
+ * blind-index domain. Unlike blindIndex it takes any string, empty included.
+ */
+export function macHex(label: string, value: string): string {
+  return createHmac("sha256", getEncryptionKey())
+    .update(label)
+    .update("\0")
+    .update(value)
+    .digest("hex");
+}
+
+/**
  * Encrypts specified string fields on an object, returning a new object (immutable).
  * Non-string or empty fields are left unchanged.
  */
