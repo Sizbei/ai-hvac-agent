@@ -3,6 +3,7 @@ export const SETTINGS_TABS = [
   'branding',
   'services',
   'job-types',
+  'forms',
   'tags',
   'business',
   'faqs',

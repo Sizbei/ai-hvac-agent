@@ -14,6 +14,7 @@ import {
   Plug,
   Truck,
   ClipboardList,
+  ListChecks,
   Tag,
 } from 'lucide-react';
 import { useOrgSettings } from '@/hooks/use-org-settings';
@@ -35,6 +36,7 @@ import { AiModelPanel } from '@/components/admin/settings/ai-model-panel';
 import { PlatformLinkPanel } from '@/components/admin/settings/platform-link-panel';
 import { TagsPanel } from '@/components/admin/settings/tags-panel';
 import { JobTypesPanel } from '@/components/admin/settings/job-types-panel';
+import { FormsPanel } from '@/components/admin/settings/forms-panel';
 import { BillingLinkPanel } from '@/components/admin/settings/billing-link-panel';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
@@ -153,6 +155,10 @@ export default function SettingsPage() {
               <ClipboardList className="size-4" />
               Job types
             </TabsTrigger>
+            <TabsTrigger value="forms">
+              <ListChecks className="size-4" />
+              Forms
+            </TabsTrigger>
             <TabsTrigger value="tags">
               <Tag className="size-4" />
               Tags
@@ -208,6 +214,9 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="job-types" className="mt-6">
             <JobTypesPanel />
+          </TabsContent>
+          <TabsContent value="forms" className="mt-6">
+            <FormsPanel />
           </TabsContent>
           <TabsContent value="tags" className="mt-6">
             <TagsPanel />

@@ -6,6 +6,7 @@ describe('resolveSettingsTab', () => {
     expect(resolveSettingsTab('after-hours')).toBe('after-hours');
     expect(resolveSettingsTab(null)).toBe('branding');
     expect(resolveSettingsTab('nope')).toBe('branding');
+    expect(resolveSettingsTab('forms')).toBe('forms');
   });
 });
 
