@@ -188,3 +188,73 @@ Rejected:
 - Forms-tab line about FieldPulse orgs (B M7): moot under R2-1.
 
 Verdict: v3 for round 3.
+
+## Spec round 3 (v3 → v4 FINAL), 2026-11-07 — 2 critics (A correctness/data/concurrency/erasure, B UX/buildability)
+
+Counts: A 1 blocker / 2 major / 10 minor; B 0 blocker / 9 major / 17 minor. Neither signed off. Lead
+rulings R3-1…R3-13 binding.
+
+Applied:
+- Submissions survive the visit trigger (A B1, R3-1): `form_submissions.appointment_id` is NO ACTION; 0058
+  `CREATE OR REPLACE`s `sync_request_appointment()` with 0050's body verbatim (`drizzle/0050_m3a_run_the_day.sql`,
+  the live definition; v3 wrongly cited 0049) and one change: `v_has_progress` also counts a form submission
+  on the visit. Render test diffs the body against 0050; integration (g) covers an unassigned, undated
+  synced job and a progress-less native completed job keeping visit and submission, and a submission-less
+  visit still deleted as in 0050.
+- One "visit counts" rule (A M1, R3-2): not cancelled, or work completed/progressed on it, or it has a
+  submission. It governs the GET `visit` check, `submittedOn`, links, `missingRequired` and the office label
+  (`· ended` vs `· cancelled`); writes need a live visit (`VISIT_ENDED`). Integration (m).
+- Photos vs erase (A M2, R3-3): the photo write is `runBatch([lockRequestSql, INSERT … WHERE NOT anonymised
+  RETURNING id])`; the erase batch locks the customer's requests as statement 0, so its attachments count and
+  DELETE see one set; two-connection integration case. The office uploader stays ungated (stated, §10).
+- Helper access (B M4, R3-4): native writes allowed when the request is in `BILL_STATUSES` or the caller's
+  own row on that visit has `arrived_at` / `started_at` / `completed_at`; synced keeps "not cancelled".
+  Un-cancel stated (A m4): 0050 leaves cancelled rows cancelled, so the technician sees NOT_ASSIGNED with
+  "Ask the office to assign you to this job again." until reassigned.
+- Sign-in link (B M1, R3-5): plain `/tech-login`; copy "Sign in again, then open this job again."; return-to
+  listed out of scope.
+- Membership (B M2, R3-6): `member | none | withheld`, each with copy; `withheld` doesn't leak existence;
+  population = every non-cancelled request, counted in SQL with no cap (A m10).
+- Erased forms (B M5, R3-7): the card carries `erased`; `formChips` precedence puts `Answers removed` first;
+  the office omits only unerased answerless drafts (B minor 12); `hasAnswers` = `values_encrypted IS NOT
+  NULL` (the writer stores NULL for an empty document).
+- Touched fields (B M3, R3-8): each PUT freezes its body; on landing, base advances by that body and a field
+  leaves `touched` only if its current value equals the landed one; edits during the flight stay touched.
+- Read-only codes (B M6, R3-9): `writeBlockedReason` enumerated (10 values) with `readOnlyCopy`;
+  FORM_LOCKED split into `ANSWERS_REMOVED`, `CUSTOMER_REMOVED`, `ANSWERS_UNREADABLE` (all stored, each with
+  copy); autosave refusals re-GET and render the reason; 404 → "This form is no longer on this job."
+- Unknown submit (B M7, R3-10): page locked with `MAY_NOT_HAVE_SAVED` + `Try again`, as M3c `pageLocked`;
+  draft unknowns keep "Not saved yet. Retrying…".
+- Builder first Save (B M8, R3-11): 201 → `router.replace` to the form URL, edit continues with `version: 1`;
+  200 replay → GET the row, stay dirty with its version when the builder differs, so the next Save PATCHes;
+  unknown → re-POST the same token; `firstSaveOutcome` tests.
+- features.csv (B M9, R3-12): 131 and 122 `partial` with notes; 125 `yes` with the synced-technician note
+  (A m5); 126 `no`.
+- Minors (R3-13): replay check before decrypt/apply/measure, and a values-size 400 offers no same-body retry
+  (A m1); `frontGates` takes a `limit`, `RATE_LIMITS.techFormDraft` 60/min, route test 31st/61st (A m3); the
+  submit audit gated on `status = 'submitted' AND submit_key AND xmin` (A m2); native = no FieldPulse and no
+  HCP id, HCP takes the synced window (A m7); the unique index leads with `appointment_id` (A m8a); CHECK
+  erased ⇒ no answers (A m8b); journal `when` > 1793975702677 (A m8c); `macHex("hvac-form-changes-v1", …)`
+  in crypto.ts and an exported `canonicalJson` defined in the spec (A m9); `missingRequired` on completed
+  requests only for forms created before completion (A m6); synced coverage stated with dev counts (A m5).
+  B minors: close-out citation `:145` and the ready-state order (1); `Discard changes` added (2); archive
+  confirm corrected (3); range copy "can't be above" (4); "to N characters or fewer" (5); "questions and
+  headings" (6); plural number copy and `src/lib/format/plural.ts` (7); `out_of_bounds` with its own copy
+  (8); "1,2" mid-typing is partial (9); `myVisit` defined as the job page's `?visit=` rule (10); `none`
+  scope still lists this job's estimates, card copy, non-tappable empty card (11); `answerText` (13); new
+  form starts with one blank Checkbox, errors shown for touched fields or after tapping disabled Save
+  (14); retry schedule and read rates (15); the pending submit intent named as the one browser copy (16);
+  17 a–l (browser Back wording, Clear answers buttons and partial reset, reopen STALE copy, explicit resize
+  steps, CUSTOMER_REMOVED shows Discard only, file tile link, `h-11` Change, admin copy says technician app,
+  one `aria-live` without `Saving…`, `planName` verbatim, a synced-job step in the walk, builder GET `{
+  form, submissionCount }`).
+
+Rejected:
+- `/tech-login?next=` with a validated return-to (B M1 option b): not taken per R3-5; listed out of scope.
+- Folding a lead-row re-arm on un-cancel into the trigger (A m4 option a): not taken; R3-1 allows only the
+  one predicate change, and the office reassigning is the stated path.
+- Unique index on `(appointment_id, form_id)` alone (A m8a option): kept the three columns with
+  `appointment_id` first, so the architecture's "unique per request/visit/form" reads directly from it.
+
+Verdict: v4 FINAL. Round 3's blocker (submissions deleted by the visit trigger) is closed by R3-1; every
+other finding was a text edit, applied. The plan and the code get their own reviews.
