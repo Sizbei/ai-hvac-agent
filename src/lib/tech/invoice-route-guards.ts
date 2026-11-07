@@ -55,15 +55,16 @@ export function statusRefusal(
 const fail = (message: string, code: string, status: number) =>
   ({ ok: false as const, response: errorResponse(message, code, status) });
 
-/** session → same-origin → uuid → rate limit. */
-async function frontGates(
+/** session → same-origin → uuid → rate limit (`limit` defaults to the 30/min write limit; M3d draft autosave passes 60/min). */
+export async function frontGates(
   request: NextRequest, id: string, bucket: string,
+  limit: { readonly maxRequests: number; readonly windowMs: number } = RATE_LIMITS.adminMutation,
 ): Promise<{ ok: true; session: TechSessionPayload } | { ok: false; response: NextResponse }> {
   const session = await getTechSession();
   if (!session) return fail("Unauthorized", "UNAUTHORIZED", 401);
   if (!isSameOriginRequest(request)) return fail("Forbidden", "FORBIDDEN", 403);
   if (!isUuid(id)) return fail("Invalid request ID format", "INVALID_ID", 400);
-  const rate = slidingWindow(`tech:${bucket}:write:${session.userId}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
+  const rate = slidingWindow(`tech:${bucket}:write:${session.userId}`, limit.maxRequests, limit.windowMs);
   if (!rate.allowed) return fail("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
   return { ok: true, session };
 }

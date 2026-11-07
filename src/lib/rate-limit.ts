@@ -92,6 +92,9 @@ export const RATE_LIMITS = {
   // a 30s timer. 60/min/user comfortably covers a few open tabs while still
   // capping a stuck/re-mounting client.
   adminRead: { maxRequests: 60, windowMs: 60_000 },
+  // M3d form draft autosave (PUT …/forms/[formId]/draft): a page sends at most
+  // ~20 a minute; 60 leaves room for two phones and retries.
+  techFormDraft: { maxRequests: 60, windowMs: 60_000 },
   // Webhook endpoints (Fieldpulse, Housecall Pro, etc.) — higher limit since
   // they're server-to-server and events can burst.
   webhook: { maxRequests: 200, windowMs: 60_000 },
