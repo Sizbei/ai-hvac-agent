@@ -43,7 +43,7 @@ export function siteMatches(self: SiteSelf, candidates: readonly SiteCandidate[]
 /**
  * Membership is shown only when this request has an address, the customer has
  * at most one location, and EVERY non-cancelled request of the customer (this
- * one included) has an address normalising to the same one (spec §7.6).
+ * one included unless cancelled; self is checked through `selfAddress`) has an address normalising to the same one (spec §7.6).
  */
 export function membershipEvaluable(selfAddress: string | null, locationCount: number, allAddresses: readonly (string | null)[]): boolean {
   return selfAddress !== null && locationCount <= 1 && allAddresses.every((a) => a === selfAddress);

@@ -82,6 +82,10 @@ export function allAddressesSql(org: string, cust: string): SQL {
     WHERE organization_id = ${org}::uuid AND customer_id = ${cust}::uuid AND status <> 'cancelled'::request_status`;
 }
 
+export function locationCountSql(org: string, cust: string): SQL {
+  return sql`SELECT count(*)::int AS n FROM customer_locations WHERE organization_id = ${org}::uuid AND customer_id = ${cust}::uuid`;
+}
+
 export function membershipSql(org: string, cust: string): SQL {
   return sql`SELECT m.id, m.started_at, m.current_period_end, pl.name AS plan_name, pl.visits_per_year
     FROM customer_memberships m JOIN membership_plans pl ON pl.id = m.plan_id AND pl.organization_id = ${org}::uuid
@@ -101,7 +105,7 @@ export function upcomingVisitsSql(org: string, membershipId: string, timeZone: s
 async function readMembership(org: string, cust: string, rid: string, selfAddress: string | null): Promise<SiteMembership> {
   if (selfAddress === null) return { state: "withheld" };
   const [[locs], all] = await Promise.all([
-    readRows(sql`SELECT count(*)::int AS n FROM customer_locations WHERE organization_id = ${org}::uuid AND customer_id = ${cust}::uuid`),
+    readRows(locationCountSql(org, cust)),
     readRows(allAddressesSql(org, cust)),
   ]);
   if (!membershipEvaluable(selfAddress, Number(locs?.n ?? 0), all.map((r) => normalizedAddress(r.address_encrypted)))) {

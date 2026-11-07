@@ -28,7 +28,7 @@ vi.mock("@/lib/crypto", () => ({
 }));
 
 import {
-  allAddressesSql, candidatesSql, getSiteView, membershipSql, normalizedAddress, openEstimatesSql, pastJobsSql, siteSelfSql,
+  allAddressesSql, candidatesSql, locationCountSql, getSiteView, membershipSql, normalizedAddress, openEstimatesSql, pastJobsSql, siteSelfSql,
   unaddressedSql, upcomingVisitsSql,
 } from "./site-queries";
 import { findActiveVisit, findReadableJob } from "@/lib/tech/ownership";
@@ -75,6 +75,19 @@ describe("site SQL binds the org on every table (spec §7.6)", () => {
       expect(text(b)).toContain("status <> 'cancelled'::request_status");
     }
     expect(text(unaddressedSql(ORG, CUST, RID))).toContain("AND id <> $");
+  });
+
+  it("customer and request scope predicates are pinned", () => {
+    const l = text(locationCountSql(ORG, CUST));
+    expect(orgCount(locationCountSql(ORG, CUST))).toBe(1);
+    expect(l).toContain("AND customer_id = $");
+    const c = text(candidatesSql(ORG, CUST, RID));
+    expect(c).toContain("AND customer_id = $");
+    expect(c).toContain("AND id <> $");
+    expect(text(unaddressedSql(ORG, CUST, RID))).toContain("AND customer_id = $");
+    const m = text(membershipSql(ORG, CUST));
+    expect(m).toContain("AND m.customer_id = $");
+    expect(m).toContain("m.status = 'active'::membership_status");
   });
 
   it("past jobs exclude unstarted future jobs and never select description, notes or contact columns", () => {

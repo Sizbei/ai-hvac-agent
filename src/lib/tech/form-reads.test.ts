@@ -82,6 +82,16 @@ describe("getJobForms (spec §6)", () => {
     expect(render(submittedElsewhereSql(ORG, RID, AID, FORM))).toContain("AND s.service_request_id = $");
   });
 
+  it("form submission scope predicates are pinned", () => {
+    expect(render(cardSubmissionsSql(ORG, RID))).toContain("AND s.service_request_id = $");
+    const o = render(oneSubmissionSql(ORG, RID, AID, FORM));
+    expect(o).toContain("s.appointment_id = $");
+    expect(o).toContain("s.form_id = $");
+    const e = render(submittedElsewhereSql(ORG, RID, AID, FORM));
+    expect(e).toContain("s.status = 'submitted' AND s.appointment_id <> $");
+    expect(e).toContain("ORDER BY s.submitted_at DESC, s.id LIMIT 1");
+  });
+
   it("hasAnswers is values_encrypted IS NOT NULL (no decrypt); every table org-bound", () => {
     const t = render(cardSubmissionsSql(ORG, RID));
     expect(t).toContain("s.values_encrypted IS NOT NULL AS has_answers");

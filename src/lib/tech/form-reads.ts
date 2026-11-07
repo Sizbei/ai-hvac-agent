@@ -107,7 +107,7 @@ export function submittedElsewhereSql(org: string, rid: string, aid: string, for
     JOIN appointments p ON p.id = s.appointment_id AND p.organization_id = ${org}::uuid
     WHERE s.organization_id = ${org}::uuid AND s.service_request_id = ${rid}::uuid AND s.form_id = ${formId}::uuid
       AND s.status = 'submitted' AND s.appointment_id <> ${aid}::uuid AND ${visitCountsSql(org, "p")}
-    ORDER BY s.submitted_at DESC LIMIT 1`;
+    ORDER BY s.submitted_at DESC, s.id LIMIT 1`;
 }
 
 export type FormResult = { kind: "not_found" } | { kind: "archived" } | { kind: "ok"; view: TechFormView };
@@ -140,6 +140,7 @@ export async function getJobForm(org: string, me: string, rid: string, rawFormId
     view: {
       form: {
         name: String(row ? row.form_name : form.name),
+        // Description is not snapshotted on the submission: it always comes from the live form.
         description: strOrNull(form.description),
         version: Number(row ? row.form_version : form.version),
         fields,
