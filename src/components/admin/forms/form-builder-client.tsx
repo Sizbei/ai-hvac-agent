@@ -125,6 +125,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     setDraft(next);
     setTouched((t) => (t.has(target) ? t : new Set([...t, target])));
     setMessage(null);
+    setHeaderMessage(null);
     setStale(false);
   };
   const editField = (index: number, next: BuilderField) => {
@@ -140,6 +141,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     }
     setSaving(true);
     setMessage(null);
+    setHeaderMessage(null);
     setStale(false);
     const def = toDefinition(draft);
     try {
@@ -423,7 +425,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
             {saving ? 'Saving…' : 'Save'}
           </Button>
           {formId && dirty && loaded && (
-            <Button type="button" variant="outline" disabled={saving} onClick={() => { setDraft(loaded); setTouched(new Set()); setShowAll(false); setMessage(null); setUndo(null); }}>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => { setDraft(loaded); setTouched(new Set()); setShowAll(false); setMessage(null); setHeaderMessage(null); setUndo(null); }}>
               Discard changes
             </Button>
           )}
