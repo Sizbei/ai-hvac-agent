@@ -24,6 +24,7 @@ import { GET, POST } from "./route";
 import { getTechSession } from "@/lib/auth/tech-session";
 import { isJobOwnedByTech, listJobPhotos } from "@/lib/tech/field-queries";
 import { addJobPhoto } from "@/lib/tech/photo-writes";
+import { logger } from "@/lib/logger";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 const req = () => new Request("http://t/api") as never;
@@ -96,5 +97,22 @@ describe("POST /api/tech/jobs/[id]/photo (M3d spec §7.7)", () => {
     (addJobPhoto as unknown as Mock).mockResolvedValueOnce({ ok: false, reason: "not_owned" });
     expect((await POST(upload(jpeg()), ctx(VALID_ID) as never)).status).toBe(404);
     expect(storage.deleteFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed write batch: the upload is deleted and the answer is 409 STALE (retryable)", async () => {
+    (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    (addJobPhoto as unknown as Mock).mockResolvedValue({ ok: false, reason: "stale" });
+    const res = await POST(upload(jpeg()), ctx(VALID_ID) as never);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ success: false, error: { code: "STALE", message: "This job changed. Try again." } });
+    expect(storage.deleteFile).toHaveBeenCalledWith("org/job/before.jpg");
+  });
+
+  it("logs a failed orphan delete (ids only) and still answers", async () => {
+    (isJobOwnedByTech as unknown as Mock).mockResolvedValue(true);
+    (addJobPhoto as unknown as Mock).mockResolvedValue({ ok: false, reason: "not_owned" });
+    storage.deleteFile.mockRejectedValueOnce(new Error("r2 down"));
+    expect((await POST(upload(jpeg()), ctx(VALID_ID) as never)).status).toBe(404);
+    expect(logger.warn).toHaveBeenCalledWith({ storageKey: "org/job/before.jpg", serviceRequestId: VALID_ID }, "orphan upload delete failed");
   });
 });

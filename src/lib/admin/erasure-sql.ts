@@ -17,6 +17,9 @@ const customerRequestIds = (org: string, cust: string): SQL =>
  * The customer's attachments: their own (office uploads), chat uploads in their
  * sessions, files on their requests (technician photos and PDFs, office request
  * documents) and files on their equipment. Parenthesised: it holds ORs.
+ * The request and equipment arms bind organization_id in their subqueries; the
+ * customer_id and session_id arms do NOT. Every caller must AND this with
+ * `attachments.organization_id = $org` (eraseAuditSql and eraseAttachmentsSql do).
  */
 export function attachmentMatchSql(org: string, cust: string, sessionIds: readonly string[]): SQL {
   return sql`(customer_id = ${cust}::uuid

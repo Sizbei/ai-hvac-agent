@@ -18,7 +18,7 @@ export interface JobPhotoInput {
 
 export type AddJobPhotoResult =
   | { readonly ok: true; readonly id: string }
-  | { readonly ok: false; readonly reason: "not_owned" | "customer_removed" };
+  | { readonly ok: false; readonly reason: "not_owned" | "customer_removed" | "stale" };
 
 const NOT_ERASED = (org: string): SQL =>
   sql`NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = service_requests.customer_id AND c.organization_id = ${org}::uuid AND c.anonymized_at IS NOT NULL)`;
@@ -34,7 +34,9 @@ export function jobPhotoInsertSql(org: string, me: string, rid: string, input: J
 
 export async function addJobPhoto(org: string, me: string, rid: string, input: JobPhotoInput): Promise<AddJobPhotoResult> {
   const out = await runBatch([lockRequestSql(org, rid), jobPhotoInsertSql(org, me, rid, input)]);
-  if (Array.isArray(out) && out[1]![0]) return { ok: true, id: String(out[1]![0].id) };
+  // A failed batch (deadlock) is retryable, never "not yours" (equipment-writes does the same).
+  if (!Array.isArray(out)) return { ok: false, reason: "stale" };
+  if (out[1]![0]) return { ok: true, id: String(out[1]![0].id) };
   // Nothing written: say why (the route deletes the uploaded object either way).
   const [r] = await readRows(sql`SELECT ${NOT_ERASED(org)} AS live FROM service_requests
     WHERE service_requests.id = ${rid}::uuid AND service_requests.organization_id = ${org}::uuid AND ${techCanReadSql(org, me)}`);

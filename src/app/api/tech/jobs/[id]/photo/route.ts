@@ -98,7 +98,12 @@ export async function POST(
     if (!result.ok) {
       // Race: the job was reassigned, or its customer erased, between the
       // ownership check and the write. Clean up the orphaned upload first.
-      await storageClient.deleteFile(storageKey).catch(() => {});
+      await storageClient.deleteFile(storageKey).catch(() => {
+        logger.warn({ storageKey, serviceRequestId: id }, "orphan upload delete failed");
+      });
+      if (result.reason === "stale") {
+        return errorResponse("This job changed. Try again.", "STALE", 409);
+      }
       if (result.reason === "customer_removed") {
         return errorResponse("This job's customer was removed.", "CUSTOMER_REMOVED", 409);
       }
