@@ -6,15 +6,19 @@
  * to R2, then records the metadata in the shared attachments table linked to the
  * job. Ownership is enforced in addJobPhoto (assignee + tenant); on a non-assignee
  * we delete the orphaned upload and 404, keeping the guard authoritative in one
- * place — mirrors the signature route.
+ * place — mirrors the signature route. M3d: 4 MB cap (the phone resizes to it;
+ * Vercel caps bodies at 4.5 MB), uuid check on POST, and the insert runs under
+ * the request lock and refuses an erased customer (409 CUSTOMER_REMOVED, the
+ * uploaded object deleted).
  */
 import { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
-import { addJobPhoto, listJobPhotos, isJobOwnedByTech } from "@/lib/tech/field-queries";
+import { listJobPhotos, isJobOwnedByTech } from "@/lib/tech/field-queries";
+import { addJobPhoto } from "@/lib/tech/photo-writes";
+import { FILE_TOO_LARGE_COPY, TECH_UPLOAD_LIMIT_BYTES } from "@/lib/tech/upload-limits";
 import {
   getStorageClient,
   generateStorageKey,
-  MAX_DOCUMENT_FILE_SIZE,
   ADMIN_DOCUMENT_MIME_TYPES,
 } from "@/lib/storage/r2-client";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -44,11 +48,17 @@ export async function POST(
     }
 
     const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid request ID format", "INVALID_ID", 400);
+    }
 
     const formData = await request.formData();
     const file = formData.get("file");
     if (!(file instanceof File)) {
       return errorResponse("A photo file is required", "INVALID_INPUT", 400);
+    }
+    if (file.size > TECH_UPLOAD_LIMIT_BYTES) {
+      return errorResponse(FILE_TOO_LARGE_COPY, "INVALID_INPUT", 400);
     }
 
     const storageClient = getStorageClient();
@@ -56,12 +66,12 @@ export async function POST(
     // allowlist would reject them).
     const validatedMime = storageClient.validateFile(
       file,
-      MAX_DOCUMENT_FILE_SIZE,
+      TECH_UPLOAD_LIMIT_BYTES,
       ADMIN_DOCUMENT_MIME_TYPES,
     );
     if (!validatedMime) {
       return errorResponse(
-        "Invalid file. Allowed: JPEG, PNG, WEBP, HEIC, or PDF (max 20 MB).",
+        "Invalid file. Allowed: JPEG, PNG, WEBP, HEIC, or PDF (max 4 MB).",
         "INVALID_INPUT",
         400,
       );
@@ -86,9 +96,12 @@ export async function POST(
       storageKey,
     });
     if (!result.ok) {
-      // Race: job was reassigned between the ownership check and the write.
-      // Clean up the orphaned upload, then 404.
+      // Race: the job was reassigned, or its customer erased, between the
+      // ownership check and the write. Clean up the orphaned upload first.
       await storageClient.deleteFile(storageKey).catch(() => {});
+      if (result.reason === "customer_removed") {
+        return errorResponse("This job's customer was removed.", "CUSTOMER_REMOVED", 409);
+      }
       return errorResponse(
         "Job not found or not assigned to you",
         "NOT_FOUND",

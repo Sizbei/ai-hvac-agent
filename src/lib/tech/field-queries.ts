@@ -575,51 +575,7 @@ export async function getJobTimelineForTech(
   };
 }
 
-export interface JobPhotoInput {
-  readonly filename: string;
-  readonly mimeType: string;
-  readonly size: number;
-  readonly storageKey: string;
-}
-
-export type AddJobPhotoResult =
-  | { readonly ok: true; readonly id: string }
-  | { readonly ok: false; readonly reason: "not_owned" };
-
-/**
- * Record a job photo the tech uploaded. The file itself lives in R2 (uploaded by
- * the route); this stores the metadata in the shared `attachments` table linked
- * to the service request (the Stage-7 serviceRequestId link). Assignee + tenant
- * guarded — a tech may only attach to their OWN job.
- */
-export async function addJobPhoto(
-  organizationId: string,
-  techUserId: string,
-  serviceRequestId: string,
-  input: JobPhotoInput,
-): Promise<AddJobPhotoResult> {
-  const owned = await findOwnedJob(organizationId, techUserId, serviceRequestId);
-  if (!owned) {
-    return { ok: false, reason: "not_owned" };
-  }
-
-  const [created] = await db
-    .insert(attachments)
-    .values({
-      organizationId,
-      serviceRequestId,
-      filename: input.filename,
-      mimeType: input.mimeType,
-      size: input.size,
-      storageKey: input.storageKey,
-    })
-    .returning({ id: attachments.id });
-
-  if (!created) {
-    throw new Error("Failed to record job photo");
-  }
-  return { ok: true, id: created.id };
-}
+// addJobPhoto moved to src/lib/tech/photo-writes.ts (M3d: request lock + erased-customer refusal).
 
 export interface JobPhotoRow {
   readonly id: string;
