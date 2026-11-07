@@ -1,15 +1,15 @@
 ---
 name: page-settings
-description: Use when working on the /admin/settings page — 11-tab org configuration (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations, job types, tags) plus the super-admin-only /admin/settings/billing sub-page.
+description: Use when working on the /admin/settings page — 12-tab org configuration (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations, job types, forms, tags) plus the super-admin-only /admin/settings/billing sub-page.
 ---
 
 # Settings (/admin/settings + /admin/settings/billing)
 
-**Purpose:** full org configuration surface. Eleven tabs (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations, job types, tags) cover every tunable that
+**Purpose:** full org configuration surface. Twelve tabs (branding, services, business info, custom Q&A, embed/keys, limits, after-hours, dispatch, integrations, job types, forms, tags) cover every tunable that
 affects the AI chatbot's appearance, scope, and behavior, plus integration
 credentials and dispatch policy.
 
-**Files:** page `src/app/admin/(dashboard)/settings/page.tsx` (11-tab shell, `narrow`
+**Files:** page `src/app/admin/(dashboard)/settings/page.tsx` (12-tab shell, `narrow`
 layout) · billing sub-page `src/app/admin/(dashboard)/settings/billing/page.tsx`
 (server component, access-gated) · hook `src/hooks/use-org-settings.ts` · panels
 `src/components/admin/settings/branding-panel.tsx` ·
@@ -51,6 +51,9 @@ and `.../tags-panel.tsx`; types/schemas `src/lib/admin/job-type-types.ts`,
 - `GET/PUT /api/admin/tags/[entity]/[id]` reads/replaces the tags on one
   customer/location/job; unknown entity or tag id -> 400 `UNKNOWN_TAG`, missing
   target row -> 404.
+
+**Forms tab (M3d, `?tab=forms`):** `src/components/admin/settings/forms-panel.tsx`; builder `/admin/settings/forms/new` and `/admin/settings/forms/[id]` (`src/app/admin/(dashboard)/settings/forms/[id]/page.tsx`, `src/components/admin/forms/form-builder-client.tsx`, `form-field-editor.tsx`, pure `src/lib/admin/form-builder.ts`). `New form` inserts nothing; the first valid Save POSTs a client token (`officeId("form", org, token)`; 201 → URL replaced natively, 200 replay → GET and stay dirty if different, unknown → re-POST the same token). Edits PATCH `{ version, definition }`, archive/restore `{ version, active }`; 409 STALE / NAME_TAKEN, 400 UNKNOWN_JOB_TYPE, 409 LIMIT_REACHED (100). Forms are archived, never deleted. Save is disabled with 'Fix these to save:' (one message per rule, `builderErrors`). Routes `src/app/api/admin/settings/forms/{route,[id]/route}.ts`, queries `src/lib/admin/form-queries.ts`.
+- **Builder accessibility (Task 9 review):** switches are named by `aria-labelledby` / `aria-describedby` only (no `aria-label`, which Base UI's labelledby would double); Save is `aria-disabled`, not `disabled`, so it stays focusable and a press lists every reason under "Fix these to save:" (`aria-live="polite"`); after Move up/down focus stays on the same button (or its twin at either end), after Remove it moves to Undo; buttons read "Move question N up/down" / "Remove question N". Archive/Restore while dirty and every archive failure show a message under the header (STALE offers Reload); the header message clears on edit, save and discard; Discard clears Undo.
 
 **Tabs:** ids live in `src/lib/admin/settings-tabs.ts` (`resolveSettingsTab`,
 `settingsTabSearch`). Switching tabs rewrites `?tab=` with

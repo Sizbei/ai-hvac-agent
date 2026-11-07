@@ -345,6 +345,67 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
 - **Verify:** `npx vitest run src/lib/tech/estimate-*.test.ts src/lib/tech/equipment-*.test.ts src/lib/tech/customer-view-state.test.ts "src/app/api/tech/jobs/[id]/estimates" "src/app/api/tech/jobs/[id]/equipment"`;
   dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-estimate.test.ts`.
 
+**Forms + site view (M3d, `/tech/jobs/[id]/forms/[formId]`, `/tech/jobs/[id]/site`):**
+- **Files:** pages `src/app/tech/jobs/[id]/forms/[formId]/page.tsx`, `src/app/tech/jobs/[id]/site/page.tsx` ·
+  components `src/components/tech/forms/` (`forms-card.tsx`, `form-fill-client.tsx`,
+  `form-field-input.tsx`), `src/components/tech/site/` (`site-card.tsx`, `site-page-client.tsx`,
+  `fetch-site.ts`), `job-photos-card.tsx` · writers `src/lib/tech/form-writes.ts`
+  (`saveFormDraft`, `submitForm`), `src/lib/tech/photo-writes.ts` (`addJobPhoto`) · reads
+  `src/lib/tech/form-reads.ts`, `src/lib/tech/site-queries.ts` · route guards
+  `src/lib/tech/form-route-guards.ts` (`techFormFront`, `formGateFail`, `findSubmitReplay`) · pure `src/lib/forms/`
+  (`form-schema.ts`, `form-values.ts`, `form-gates.ts`, `site-scope.ts`, `form-bodies.ts`),
+  `src/lib/tech/` (`form-fill-state.ts`, `form-save-machine.ts`, `form-copy.ts`, `form-view.ts`,
+  `site-display.ts`, `photo-resize.ts`, `upload-limits.ts`).
+- **Routes:** `GET /api/tech/jobs/[id]/forms?visit=`, `GET …/forms/[formId]?visit=`,
+  `PUT …/forms/[formId]/draft` (no key; `saveId` replay checked first, revision gate, 60/min
+  bucket `form-draft`), `POST …/forms/[formId]/submit` (keyed; hash over an HMAC of the
+  changes, `macHex("hvac-form-changes-v1", …)`), `GET /api/tech/jobs/[id]/site`.
+- **Who writes:** a non-cancelled row on THAT live visit; native on site (`BILL_STATUSES`) or
+  the caller's own row arrived/started/completed; synced (FieldPulse or HCP) any status but
+  cancelled. One gate read (`readFormGatesSql`) + `gateReason`, in this order: cancelled request
+  → JOB_CLOSED; erased customer → CUSTOMER_REMOVED; ended visit → VISIT_ENDED for a technician
+  with a row on it, else NOT_ASSIGNED; no live row → NOT_ASSIGNED; native and not on site →
+  NOT_ON_SITE. Replays run BEFORE the gates: the draft route's `findDraftReplay` (saveId), the
+  submit route's idempotency key, and inside the keyed run `findSubmitReplay` (a row already
+  submitted with this key's derived `submit_key` answers 200) runs before `formGateFail`, so a
+  committed submit whose response was lost still answers 200 after the visit ended or the job
+  was cancelled. A pre-read revision other than `baseRevision` is STALE before any decrypt.
+- **Visits counts** = live, or progressed/completed work on it, or a submission. Migration 0058
+  re-creates `sync_request_appointment()` with ONE added predicate: a visit with any
+  `form_submissions` row (an empty draft included) is kept (times nulled, lead demoted) instead
+  of deleted. `form_submissions.appointment_id` is NO ACTION.
+- **Client:** autosave timing is `form-save-machine.ts` (1.5 s debounce, one in flight, 3 s
+  floor, unknown re-sent first with its saveId, 3 → 30 s back-off, hidden/pagehide flush);
+  the `submitted` stop is final (`resume` never clears it, and the page stays read-only even if
+  the post-submit re-read fails). Answer bookkeeping is `form-fill-state.ts` (touched fields,
+  last valid number, landed body advances base); `mergeIntoInputs` reseeds `lastValid` for
+  untouched number fields, so a later half-typed number can't send a stale value over a
+  colleague's answer, and a live merge keeps half-typed numbers (touched ∪ carried). A failed
+  re-read after STALE retries after the machine's back-off instead of sticking on "Retrying…";
+  one re-read runs at a time (a call made meanwhile is queued, never dropped; autosave waits
+  while one is scheduled or in flight; a re-read times out into the back-off; a successful
+  save or submit cancels a scheduled re-read, and nothing re-reads a submitted page or runs
+  after unmount), and a recovered submit's changes are folded into the inputs as touched edits
+  first, so answers typed during the back-off survive the re-read. On FORM_CHANGED a field the
+  new version drops leaves the touched set and is listed under "Not saved".
+  The submit intent lives in `tech:estimate:<rid>:intents` as `form:submit:<formId>:<aid>`;
+  the fill page re-sends only an intent restored at mount. A live submit is never re-sent
+  automatically: a lost response locks the page on "Your last change may not have saved. Try
+  again." and only Try again sends it again (same key).
+- **Close-out:** required forms not submitted on any visit that counts show as non-blocking
+  "Fill in “…”" links in `close-out-sheet.tsx`; nothing blocks (row 126 deferred).
+- **Site:** match by `location_id`, else by `normalizeAddress` of the request's own address;
+  never the customer's other address, never a fallback. Membership `member | none | withheld`.
+  `isLead` comes from `isActiveLead` (`ownership.ts`, shared with the M3c estimates GET); this
+  job's open native estimates are links for the lead only (chevron row, as other tech links).
+- **Photos:** quality per device (`tech:photo-quality`), resized on the phone, PDFs via
+  `Add file`, 4 MB on phone and route; an erased customer's job refuses uploads
+  (409 CUSTOMER_REMOVED, object deleted); a failed insert batch answers 409 STALE "This job
+  changed. Try again." (object deleted, retryable). A photo the phone can't prepare unlocks the
+  card with `PHOTO_CANT_PREPARE` (`photo-resize.ts`); `Add file` takes PDFs only (client MIME check).
+- **Verify:** `npx vitest run src/lib/forms src/lib/tech/form-*.test.ts src/lib/tech/site-*.test.ts src/lib/tech/photo-*.test.ts "src/app/api/tech/jobs/[id]/forms" "src/app/api/tech/jobs/[id]/site" "src/app/api/tech/jobs/[id]/photo" tests/api/tech-photo.test.ts`;
+  dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-forms.test.ts`.
+
 **Invariants:**
 - **Assignee + tenant guard** (legacy sub-routes): every mutation route checks BOTH
   `assignedTo == techUserId` AND the session's `organizationId`. A technician may only

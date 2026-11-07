@@ -1,8 +1,8 @@
-## Parity: 47.4 / 100
+## Parity: 47.9 / 100
 
-features 47.4  (275 counted, must-haves 56 of 111 done)
+features 47.9  (275 counted, must-haves 57 of 111 done)
 
-Not shippable yet: 55 must-have features are not done.
+Not shippable yet: 54 must-have features are not done.
 
 ## By area, weakest first
 - integrations                  22.7  (8 features)
@@ -22,7 +22,7 @@ Not shippable yet: 55 must-have features are not done.
 - jobs                          56.7  (26 features)
 - reporting                     56.7  (8 features)
 - payments                      61.8  (7 features)
-- tech-app                      63.9  (29 features)
+- tech-app                      68.1  (29 features)
 - scheduling                    68.2  (13 features)
 
 ## Missing, in build order
@@ -37,7 +37,6 @@ Not shippable yet: 55 must-have features are not done.
 - [must] memberships: Recurring membership billing (monthly to annual), no  (FP+ST; billing mocked - providerSubscriptionId placeholder)
 - [must] pricebook: Discounts and fees, no  (ST)
 - [must] team-settings: Business units (trades / divisions / invoice header / tax default), no  (ST; single org = single business)
-- [must] tech-app: Job forms and checklists, no  (FP+ST; FP forms are an add-on)
 - [must] tech-app: Offline mode with cached jobs and pricebook, no  (FP+ST)
 - [must] comms: Manual send to customer, partial  (FP; /admin/conversations SMS reply only)
 - [must] comms: On-the-way text with tracking link, partial  (FP+ST; technician_enroute template - no en-route action or tracking link)
@@ -79,8 +78,8 @@ Not shippable yet: 55 must-have features are not done.
 - [must] scheduling: Capacity by open vs total hours per slot, partial  (ST; capacity_reservations slot counts - no hours-based capacity)
 - [must] scheduling: Technician shifts (normal / on-call / time-off) with repeat, partial  (FP+ST; on-call / time-off / non-job rows; no repeat rule)
 - [must] team-settings: Roles with granular permissions, partial  (FP+ST; super_admin/admin/technician only)
-- [must] tech-app: Location info tab (history / opportunities / recurring), partial  (ST; /tech/jobs/[id] summary only)
-- [must] tech-app: Photos / video / files on job with quality setting, partial  (FP+ST; /api/tech/jobs/[id]/photo - photos only)
+- [must] tech-app: Location info tab (history / opportunities / recurring), partial  (past jobs, open estimates and membership at the same location or saved address; FieldPulse-synced jobs carry no address, so their history is counted, not shown; flips to yes when FieldPulse job addresses are imported (follow-up))
+- [must] tech-app: Photos / video / files on job with quality setting, partial  (photos with a quality setting + PDF files; no video)
 - [should] comms: Attach files to communications, no  (FP)
 - [should] comms: Call routing / IVR / sequential ring, no  (FP; buildable on Twilio)
 - [should] comms: Customer text-to-confirm appointment, no  (ST)
@@ -144,7 +143,7 @@ Not shippable yet: 55 must-have features are not done.
 - [should] team-settings: Per-user permission toggles and schedule visibility, no  (FP)
 - [should] tech-app: AI tech Q&A and troubleshooting assistant, no  (ST; diagnostics/parts depth is an add-on)
 - [should] tech-app: Guided status flows, no  (FP)
-- [should] tech-app: Required forms block close-out, no  (ST)
+- [should] tech-app: Required forms block close-out, no  (forms can be marked Required; the Forms card, the close-out sheet and the office remind; nothing blocks (deferred: it would change the M3a close-out batch))
 - [should] tech-app: Tech schedules follow-up or books a lead from field, no  (ST)
 - [should] tech-app: Tech scorecard in app, no  (ST; scorecards are admin-only)
 - [should] tech-app: Timesheet extras (GPS geostamp / backdating / status prompts), no  (FP)

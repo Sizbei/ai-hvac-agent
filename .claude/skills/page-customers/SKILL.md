@@ -124,6 +124,7 @@ work logs — real booking history is in `service_requests` via
   on `fp-import-`). All one `db.batch`. Customers erased before this were
   backfilled by `drizzle/0056_erased_session_scrub.sql`; sessions whose only
   link was the (already nulled) `customer_id` could not be found by it.
+- **Erase (M3d):** the batch locks the customer's requests first, counts and deletes attachments in SQL (`DELETE … RETURNING storage_key`, `src/lib/admin/erasure-sql.ts`) — the customer's own, chat uploads in their sessions, files on their requests (technician photos and PDFs, office request documents) and files on their equipment — and nulls form answers (`erased_at` set; status and who/when kept). The R2 objects are deleted in `after()` from the returned keys; the audit's `attachmentsDeleted` is the SQL count. Technician uploads and new answers on an erased customer's requests are refused (CUSTOMER_REMOVED); a draft row whose answers were erased refuses further saves (ANSWERS_REMOVED). `deleteCustomer` still detaches and keeps answers with the request. Pinned on dev by `tests/integration/field-forms.test.ts` (i), including an erase racing a first save and a photo insert on separate connections.
 - After erase AND hard delete, `invalidateCustomerSearchCache(orgId)`
   (`src/lib/admin/crm-queries.ts`) drops that org's cached search scans on
   this instance; other instances age out within the 5-minute TTL, and every

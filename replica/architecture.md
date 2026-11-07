@@ -241,8 +241,8 @@ and request.
 | POST …/invoice/pay-link | SMS/email the portal link (tech version of the admin pay-link); shipped SMS only, `{ invoiceId }`, 2-minute cooldown on `invoices.pay_link_sent_at` | lead | channel | sent |
 | **M3c** POST /api/tech/jobs/[id]/estimates, POST …/estimates/[eid]/present, POST …/sign | build options from the pricebook (no templates, no deposit), present on device, accept with signer name + signature via a `markEstimateSold` variant (actor tech), then sold lines append to the draft invoice exactly once | lead | options; signature | estimate |
 | POST /api/tech/jobs/[id]/equipment | add / replace equipment at the location (`replaced_by_equipment_id`, `retired_at`) | tech | fields, replacesId | equipment |
-| **M3d** GET /api/tech/forms, GET/PUT /api/tech/jobs/[id]/forms/[formId] | fill a form; PUT upserts on `(service_request_id, appointment_id, form_id)` | tech | values | submission |
-| GET /api/tech/jobs/[id]/location-info | past jobs at the location, open estimates, membership | tech | — | info |
+| **M3d** `GET /api/tech/jobs/[id]/forms?visit=`, `GET …/forms/[formId]?visit=`, `PUT …/draft`, `POST …/submit`; office `/api/admin/settings/forms`, `/api/admin/requests/[id]/forms` | fill a form; draft PUT applies `changes` under a revision gate on `(appointment_id, form_id, service_request_id)` | tech | values | submission |
+| GET /api/tech/jobs/[id]/site | past jobs at the location (or saved address), open estimates, membership | tech | — | info |
 
 **Idempotency (M3b onward, `idempotency_keys`).** Rate check first; then
 `INSERT … ON CONFLICT DO NOTHING RETURNING`. Winner: run the write with
@@ -615,6 +615,13 @@ until a tech can finish and collect on a job here.
      reloads, sees the draft, submits; the submission shows on the admin
      job and is anonymised by erase; the location tab lists past jobs,
      open estimates and the membership.
+     Shipped 2026-11-07 (plan
+     `docs/superpowers/plans/2026-11-07-replica-m3d-forms-site-view.md`).
+     As built: forms on native AND synced jobs (on synced jobs the
+     technician FieldPulse lists first); 0058 changes the 0049/0050 visit
+     trigger by one predicate (a visit with a submission is kept); video
+     cut; row 126 deferred (Required reminds, never blocks); only the
+     office reopens a submitted form.
 5. **M2 Dispatch, as deltas to `/admin/calendar`.** The dnd-kit day view
    (`interactive-scheduling-calendar.tsx` DayLane) already covers the
    timeline, status colours, tray and drag. Add: arrival-window prompt in

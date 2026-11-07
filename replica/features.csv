@@ -119,16 +119,16 @@ Pause or hold job with reason from field,tech-app,must,yes,yes,ST; hold ends the
 Tech schedules follow-up or books a lead from field,tech-app,should,yes,no,ST
 Mark myself done vs close out job,tech-app,must,yes,yes,ST; per-technician done on a visit; the lead closes out the request (close-out sheet)
 Navigate to job location,tech-app,must,yes,yes,FP; tech-job-summary.tsx Google Maps directions link
-Photos / video / files on job with quality setting,tech-app,must,yes,partial,FP+ST; /api/tech/jobs/[id]/photo - photos only
+Photos / video / files on job with quality setting,tech-app,must,yes,partial,photos with a quality setting + PDF files; no video
 Field vs internal notes and job comments with notify,tech-app,should,yes,partial,FP; /api/tech/jobs/[id]/note - no field/internal split or comments
 Offline mode with cached jobs and pricebook,tech-app,must,yes,no,FP+ST
-Job forms and checklists,tech-app,must,yes,no,FP+ST; FP forms are an add-on
-Required forms block close-out,tech-app,should,yes,no,ST
+Job forms and checklists,tech-app,must,yes,yes,native and synced jobs; on synced jobs the technician FieldPulse lists first fills them
+Required forms block close-out,tech-app,should,yes,no,"forms can be marked Required; the Forms card, the close-out sheet and the office remind; nothing blocks (deferred: it would change the M3a close-out batch)"
 Non-job and PDF-overlay forms,tech-app,could,yes,no,FP+ST; FP PDF overlay is an add-on
 Guided status flows,tech-app,should,yes,no,FP
 Equipment add / replace from field,tech-app,must,yes,yes,"ST; job page Equipment card: add or replace at the job's address (location rule), old unit retired and linked; no photos/barcode/warranty"
 Equipment barcode / serial capture,tech-app,should,yes,partial,ST; serial field in equipment form - no barcode scan
-Location info tab (history / opportunities / recurring),tech-app,must,yes,partial,ST; /tech/jobs/[id] summary only
+Location info tab (history / opportunities / recurring),tech-app,must,yes,partial,"past jobs, open estimates and membership at the same location or saved address; FieldPulse-synced jobs carry no address, so their history is counted, not shown; flips to yes when FieldPulse job addresses are imported (follow-up)"
 Present estimate with options on site,tech-app,must,yes,yes,"FP+ST; builder (1-3 pricebook options) + #customer layer: pick, typed-name signature, approve on the lead's phone"
 Sold items onto invoice now or later,tech-app,must,yes,yes,"ST; now = the job's invoice (once per estimate); later = office Generate invoice + Sold, not invoiced filter"
 Invoice presentation and signature on site,tech-app,must,yes,yes,ST; S40 /tech/jobs/[id]/invoice - lines + totals on the phone and a customer approval sheet (signature then finalize; the invoice snapshots a fresh signature)
