@@ -1,6 +1,6 @@
 # Replica M3d: Forms + site view
 
-Status: v4 FINAL (2026-11-07) after adversarial review rounds 1–3 (7 critics; log in
+Status: v4.1 FINAL (2026-11-07) after adversarial review rounds 1–3 (7 critics; log in
 `docs/superpowers/specs/2026-11-07-replica-m3d-review-log.md`). Owner: Raymond Chen.
 Milestone source: `replica/architecture.md` build order "M3d Forms + site view" (line 609) and the F04
 ownership rule (lines 156–159). Builds on M3a (ownership, visit trigger), M3b (idempotency keys) and M3c
@@ -164,7 +164,7 @@ submitted answers would vanish silently. 0058 therefore `CREATE OR REPLACE`s the
 **verbatim** except one predicate: `v_has_progress` also ORs `EXISTS (SELECT 1 FROM form_submissions s
 WHERE s.appointment_id = v_appt_id)`. A visit with a submission is then kept with its times nulled and its
 lead demoted, as 0050 does for a visit with progress. The function is created after `form_submissions`. A
-render test diffs the 0058 body against 0050's and allows only that line.
+render test diffs the 0058 body against 0050's and allows only that line. Any `form_submissions` row counts, including an empty draft (`values_encrypted` NULL): such a visit is kept too. That is harmless and intended.
 
 ## 4. Ids, idempotency, versioning, locking
 
@@ -380,7 +380,7 @@ window (§5.1); submit then reads the key. Writers re-check everything inside th
 | `POST /api/admin/settings/forms` | admin, `adminMutation` | 201/200 `{ id }` |
 | `GET /api/admin/settings/forms/[id]` | admin, `isUuid`, `organization_id = $org` (foreign → 404) | `{ form, submissionCount }` |
 | `PATCH /api/admin/settings/forms/[id]` | same, `adminMutation` | `{ version }` |
-| `GET /api/admin/requests/[id]/forms` | admin, `isUuid`, request in org | `{ submissions: [{ id, formId, formName, formVersion, appointmentId, appointmentNumber, visitState: 'live' \| 'ended' \| 'cancelled', status, revision, erased, unreadable, fields, values, updatedAt, updatedByName, submittedAt, submittedByName, visitHasTechnician }], missingRequired: [{ formId, name }] }`. Omitted: `status = 'draft' AND erased_at IS NULL AND values_encrypted IS NULL`. Undecryptable → `values: null, unreadable: true`, never a 500. `missingRequired`: every request except `cancelled`, counting submissions on visits that count; on a completed request only forms with `f.created_at < r.completed_at` |
+| `GET /api/admin/requests/[id]/forms` | admin, `isUuid`, request in org | `{ submissions: [{ id, formId, formName, formVersion, appointmentId, appointmentNumber, visitState: 'live' \| 'ended', status, revision, erased, unreadable, fields, values, updatedAt, updatedByName, submittedAt, submittedByName, visitHasTechnician }], missingRequired: [{ formId, name }] }`. Omitted: `status = 'draft' AND erased_at IS NULL AND values_encrypted IS NULL`. Undecryptable → `values: null, unreadable: true`, never a 500. `missingRequired`: every request except `cancelled`, counting submissions on visits that count; on a completed request only forms with `f.created_at < r.completed_at` |
 | `POST /api/admin/requests/[id]/forms/[sid]/reopen` | admin, `isUuid` ×2, `adminMutation` | `{ revision, changed }` |
 
 `myVisit` = the caller has any assignment row on this visit (the job page's `?visit=` rule,
@@ -512,7 +512,7 @@ and parts warnings (`:119`), the reminder, the confirm. Pure `reminderVisible`. 
 route and `status-writes.ts` are unchanged.
 
 ### 7.5 Office Forms section
-Each submission: form name, `Visit #N` (`· ended` / `· cancelled` from `visitState`), `Draft` /
+Each submission: form name, `Visit #N` (`· ended` from `visitState`), `Draft` /
 `Submitted` / `Answers removed` / "These answers can't be shown.", who and when, answers via `answerText`
 with the range note. `missingRequired`: "Not submitted yet: <name>" on open requests, "Required, not
 submitted: <name>" (warning tone) on completed ones. `Reopen` confirm "Reopen this form? The technician can
@@ -657,7 +657,7 @@ the request is still `scheduled` → allowed; a helper with no progress then →
 technician saves and submits; `cancelled` → JOB_CLOSED; a sync-style UPDATE setting `assigned_to`,
 `scheduled_date` and both window ends to NULL → the visit still exists (times NULL, lead demoted), the
 submission survives and the office GET lists it; the same on a native `completed` job with no progress;
-a visit with no submissions under the same UPDATE is deleted, as in 0050;
+a visit with no submissions under the same UPDATE is deleted, as in 0050; deleting the request (session delete) and purging the org still succeed, with the submission removed by the cascade in the same statement; a direct `DELETE FROM appointments` on a visit with a submission fails with the foreign key error;
 (h) archived: an existing draft saves and submits; starting it on a new visit → FORM_ARCHIVED; an active
 non-applicable form can be started; `Clear answers` → `values_encrypted` NULL, `Not started`, hidden in the
 office GET;

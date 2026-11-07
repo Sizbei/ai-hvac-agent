@@ -258,3 +258,10 @@ Rejected:
 
 Verdict: v4 FINAL. Round 3's blocker (submissions deleted by the visit trigger) is closed by R3-1; every
 other finding was a text edit, applied. The plan and the code get their own reviews.
+
+## v4 verification (scoped, opus)
+
+Sign off: the blocker and all 11 round-3 majors are closed. I applied the verifier's three notes as v4.1:
+- `visitState` drops `cancelled`. Every listed submission keeps its visit by the visit-counts rule, so `cancelled` could never show. The office shows `· ended` or nothing.
+- An empty draft also keeps its visit through the trigger predicate. This is now stated as intended.
+- Test (g) adds the request-delete and org-purge cascades, plus the direct visit-delete foreign key error.
