@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { HOLD_REASONS, type HoldReason } from '@/lib/admin/request-status';
@@ -15,6 +16,7 @@ import {
   type CloseOutInvoice,
   type SheetAction,
 } from '@/components/tech/tech-status-confirm';
+import { reminderVisible } from '@/lib/tech/form-copy';
 
 export interface SheetConfirmOptions {
   readonly holdReason?: HoldReason;
@@ -41,6 +43,7 @@ export function CloseOutSheet({
   blockers,
   invoice = null,
   unbilledParts = 0,
+  reminders = [],
   pending,
   error,
   onConfirm,
@@ -52,6 +55,8 @@ export function CloseOutSheet({
   readonly invoice?: CloseOutInvoice | null;
   /** Parts on no non-void invoice ("2 parts aren't on an invoice yet."). */
   readonly unbilledParts?: number;
+  /** M3d: required forms not submitted on any visit that counts; never blocks (spec §7.4). The caller passes [] on synced jobs. */
+  readonly reminders?: ReadonlyArray<{ readonly name: string; readonly href: string }>;
   readonly pending: boolean;
   readonly error: string | null;
   readonly onConfirm: (action: SheetAction, options: SheetConfirmOptions) => void;
@@ -76,6 +81,17 @@ export function CloseOutSheet({
   const copy = buildActionSheetCopy(shown);
   const blocked = shown === 'close_out' ? relevantBlockers(blockers) : [];
   const closeOutReady = shown === 'close_out' && blocked.length === 0;
+  const showReminder = reminderVisible(shown, true, reminders);
+  const reminder = showReminder ? (
+    <div className="space-y-1.5" aria-label="Forms not submitted">
+      <p className="text-[15px] font-medium">Not submitted yet:</p>
+      {reminders.map((r) => (
+        <Link key={r.href} href={r.href} className="flex h-11 items-center rounded-xl border border-border-input px-3 text-[15px] text-link">
+          Fill in “{r.name}”
+        </Link>
+      ))}
+    </div>
+  ) : null;
   const warnings = closeOutReady
     ? [closeOutInvoiceWarning(invoice), unbilledPartsWarning(unbilledParts)].filter((w): w is string => w !== null)
     : [];
@@ -116,11 +132,17 @@ export function CloseOutSheet({
             </ul>
           )}
 
+          {/* Blocked: the reminder sits under the blocker list. */}
+          {blocked.length > 0 && reminder}
+
           {warnings.map((w) => (
             <p key={w} className="rounded-md border border-warning-border bg-warning-light px-3 py-2.5 text-[15px] text-foreground">
               {w}
             </p>
           ))}
+
+          {/* Ready: invoice and parts warnings, then the reminder, then the confirm. */}
+          {blocked.length === 0 && reminder}
 
           {shown === 'on_hold' && (
             <div className="space-y-3">

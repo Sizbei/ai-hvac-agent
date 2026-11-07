@@ -37,6 +37,7 @@ interface TechJobSummary {
   readonly address: string | null;
   readonly accessNotes: string | null;
   readonly assignment: { readonly appointmentId: string; readonly isLead: boolean } | null;
+  readonly activeVisitId: string | null;
   readonly allowedActions: readonly TechAction[];
   readonly blockers: readonly Blocker[];
   readonly native: boolean;
@@ -69,12 +70,17 @@ function directionsUrl(address: string): string {
 export interface SummaryLoaded {
   readonly status: string;
   readonly invoiceState: string | null;
+  /** M3d: the Forms card's visit pick and the close-out reminder. */
+  readonly native: boolean;
+  readonly assignmentVisitId: string | null;
+  readonly activeVisitId: string | null;
 }
 
 export function TechJobSummary({
   id,
   appointmentId,
   unbilledParts = 0,
+  formReminders = [],
   onStatusChanged,
   onLoaded,
 }: {
@@ -82,6 +88,8 @@ export function TechJobSummary({
   readonly appointmentId?: string;
   /** Parts on no non-void invoice, for the Close out heads-up. */
   readonly unbilledParts?: number;
+  /** M3d: required forms with no submitted copy (the close-out reminder links). */
+  readonly formReminders?: ReadonlyArray<{ readonly name: string; readonly href: string }>;
   readonly onStatusChanged?: () => void;
   /** Called after each summary load; 'not_found' lets the page drop every form. */
   readonly onLoaded?: (outcome: JobLoadOutcome, job: SummaryLoaded | null) => void;
@@ -114,7 +122,13 @@ export function TechJobSummary({
       onLoaded?.(
         outcome,
         outcome === 'ok'
-          ? { status: String(body.data.status), invoiceState: body.data.invoiceSummary?.state ?? null }
+          ? {
+              status: String(body.data.status),
+              invoiceState: body.data.invoiceSummary?.state ?? null,
+              native: body.data.native === true,
+              assignmentVisitId: body.data.assignment?.appointmentId ?? null,
+              activeVisitId: body.data.activeVisitId ?? null,
+            }
           : null,
       );
     } catch {
@@ -326,6 +340,7 @@ export function TechJobSummary({
           blockers={relevantBlockers(serverBlockers ?? job.blockers)}
           invoice={job.invoiceSummary}
           unbilledParts={unbilledParts}
+          reminders={job.native ? formReminders : []}
           pending={advancing !== null}
           error={sheetError}
           onConfirm={(a, options) => void advance(a, options)}

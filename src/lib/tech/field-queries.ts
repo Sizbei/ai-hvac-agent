@@ -69,6 +69,8 @@ export interface TechJobSummary {
   readonly accessNotes: string | null;
   /** The caller's row this summary is about (null for a legacy assigned_to-only reader). */
   readonly assignment: TechAssignmentRow | null;
+  /** M3d: the visit the request is "on" (pickActiveVisit), for readers without a row (the Forms card). */
+  readonly activeVisitId: string | null;
   readonly allowedActions: readonly TechAction[];
   readonly blockers: readonly Blocker[];
   readonly native: boolean;
@@ -189,6 +191,7 @@ export async function getTechJobSummary(
     address: safeDecrypt(row.addressEncrypted),
     accessNotes: row.accessNotes,
     assignment,
+    activeVisitId,
     allowedActions: actions,
     blockers,
     native,

@@ -11,6 +11,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { EstimatesCard } from '@/components/tech/estimates/estimates-card';
 import { EquipmentCard } from '@/components/tech/equipment/equipment-card';
+import { FormsCard } from '@/components/tech/forms/forms-card';
+import { cardVisit, fillHref } from '@/lib/tech/form-copy';
+import { unsubmittedRequired, type TechFormsView } from '@/lib/tech/form-view';
 import { materialOverlapWarning, soldPricebookItemIds } from '@/lib/tech/material-overlap';
 import type { TechEstimatesView } from '@/lib/tech/estimate-view';
 import { TechJobSummary, type SummaryLoaded } from '@/components/tech/tech-job-summary';
@@ -92,13 +95,20 @@ export function TechJobDetailClient({
   // and photos stay allowed. Until the summary says which, no form renders.
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [invoiceState, setInvoiceState] = useState<string | null>(null);
+  // M3d: the Forms card's visit (spec §7.2) and its view, for the close-out reminder.
+  // undefined = the summary hasn't said yet (the card shows a skeleton, not "No visit on this job yet.").
+  const [formsVisit, setFormsVisit] = useState<string | null | undefined>(appointmentId ?? undefined);
+  const [formsView, setFormsView] = useState<TechFormsView | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
   const onSummaryLoaded = useCallback((outcome: JobLoadOutcome, job: SummaryLoaded | null) => {
     setJobOutcome(outcome);
+    setSummaryFailed(outcome === 'error');
     if (job) {
       setJobStatus(job.status);
       setInvoiceState(job.invoiceState);
+      setFormsVisit(cardVisit(appointmentId, job.assignmentVisitId, job.activeVisitId));
     }
-  }, []);
+  }, [appointmentId]);
   const known = jobStatus !== null;
   const closed = jobIsClosed(jobStatus);
   const editable = known && !closed;
@@ -408,6 +418,9 @@ export function TechJobDetailClient({
   );
 
   const unbilledParts = isLoading ? 0 : materials.filter((m) => !m.onInvoice).length;
+  const formReminders = formsView
+    ? unsubmittedRequired(formsView).map((f) => ({ name: f.name, href: fillHref(id, f.formId, formsView.visitId) }))
+    : [];
   const lateWarning = lateMaterialWarning(invoiceState);
   const overlapWarning = materialOverlapWarning(soldPricebookItemIds(estimatesView), selectedItemId);
 
@@ -449,6 +462,7 @@ export function TechJobDetailClient({
         id={id}
         appointmentId={appointmentId}
         unbilledParts={unbilledParts}
+        formReminders={formReminders}
         onLoaded={onSummaryLoaded}
         onStatusChanged={() => {
           // A status tap opens or closes the job clock: reload both.
@@ -457,6 +471,7 @@ export function TechJobDetailClient({
           setRefreshKey((k) => k + 1);
         }}
       />
+      <FormsCard jobId={id} visitId={formsVisit} summaryFailed={summaryFailed} refreshKey={refreshKey} onLoaded={setFormsView} />
       <EstimatesCard jobId={id} refreshKey={refreshKey} onLoaded={onEstimatesLoaded} />
 
       {loadError && (
