@@ -83,7 +83,7 @@ export function CloseOutSheet({
   const closeOutReady = shown === 'close_out' && blocked.length === 0;
   const showReminder = reminderVisible(shown, true, reminders);
   const reminder = showReminder ? (
-    <div className="space-y-1.5" aria-label="Forms not submitted">
+    <div role="group" className="space-y-1.5" aria-label="Forms not submitted">
       <p className="text-[15px] font-medium">Not submitted yet:</p>
       {reminders.map((r) => (
         <Link key={r.href} href={r.href} className="flex h-11 items-center rounded-xl border border-border-input px-3 text-[15px] text-link">

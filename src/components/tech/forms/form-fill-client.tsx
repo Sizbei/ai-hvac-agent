@@ -94,6 +94,15 @@ export function FormFillClient({
   const flightRef = useRef<Promise<boolean> | null>(null);
   const saveRef = useRef<SaveState>(SAVE_IDLE);
   const bannerShown = useRef(false);
+  /**
+   * The recovery of a stored submit intent, claimed once per intent (M3c's keyed-ref pattern; StrictMode runs
+   * effects twice). A live submit claims it too, so only an intent restored at mount is ever re-sent on its own.
+   * `done` is the shared promise a second caller awaits instead of starting another send.
+   */
+  const recovery = useRef<{ key: string; done: Promise<void> } | null>(null);
+  /** A scheduled re-read after a failed one (reconcile's back-off); autosave waits while it is set. */
+  const rereadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconcileRef = useRef<((code: string | null, mineOverride?: Changes, baseOverride?: FormValues) => Promise<void>) | null>(null);
 
   const intentId = `form:submit:${formId}:${visitId}`;
   const { state: keyState, dispatch: keyDispatch } = useIdempotencyKey({
@@ -169,6 +178,11 @@ export function FormFillClient({
       // The re-read itself failed (a network blip): back off and try again, never freeze the page.
       dispatchSave({ type: 'unknown', now: Date.now(), retryAfterMs: null });
       setPhase('retrying');
+      if (rereadRef.current) clearTimeout(rereadRef.current);
+      rereadRef.current = setTimeout(() => {
+        rereadRef.current = null;
+        void reconcileRef.current?.(code, mineOverride, baseOverride);
+      }, Math.max(0, saveRef.current.waitUntil - Date.now()));
       return;
     }
     if (v.submission?.status === 'submitted') {
@@ -199,13 +213,18 @@ export function FormFillClient({
     const theirs = v.submission?.values ?? {};
     // A recovered submit's changes aren't in the inputs yet: rebuild those inputs from them.
     const mineInputs = mineOverride ? inputsFromValues(fields, nonNull(carriedMine)) : inputsRef.current;
-    const merged = mergeIntoInputs(fields, carriedBase, carriedMine, theirs, mineInputs, new Set(Object.keys(carriedMine)), lastValidRef.current);
+    // A live merge keeps every touched input (a half-typed number isn't in `mine`); a recovered submit has only its changes.
+    const ids = new Set(fields.map((f) => f.id));
+    const touched = mineOverride
+      ? new Set(Object.keys(carriedMine))
+      : new Set([...touchedRef.current, ...Object.keys(carriedMine)].filter((id) => ids.has(id)));
+    const merged = mergeIntoInputs(fields, carriedBase, carriedMine, theirs, mineInputs, touched, lastValidRef.current);
     viewRef.current = v;
     fieldsRef.current = fields;
     versionRef.current = v.form.version;
     baseRef.current = theirs;
     revisionRef.current = v.submission?.revision ?? 0;
-    touchedRef.current = new Set(Object.keys(carriedMine));
+    touchedRef.current = touched;
     // Untouched numbers follow the merged value (a later half-typed edit never sends a stale last-valid).
     lastValidRef.current = merged.lastValid;
     setInputs(merged.inputs);
@@ -218,6 +237,12 @@ export function FormFillClient({
     dispatchSave({ type: 'resume' });
     dispatchSave({ type: 'edit', now: Date.now() });
   }, [applyView, dispatchSave, notSavedLines, refetch, setInputs, syncFlags]);
+  useEffect(() => {
+    reconcileRef.current = reconcile;
+  }, [reconcile]);
+  useEffect(() => () => {
+    if (rereadRef.current) clearTimeout(rereadRef.current);
+  }, []);
 
   const currentChanges = useCallback(
     () => buildChanges(fieldsRef.current, inputsRef.current, touchedRef.current, lastValidRef.current),
@@ -229,7 +254,12 @@ export function FormFillClient({
     let body = kind === 'send_retry' ? pendingRef.current : null;
     if (!body) {
       const changes = currentChanges();
-      if (Object.keys(changes).length === 0) return true;
+      if (Object.keys(changes).length === 0) {
+        // Nothing left to send (a retry after a merge, say): settle the machine and the line.
+        dispatchSave({ type: 'landed' });
+        setPhase(savedAt ? 'saved' : 'blank');
+        return true;
+      }
       const applied = applyChanges(fieldsRef.current, baseRef.current, changes);
       if (applied.ok && valuesTooLarge(applied.values)) {
         dispatchSave({ type: 'stop', reason: 'too_large' });
@@ -300,13 +330,14 @@ export function FormFillClient({
     const landed = await flight;
     flightRef.current = null;
     return landed;
-  }, [currentChanges, dispatchSave, formId, jobId, notSavedLines, reconcile, syncFlags, visitId]);
+  }, [currentChanges, dispatchSave, formId, jobId, notSavedLines, reconcile, savedAt, syncFlags, visitId]);
 
   // Autosave timer: wake at the machine's next due time.
   useEffect(() => {
     const wake = nextWakeAt(save, dirty);
     if (wake === null) return;
     const t = setTimeout(() => {
+      if (rereadRef.current) return;
       const action = saveDue(saveRef.current, Date.now(), touchedRef.current.size > 0 || pendingRef.current !== null);
       if (action) void sendDraft(action);
     }, Math.max(0, wake - Date.now()));
@@ -335,6 +366,8 @@ export function FormFillClient({
   const submitFlow = useCallback(async (intent: SubmitIntent | null) => {
     let stored = intent;
     if (!stored) {
+      // A live submit claims the recovery slot: its own unknown result waits for Try again, never an auto re-send.
+      recovery.current ??= { key: intentId, done: Promise.resolve() };
       const payload = { appointmentId: visitId, formVersion: versionRef.current, baseRevision: revisionRef.current, changes: currentChanges() };
       stored = { path: `/api/tech/jobs/${jobId}/forms/${formId}/submit`, payload, base: baseRef.current };
       const hash = JSON.stringify(stored.payload);
@@ -363,6 +396,7 @@ export function FormFillClient({
       // A submitted page never autosaves: a draft still queued behind the submit is dropped, not retried.
       pendingRef.current = null;
       dispatchSave({ type: 'submitted' });
+      setPhase('submitted');
       const v = await refetch();
       if (v && v !== 'gone') applyView(v);
       return;
@@ -376,7 +410,7 @@ export function FormFillClient({
     }
     // STALE / FORM_CHANGED: merge (or carry), unlock, show the line; a new tap and confirm send a new body (a new key).
     await reconcile(code, sent.payload.changes, sent.base);
-  }, [applyView, currentChanges, dispatchSave, formId, jobId, keyDispatch, reconcile, refetch, visitId]);
+  }, [applyView, currentChanges, dispatchSave, formId, intentId, jobId, keyDispatch, reconcile, refetch, visitId]);
 
   // Load, then recover a pending submit of this form on this visit (the page's own intent).
   useEffect(() => {
@@ -386,8 +420,7 @@ export function FormFillClient({
       else setLoad(r.status === 404 || r.code === 'FORM_ARCHIVED' ? { kind: 'gone' } : { kind: 'error' });
     })();
   }, [jobId, formId, visitId, applyView]);
-  /** The mount recovery of this page's own submit intent, started once per intent (M3c's keyed-ref pattern; StrictMode runs effects twice). */
-  const recovery = useRef<{ key: string; done: Promise<void> } | null>(null);
+  // The mount recovery of this page's own stored submit intent (the `recovery` ref above).
   useEffect(() => {
     if (load.kind !== 'ok' || keyState.phase !== 'unknown') return;
     if (recovery.current?.key === intentId) return;
