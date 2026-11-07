@@ -235,3 +235,84 @@ Applied:
   FieldPulse client or push, integration (f) expects MANAGED_EXTERNALLY for every FieldPulse board move and
   no FieldPulse call for a native request in a connected throwaway org (client mocked), (m) and the walk
   updated; §11 rulings, "not closed", "not verified" and §12 updated.
+
+## Spec round 3 (v3.1 → v4 FINAL), 2026-11-08 — 2 critics (A correctness/data/concurrency/tenancy, B UX and buildability)
+
+Counts: A 1 blocker / 7 major / 11 minor; B 0 blocker / 7 major / 20 minor. Neither signed off. Lead rulings
+L3-1…L3-7 binding.
+
+Lead rulings:
+- L3-1 Cut Undo from M2. Every round found new state-corruption paths in it (round 2: dropped helpers,
+  replayed confirms; round 3: an ungated pre-step leaving no lead on a lost race (A-B1), stale helper
+  rewrites (A-M1), client-supplied statuses (A-M2), lost labor (A-M7), missing status events (A-m6)),
+  while dragging the request back already recovers: an ordinary move that revives the old lead's row.
+  "Move anyway" stays with its confirm.
+- L3-2 The sheet's schedule edit stays exactly as today (A-M6): not switched to the started rule;
+  `updateAppointment` keeps its gate; its `pushJobToFieldpulse` is an existing gap. Change time copy never
+  says "pause"; every sheet refusal on a FieldPulse request names FieldPulse (B-M1, B-M2).
+- L3-3 (A-M3) The mass audit is computed in SQL.
+- L3-4 (A-M4) A recovered mass run re-sends only update-style pushes; never an HCP create; such requests are
+  listed "not sent; open it to retry".
+- L3-5 (A-M5) Fix test (b): the new lead edits the draft once on site.
+- L3-6 (B majors) `Move…` always visible; the drag wrapper out of the tab order; spike proves near-lane
+  drops and Unscheduled-to-lane drags don't slide the board, with auto-scroll settings; the `Move…` dialog
+  fully specified.
+- L3-7 All minors; real time format, `Visit #<n>`, "Unscheduled", "below".
+
+Applied:
+- Undo removed (A-B1, A-M1, A-M2, A-M7, A-m6, A-m7, B-M3; L3-1): `restore`, `previous`, `expectStartedIds`,
+  `startedIds`, the `exact` rule, steps 1 and 5, §5.4 Undo, the Undo banner and copy, tests (b2u) and (b2h).
+  (b2) drag-back stays. §10 lists Undo as out of scope.
+- Guards (A-M6, A-m11; L3-2): two guards. `visitOneStartedGuardSql` (§3.2) for the move, Unscheduled,
+  assign, reassign and `placeAndAssignRequest`; `visitOneGuardSql` unchanged for `scheduleRequest`;
+  `updateAppointment` unchanged. The sheet/board difference (helper working) is stated and the sheet copy
+  points to `Move…`. Integration (e) checks the schedule edit behaves as today.
+- Change time (B-M1, A-m3, B-m9; L3-2): HAS_PROGRESS "Work has started on this visit, so its time can't
+  change. Cancel it and add a new visit instead."; disabled when any row has `hasProgress`; one copy map
+  (`VISIT_ERROR_COPY` updated) incl. TECHNICIAN_NOT_FOUND, VISIT_ENDED, VISIT_CANCELLED and a canon generic.
+- FieldPulse in the sheet (B-M2, B-m18, A-m8; L3-2): refusals check FieldPulse first and name it; the
+  Assign/Reassign select is disabled on FieldPulse requests; every FieldPulse refusal is a SQL predicate.
+- Mass audit in SQL (A-M3; L3-3): `movedVisitIds` from the xmin of the candidates, `skipped` =
+  validated `preSkipped` plus every candidate not moved as `stale`; route test for a forged reason.
+- Recovery pushes (A-M4, A-m5; L3-4): only `syncRequestToCalendar` and `pushJobToHcp` for requests with
+  `hcp_job_id`; no create, no telemetry, no status events; `pushesNotSent`; the "idempotent" claim corrected
+  to "only when sequential"; `after()` registered as `run`'s last step.
+- Test (b) (A-M5; L3-5): Alex arrives and starts a draft; Sam's save before arriving is refused, after
+  arriving it lands; §5.3 states the on-site condition.
+- Card and dialog (B-M4, B-M5, B-M6, B-M7; L3-6): `Move…` is a small always-visible button on every
+  movable lead card and Unscheduled row; the drag wrapper loses `tabIndex`, `aria-roledescription` and
+  `aria-describedby`, `screenReaderInstructions` points to `Move…`, `@dnd-kit/sortable` removed;
+  `autoScroll={{ threshold: { x: 0.06, y: 0.2 }, acceleration: 5 }}` (default 0.2 / 10, verified in
+  `@dnd-kit/core`), task 0 (d) and (e) prove near-lane drops and Unscheduled → Unassigned keep `scrollLeft`,
+  with 5 technicians seeded and §7.2's layout applied locally; the `Move…` dialog's title, buttons,
+  defaults, unassigned and Unscheduled cards, ended choices, disabled-when-unchanged, time-off check and body
+  (`moveDialogDefaults`, `moveDialogBody`).
+- A minors: m1 `FOR NO KEY UPDATE` in `addVisitTechnician`, concurrent 6th add test; m2 helper writers bump
+  `appointments.version`; m4 `TECHNICIAN_DONE`; m8 Unscheduled drop gets the version gate; m9 `movable: 'no'`
+  for a #1 with `cancelled_at`; m10 every revive nulls the progress timestamps (history stays in entries
+  and events).
+- B minors: 1 "9 AM–11 AM" format throughout (`formatBusinessTimeRange`, `calendar-time.ts:267`); 2
+  `Visit #<n>` and `VISIT_PINNED { visitNumber }`; 3 "Unscheduled"; 4 sheet copy points to `Move…`; 5
+  confirm line 3 reworded, combined lead and window rule, day in the time-change line; 6 started cue is a
+  different icon and only on movable cards; 7 focus target with `data-lane-role`, lane headers
+  `tabIndex={-1}`, off-day `Move…` focus; 8 "Reassign below"; 9 one copy map; 10 `onChanged` calls
+  `onAssigned`; 11 visits GET adds `started` and `hasProgress`; 12 `removesCapacity` only, kind and
+  multi-day copy; 13 no banner when the band equals the window, the covered line points to `Move…`; 14
+  always-mounted live region, 4 s for "Moved.", cleared on drag start, top-centre below 640 px (the 60 s
+  Undo part is moot); 15 blocks non-interactive between bands and cards with a "Staff" link; 16 mass key
+  lifecycle, failure and 422 copy, singular label, refetch, no ⋯ on Unassigned, the lane menu kept when not
+  interactive; 17 ended band disabled in the prompt, no send for an Unscheduled drop into an ended band; 18
+  disabled select; 19 pill wrapper with the title, width from `columns`, Week and Unscheduled `sm`; 20
+  helper-copy title, "Assign a technician to this request first.", the three FieldPulse variants named in
+  §8, both PATCH routes named in §6, `movable` for terminal requests, the walk's en-route request pinned to
+  8 AM–12 PM.
+
+Rejected / moot:
+- A-M2's `undoOf` audit design, A-M7's restore entries, A-m6, A-m7, B-M3, B-m14's 60 s Undo pause: moot
+  with Undo cut (L3-1).
+- A-M6 option (b) (started rule in the schedule edit with a FieldPulse refusal): not taken (L3-2 chose a).
+- A-m10's "Undo restores stamps from the audit": moot; the revive-nulls-stamps part was taken.
+
+Verdict: v4 FINAL. The round-3 blocker (A-B1) is removed with Undo. The spec grew from 636 to 682 lines:
+cutting Undo saved about 40 lines, but fully specifying the `Move…` dialog, the copy map and the FieldPulse
+variants added more.
