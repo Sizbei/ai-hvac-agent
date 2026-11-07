@@ -68,6 +68,11 @@ export const TERMINAL_STATUSES = ["completed", "cancelled"] as const satisfies r
  * progress on visit #1 the visit-one guard still refuses (409 HAS_PROGRESS). */
 export const REASSIGNABLE_STATUSES = IN_FLIGHT_STATUSES;
 
+/** Assignment-row statuses that mean a technician has started a visit (M2
+ * spec §3.2): a lead row counts all four, a helper row the first three; a row
+ * `on_hold` counts only with a progress timestamp (a pause). Live rows only. */
+export const STARTED_ASSIGNMENT_STATUSES = ["en_route", "arrived", "in_progress", "completed"] as const satisfies readonly RequestStatus[];
+
 /** "in_progress" -> "In progress". Sentence case for copy and error messages. */
 export function requestStatusLabel(status: string): string {
   const spaced = status.replace(/_/g, " ").trim();
