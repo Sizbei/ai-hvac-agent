@@ -1,475 +1,485 @@
 # Replica M2: Dispatch, as deltas to /admin/calendar
 
-Status: v2 (2026-11-08) after adversarial review round 1 (3 critics; log in
+Status: v3.1 (2026-11-08) after adversarial review rounds 1–2 (5 critic reports) and lead ruling L3.1-1
+(log in
 `docs/superpowers/specs/2026-11-08-replica-m2-review-log.md`). Owner: Raymond Chen.
 Milestone source: `replica/architecture.md` build order item 5 (lines 625–633), the F03 route table
 (lines 134–145), the reassign-guard constraint (lines 93–95), the races paragraph (lines 344–351) and the
-F04 ownership and status rules (lines 146–175). Builds on M0a (visits, assignments, shifts), M3a
-(ownership, the visit trigger), M3b (idempotency keys) and M3d (a visit with a form submission is never
-deleted). Trigger citations are to `drizzle/0050_m3a_run_the_day.sql`; the live body is 0058's, which is
-0050's verbatim except the `v_has_progress` predicate (`0058_m3d_forms.sql:112-117`).
+F04 ownership and status rules (lines 146–175). Builds on M0a, M3a, M3b and M3d (a visit with a form
+submission is never deleted). Trigger citations are to `drizzle/0050_m3a_run_the_day.sql`; the live body
+is 0058's, identical except the `v_has_progress` predicate (`0058_m3d_forms.sql:112-117`). Integration
+paths are under `src/lib/integrations/`.
 
 ## 1. Goal
 
 The office runs the day on the existing day view. Dragging a request into a window its current window
-doesn't cover asks whether to keep the window, use the new one, or choose one. Moving a visit a
-technician has started is refused with a 409 until the dispatcher confirms "Move anyway"; the override is
-audited and offers Undo. A visit worked by two technicians shows in both lanes with crew chips, and the
-sheet's Visits section adds and removes helpers. Time off, non-job events and on-call shifts show as
-blocks in the lane. A dispatcher can move a technician's day to another day or technician after a
-preview. There is no second board: `/admin/dispatch`, month and agenda are untouched.
+doesn't cover asks which window to use. Moving a visit a technician has started is refused with a 409
+until the dispatcher confirms "Move anyway"; the override is audited and Undo restores the previous crew.
+A visit worked by two technicians shows in both lanes with crew chips; the sheet's Visits section adds
+and removes helpers and changes a later visit's time. Time off, non-job events and on-call shifts show as
+blocks in the lane. Each card has a keyboard-reachable `Move…` action. A dispatcher can move a
+technician's day after a preview. No second board: `/admin/dispatch`, month and agenda are untouched.
 
-Synced requests stay on the board. Housecall Pro requests move like native ones and are pushed as
-today. FieldPulse requests move in time (pushed with `pushJobToFieldpulse`, as the sheet does), but
-their technician can't be changed here, because the nightly FieldPulse sync owns the assignee.
+FieldPulse-mapped requests (`fieldpulse_job_id` set) are read-only on the board in M2: time, window, day
+and technician are all changed in FieldPulse, and the card says so. Pushing a board move to FieldPulse
+would write to the owner's live FieldPulse account, which is a follow-up the owner verifies first (§10).
+Native requests (including unmapped ones in a FieldPulse org) and Housecall Pro requests move on the
+board.
 
 Done when (architecture.md): dragging across a window boundary prompts for the window; a working job
-refuses reassignment with a 409 unless overridden; a two-tech job shows on both lanes.
+refuses reassignment with a 409 unless overridden; a two-tech job shows on both lanes. All three are
+proved on native requests; FieldPulse-mapped requests refuse every board move.
 
 Feature rows (`replica/features.csv`, row = file line):
-- **96** Edit arrival window prompt on move (must) → `yes`, note "a drop into a window the current one
-  doesn't cover asks: keep, use the new window, or choose one; lane changes and covered drops keep it".
-- **97** Block reassign of working or done jobs (must) → `yes`, note "a started visit refuses a move with
-  409 HAS_PROGRESS; Move anyway overrides, is audited and can be undone; the old lead stays as a helper".
-- **98** Multi-technician and team assignment with team grouping (must) → `yes`, note "lead + helpers
-  per visit, added in the request sheet; the visit shows in every crew member's lane with crew chips; no
-  named teams (a visit's crew is its team)".
-- **102** Mass reschedule (could) → `yes`, note "move a technician's day to another day and/or
-  technician, with a preview; no undo (move it back)".
-- Cut, unchanged: **82** capacity board (stays `no`; the window-load strip and guard go to a capacity
-  milestone, §10), **100** zones (stays `partial`), **79**, **93**, **101**, **103**.
+- **96** (must) → `yes`, "a drop into a window the current one doesn't cover asks which window; a drop
+  into a covered band keeps it; FieldPulse-mapped requests are moved in FieldPulse".
+- **97** (must) → `yes`, "a started visit refuses a move with 409 HAS_PROGRESS; Move anyway hands it over,
+  is audited and can be undone".
+- **98** (must) → `yes`, "lead + helpers per visit, added in the request sheet; the visit shows in every
+  crew member's lane with crew chips; no named teams (a visit's crew is its team)".
+- **102** (could) → `yes`, "move a technician's day to another day and/or technician after a preview;
+  FieldPulse-mapped requests are skipped".
+- Unchanged: **82** (`no`, capacity milestone, §10), **100** (`partial`), **79**, **93**, **101**, **103**.
 
 Dev facts (dev branch, 2026-11-08, read-only):
-- Open placed requests: 32 native, 83 FieldPulse (all 207 FieldPulse rows are in the default org; 16 of
-  them are app-created bookings the app pushed to FieldPulse). 0 rows carry `hcp_job_id`.
-- Windows that aren't an exact named band: 3 of 32 native open placed requests, 82 of 83 FieldPulse.
-- Helper rows: 0 (no UI creates them today, §7.7). Visits #2+: 2, both cancelled. `technician_shifts`: 0.
-- Rows `in_progress` with no timestamp: 16 (15 FieldPulse, 1 native office status mirror). Rows with a
-  progress timestamp: 5.
-- Native `pending` requests with an assignee: 5 (lead rows `pending`, which the technician app doesn't
-  list).
+- Open placed requests: 32 native, 83 FieldPulse; the default org is the only FieldPulse-connected org,
+  and 29 of its native open placed requests have no `fieldpulse_job_id`. 16 FieldPulse rows are bookings
+  the app pushed. 0 rows carry `hcp_job_id`.
+- 15 open placed requests are unassigned; all 15 have a visit #1 with no assignment row.
+- Windows not an exact named band: 3 of 32 native open placed, 82 of 83 FieldPulse.
+- Helper rows 0 (no UI creates them today). Visits #2+: 2, both cancelled. `technician_shifts`: 0.
+- Rows `in_progress` with no timestamp: 16 (15 FieldPulse, 1 native office status mirror).
+- Native `pending` requests with an assignee: 5. FieldPulse `pending` with an assignee: 47.
 - Visits at `version` 0: 284 of 298. Job time entries with no `appointment_id`: 1 of 6.
 
 ## 2. Surfaces
 
 | surface | who | what |
 | --- | --- | --- |
-| Calendar Day view (`interactive-scheduling-calendar.tsx` `DayView` / `DayLane`, :165–332) | admin, ≥ 1024 px | crew chips and helper copies (§7.2), blocks (§7.3), drop flow, window prompt, confirm, Undo (§7.4, §7.5), lane menu `Move this day…` (§7.6) |
-| Calendar Week view (`WeekView`, :346–415) | admin, ≥ 1024 px | the window prompt on drops; one card per request |
-| Unscheduled tray (`draggable-unscheduled-panel.tsx`) | admin | drags use the move route; FieldPulse requests can't go back to the tray |
-| Calendar below 1024 px | admin | read-only (§7.8) |
-| Request detail sheet, Visits section (`request-detail-sheet.tsx:578-615`) | admin | `Technicians` control: add a helper, remove one (§7.7); reassign and schedule refuse a started visit with new copy (§5.6) |
+| Calendar Day view (`interactive-scheduling-calendar.tsx` `DayView` / `DayLane`, :165–332) | admin, interactive (§7.8) | crew chips and helper copies, blocks, drop flow, dialogs, banner, `Move…`, lane menu `Move this day…` |
+| Calendar Week view (`WeekView`, :346–415) | same | prompt on drops; one card per request |
+| Unscheduled tray (`draggable-unscheduled-panel.tsx`) | admin | drags use the move route |
+| Calendar, not interactive | admin | read-only; `Move…` still offered (§7.8) |
+| Request sheet, Visits section (`request-detail-sheet.tsx:578-615`) | admin | `Technicians` control (§7.7), `Change time` on a later visit (§7.7), reassign/schedule copy (§5.6) |
 | `/admin/dispatch`, month, agenda, tech app | — | unchanged |
 
 ## 3. Data model
 
-**No migration.** `drizzle/0059` stays free (journal last entry `idx 58`).
+**No migration.** `drizzle/0059` stays free.
 
 ### 3.1 Arrival windows
-The window is `arrival_window_start` / `arrival_window_end` on `service_requests` (`schema.ts:570-571`)
-and `appointments` (`schema.ts:707-708`); no `window_start` / `window_end` column exists.
-`appointments.starts_at` / `ends_at` (`:705-706`) are written equal to the window by every writer (the
-trigger, 0050:102–105; `addAppointment`, `appointment-queries.ts:163-166`; `updateAppointment`, :257); M2
-keeps them equal (dev: 0 rows differ). Visit #1 is written through the request columns and mirrored by
-the trigger, which fires only on a real change of `scheduled_date`, either window end, `assigned_to` or
-`status` (0049:221–229). Named windows: `ARRIVAL_WINDOWS` (`arrival-window.ts:12-27`); drop targets are
-the three bands `RESCHEDULE_WINDOW_ROWS` (`calendar-time.ts:329-333`).
+`arrival_window_start` / `arrival_window_end` on `service_requests` (`schema.ts:570-571`) and
+`appointments` (`:707-708`); no `window_start` / `window_end` exists. `starts_at` / `ends_at` (`:705-706`)
+are written equal to the window by every writer (0050:102–105; `appointment-queries.ts:163-166`, :257;
+dev: 0 differ) and M2 keeps them equal. Visit #1 is written through the request columns and mirrored by
+the trigger, which fires only on a real change of the date, either window end, `assigned_to` or `status`
+(0049:221–229). Named windows `ARRIVAL_WINDOWS` (`arrival-window.ts:12-27`); drop bands
+`RESCHEDULE_WINDOW_ROWS` (`calendar-time.ts:329-333`).
 
-### 3.2 Started (the reassign guard's definition)
-New `src/lib/admin/visit-started.ts` (pure `rowStarted` + SQL twin `startedRowSql(alias)`), with
+### 3.2 Started
+`src/lib/admin/visit-started.ts` (pure `rowStarted`, SQL twin `startedRowSql(alias)`);
 `STARTED_ASSIGNMENT_STATUSES = ['en_route', 'arrived', 'in_progress', 'completed']` in `request-status.ts`.
-Only the visit's live rows (`status <> 'cancelled'`) count:
-- the **lead** row is started when its status is `en_route`, `arrived`, `in_progress` or `completed`, or
-  `on_hold` with a progress timestamp (a pause);
-- a **helper** row is started when it is working: `en_route`, `arrived`, `in_progress`, or a pause. A done
-  helper (`completed`) doesn't hold the visit.
-- Timestamps alone don't count, except to tell a pause from an untouched `on_hold`. A row revived to
-  `assigned` / `scheduled` after an override keeps its timestamps as history and is not started.
-- A visit is started when any live row is started.
-Status counts because the trigger mirrors request status onto an untouched lead row (0050:147–159; dev:
-16 rows) and architecture.md:93–95 names the guard by status. `visit-one-guard.ts` `progressed()` (:22),
-`appointment-queries.ts` `visitProgressed` (:199-201) and `classifyMiss` (:222-226) switch to it, so the
-sheet, the tray, visit PATCH and the board share one rule. `removeVisitTechnician`'s per-row timestamp
-check (`assignment-queries.ts:134-135`) and the trigger's `v_has_progress` are different questions and
-stay. `REASSIGNABLE_STATUSES` (`request-status.ts:69`; architecture.md:95 places it in `queries.ts`)
-stays `IN_FLIGHT_STATUSES`: the visit guard already refuses every status that narrowing would remove.
+Only live rows (`status <> 'cancelled'`) count:
+- the lead row is started when `en_route`, `arrived`, `in_progress`, `completed`, or `on_hold` with a
+  progress timestamp (a pause);
+- a helper row is started when working (`en_route`, `arrived`, `in_progress`, or a pause); a done helper
+  doesn't hold the visit;
+- timestamps alone don't count (they only tell a pause from an untouched `on_hold`), so a revived row is
+  not started.
+A visit is started when any live row is. Status counts because the trigger mirrors request status onto
+an untouched lead row (0050:147–159; dev: 16) and architecture.md:93–95 names the guard by status.
+`visit-one-guard.ts` `progressed()` (:22) switches to this rule, so the sheet, the tray and the board
+agree. `updateAppointment`'s `visitProgressed` (`appointment-queries.ts:199-201`) and `classifyMiss`
+(:222-226) **keep** the timestamp rule: `updateAppointment` deletes only untouched rows and then
+plain-inserts the list (`:272-275`, `insertAssignments` :94-98), so letting a timestamped row through
+would hit `appointment_assignments_unique` and answer 500. `REASSIGNABLE_STATUSES`
+(`request-status.ts:69`; architecture.md:95 places it in `queries.ts`) stays `IN_FLIGHT_STATUSES`.
 
 ### 3.3 Crew
-A visit's crew = its live rows (`schema.ts:728-752`; one lead; at most `MAX_TECHNICIANS_PER_VISIT = 5`,
-`appointment-types.ts:30`). Helpers are written by the existing M3a endpoints (`POST/DELETE
-…/appointments/[aid]/assignments`, `assignment-queries.ts:61`, `:125`), which now get a UI (§7.7).
-`addVisitTechnician`'s insert changes from `ON CONFLICT DO NOTHING` (:90) to reviving a cancelled
-non-lead row: `ON CONFLICT (appointment_id, technician_id) DO UPDATE SET status = 'assigned',
-assigned_by = $actor, assigned_at = now() WHERE appointment_assignments.status = 'cancelled' AND NOT
-appointment_assignments.is_lead` (timestamps kept, not started by §3.2).
+A visit's crew = its live rows (`schema.ts:728-752`; one lead). The M3a helper writer
+(`addVisitTechnician`, `assignment-queries.ts:61`) changes:
+- revives a cancelled non-lead row instead of `ON CONFLICT DO NOTHING` (:90): `DO UPDATE SET status =
+  'assigned', assigned_by = $actor, assigned_at = now() WHERE appointment_assignments.status = 'cancelled'
+  AND NOT appointment_assignments.is_lead`;
+- requires a live lead row on the visit (today any visit with no rows passes, :86; every unassigned
+  placed #1 has none) → 409 `NO_LEAD`;
+- enforces `MAX_TECHNICIANS_PER_VISIT = 5` (`appointment-types.ts:30`) in SQL: `(SELECT count(*) … live)
+  < 5` → 409 `VISIT_FULL` (today only `addAppointment`'s zod caps it).
+`removeVisitTechnician` (:125): untouched → DELETE (today); not started by §3.2 but timestamped →
+`status = 'cancelled'` (the row stays for history); started → `HAS_PROGRESS` (today).
 
 ### 3.4 Blocks
-`technician_shifts` (`schema.ts:754-772`, kinds `on_call`, `time_off`, `non_job`; `removes_capacity`
+`technician_shifts` (`schema.ts:754-772`; kinds `on_call`, `time_off`, `non_job`; `removes_capacity`
 default per `shift-types.ts:20-22`). Read only; written on the Staff page's time-off dialog.
 
 ## 4. Concurrency
 
 ### 4.1 Revision gate
-Every board write carries the visit the dispatcher saw: `visitId` + `visitVersion`
-(`appointments.version`, `schema.ts:713`). The gate compares both: `EXISTS (SELECT 1 FROM appointments p
-WHERE p.id = $visitId AND p.organization_id = $org AND p.service_request_id = $rid AND p.version = $v)`;
-with `visitId: null` (a tray request with no visit yet), `NOT EXISTS (… appointment_number = 1)`. The id
-matters: a new visit #1 starts at version 0 (284 of 298 on dev), so sending a card to the tray and
-placing it again creates a different visit at the same version. The trigger bumps #1's version on every
-watched change (0050:119), so a technician's tap, another dispatcher's move or an autopilot placement
-(`placeAndAssignRequest` writes the same request columns) between render and drop answers `STALE`. The
-autopilot itself only places requests still unassigned (`requireUnassigned`,
-`scheduling-queries.ts:780-785`), so it can't overwrite a dispatcher's lane change; its residual is in
-§11. Helper changes don't bump the version; every crew check runs in SQL at write time.
+Cards carry `visitId` and `visitVersion`. `visitId` = the displayed visit (`displayVisitIdSql`,
+`current-visit.ts:54-59`), **falling back to visit #1's id**: `activeVisitIdSql` (:33-40) returns only a
+visit with a live row, and an unassigned #1 has none (dev: 15 of 15). `visitId: null` means no visit #1
+exists. The gate compares id and version: `EXISTS (SELECT 1 FROM appointments p WHERE p.id = $visitId
+AND p.organization_id = $org AND p.service_request_id = $rid AND p.appointment_number = 1 AND p.version =
+$v)`, or `NOT EXISTS (… appointment_number = 1)` for null. The id matters because a new #1 starts at
+version 0. The trigger bumps #1's version on every watched change (0050:119), so a lead's status tap,
+another dispatcher's move or an autopilot placement between render and drop answers `STALE`; a helper's
+tap bumps nothing and is caught by the started guard instead. The autopilot places only still-unassigned
+requests (`requireUnassigned`, `scheduling-queries.ts:780-785`); its residual is in §11.
 
 ### 4.2 Idempotency
-- **Single move: not keyed.** It writes absolute values under the version gate, so a re-send after a
-  lost response answers `STALE`. The client then refetches and treats the move as landed, silently, when
-  the refetched card has the intended lead and window (pure `moveLanded`); otherwise the STALE banner.
-  No `idempotency_keys` row per drag.
-- **Mass reschedule: keyed** with `withIdempotency(scope, canonicalHash(body), run)`
-  (`idempotency.ts:215`), Idempotency-Key required (`parseIdempotencyKey`, :47; missing → 400
-  `VALIDATION_ERROR`), 2xx stored only; no new `STORED_CODES`. Crash after commit: `runAsWinner` writes
-  the done row after the work (`idempotency.ts:186-200`), so a taken-over re-run must not meet its own
-  version bumps. The audit row's id is `derivedId(scope, 'audit')` (`ON CONFLICT (id) DO NOTHING`, in
-  the batch), and its details carry `movedVisitIds` and `skippedVisitIds` (ids only, ≤ 30 each). `run`
-  first reads that row; when it exists, it rebuilds the 200 from it plus the visits' current versions and
-  writes nothing. The M3b rule (m3b spec "a re-run after a crash … must not credit twice").
+- **Single move: not keyed.** Absolute values under the version gate; a re-send after a lost response
+  answers `STALE`, the client refetches and treats the move as landed, quietly, when the refetched card
+  has the intended lead and window (pure `moveLanded`).
+- **Mass reschedule: keyed** (`withIdempotency`, `idempotency.ts:215`; Idempotency-Key required,
+  `parseIdempotencyKey` :47; 2xx stored; no new `STORED_CODES`). `runAsWinner` stores the done row after
+  the work (`:186-200`), so a crash between commit and done row is recovered from the audit row: its id is
+  `derivedId(scope, 'audit')` (org-scoped, `:82-87`), its details hold `movedVisitIds` and `skipped:
+  [[visitId, reason]]`, every statement in the batch carries `NOT EXISTS (SELECT 1 FROM audit_log WHERE id
+  = $auditId AND organization_id = $org)`, and `run` first reads that row (with `organization_id = $org`).
+  When it exists, `run` rebuilds the 200 from it plus current versions, writes nothing, and re-sends the
+  after-calls for the moved requests. Re-sending is safe: `syncRequestToCalendar` upserts, the HCP push
+  updates a mapped job with the same window (an HCP create is guarded by `hcp_job_id IS NULL` and won't
+  duplicate), and `stampDispatchOverride` is last-write-wins. Mass never calls FieldPulse.
 
 ### 4.3 Locks
-L_req first in every batch: `lockRequestSql(org, rid)` (`invoice-field-writes.ts:42`). The mass batch
-locks all its requests first: `SELECT 1 FROM service_requests WHERE organization_id = $org AND id =
-ANY($ids) ORDER BY id FOR NO KEY UPDATE`. Request → rows everywhere, as every M3 writer does.
+L_req first in every batch (`lockRequestSql`, `invoice-field-writes.ts:42`); mass locks all its requests
+`ORDER BY id FOR NO KEY UPDATE`. Request → rows everywhere.
 
 ## 5. Writers
 
 ### 5.1 Who, and synced requests
-Admin session only (`getAdminSession`; `verifyToken` rejects other roles, `auth/config.ts:45`); no
-`/api/tech` route changes. Every body id is re-read under the session org inside the write.
+Admin session only (`verifyToken` rejects other roles, `auth/config.ts:45`); no `/api/tech` change. Every
+body id is re-read under the session org inside the write.
 
-| source | time / window / day | technician (lane change, tray, mass `T2`) | after a visit #1 window change |
+| source | time / window / day | technician (lane, tray, sheet reassign, mass `T2`) | push after a visit #1 window change |
 | --- | --- | --- | --- |
-| native | yes | yes | `pushJobToHcp`, `pushJobToFieldpulse` (no-ops unless the org is connected) |
+| native, no FSM id | yes | yes | `pushJobToHcp` as today (`reschedule/route.ts:184-189`); **no** FieldPulse call |
 | Housecall Pro (`hcp_job_id`) | yes | yes | `pushJobToHcp` |
-| FieldPulse (`fieldpulse_job_id`) | yes | **no**: 409 `MANAGED_EXTERNALLY` | `pushJobToFieldpulse` |
+| FieldPulse (`fieldpulse_job_id`) | **no**: 409 `MANAGED_EXTERNALLY` | **no**: 409 `MANAGED_EXTERNALLY` | — |
 
-- **Housecall Pro** writes back status and invoice status only (`housecall-pro/webhook-sync.ts`, around
-  :232 and :309-311), never schedule or assignee, so moves stick, as today's drag route assumes
-  (`reschedule/route.ts:186-189`). A request never becomes unmovable because the app pushed it.
-- **FieldPulse** time moves are pushed exactly as the sheet pushes a schedule change
-  (`requests/[id]/route.ts:356`, `:382-386`): `after(() => pushJobToFieldpulse(org, rid))` when the
-  window changed. Failure handling is the sheet's: `pushJobToFieldpulse` is degrade-safe, logs a warning
-  and never throws (`fieldpulse/job-sync.ts:136-226`), and the response doesn't wait for it. If the push
-  fails, the nightly import writes FieldPulse's old window back (`import/jobs.ts:528-536`), as it does for
-  the sheet today. The assignee is never pushed; the import sets `assigned_to` from FieldPulse's
-  assignment or null (`import/jobs.ts:429-460`), so a lane change would be undone overnight. The board
-  refuses it with honest copy (§8). Pushing the assignee (the client accepts `assigned_user_id`,
-  `fieldpulse/client.ts:984-1001`) is a later milestone.
-- Native requests in a FieldPulse-connected org are pushed at booking (`create-request-queries.ts:409`,
-  `submit-session-request.ts:420`) and from then on follow the FieldPulse row; M2 doesn't change that.
+- **Native.** Today's drag pushes to Google Calendar and HCP only; M2 matches it and never calls
+  FieldPulse for a request without `fieldpulse_job_id`, so a board move never creates a FieldPulse job.
+  In an HCP-connected org `pushJobToHcp` creates the HCP job on the first move (`housecall-pro/job-sync.ts:160-200`),
+  as today; the request stays movable (HCP writes back status and invoice status only,
+  `housecall-pro/webhook-sync.ts`), but the M3a crew writers then refuse it (`assignment-queries.ts:83`).
+  Dormant on dev (0 HCP connections).
+- **FieldPulse-mapped requests** are read-only on the board: every move, the tray and mass reschedule
+  refuse them (409 `MANAGED_EXTERNALLY`, "Change this request in FieldPulse."), and the batch's UPDATE
+  carries `fieldpulse_job_id IS NULL`. The nightly import owns their window and assignee
+  (`import/jobs.ts:528-536`, `:429-460`), and a board push would be an irreversible write to the owner's
+  live FieldPulse account, so M2 makes none. The schedule-only push is a follow-up (§10). The sheet's
+  existing schedule edit and its `pushJobToFieldpulse` call are not changed by M2 (§11).
+- **FieldPulse technician changes** are also refused in the sheet's `assignTechnician` / `reassignTechnician` (`queries.ts:506`, :662, which today
+  write an assignee the nightly import overwrites from FieldPulse or null, `import/jobs.ts:429-460`).
+- The status CASE (§5.3) is native only by construction (FieldPulse requests never reach the batch).
 
 ### 5.2 Window resolution (`src/lib/admin/move-window.ts`, pure, client and server)
-- **Drop band** is the band under the pointer: dnd-kit `pointerWithin` collision with `closestCenter` as
-  the fallback for keyboard drags (§7.4).
+- **Drop band** = the band under the pointer: `collisionDetection={pointerWithin}`; a drop not over any
+  droppable does nothing.
 - `currentWindowKind(start, end)` → `band` | `anytime` | `custom` | `none`.
-- `covers(current, D, B)` = the current window, moved to day `D` with the same wall-clock times, overlaps
-  band `B` (half-open).
-- `promptPlan(current, D, B)`:
+- `covers(current, D, B)` = the current window, on day `D` with the same wall-clock times, overlaps band
+  `B` (half-open).
+- `promptPlan(current, D, B, leadChanges)`:
   - no window (tray) → no prompt, use band `B`;
-  - `covers` → no prompt, keep (lane changes and same-band day moves never prompt; a custom 9–11 stays
-    9–11, today it becomes 8–12);
-  - otherwise prompt, default **Use the new window** for a `band` window, **Keep** for `anytime` and
-    `custom`.
+  - `covers` → no prompt, keep. A lane change into a band the window covers never prompts. Same lane and
+    day → nothing is sent, and the banner says "Still 11:00 AM – 1:00 PM. Open the request to change the
+    time.";
+  - otherwise prompt. Default **Use the new window** for a `band` window, **Keep** for `anytime` and
+    `custom` when the day or lead changes. With the same day and lead, Keep would change nothing, so it is
+    not offered and the default is Use the new window.
 - `resolveMoveWindow(current, D, B, rule, pick | exact)`: `match` → band `B` on `D`
-  (`arrivalWindowUtcForBusinessDate`, `calendar-time.ts:311`); `pick` → the picked `ARRIVAL_WINDOWS` value
-  on `D`; `keep` → the same wall-clock start and end on `D` (`businessWallClockToUtc`, :129; an end on the
-  next business day stays on `D + 1`); `exact` → the given instants (used only by Undo, §7.5; end > start,
-  span ≤ 24 h). `keep` with no window → 400 `VALIDATION_ERROR` `{ path: ['windowRule'] }`.
-- Same lead, same window → nothing is sent.
-- The server recomputes from the window it read (the version gate proves it unchanged).
-- **Ended:** a changed window whose end ≤ now → 400 `WINDOW_ENDED` (`WINDOW_ENDED_MESSAGE`,
-  `window-ended.ts:9`, as `POST …/appointments` does, its route.ts:93-94). A lead change that keeps an
-  ended window is allowed.
+  (`arrivalWindowUtcForBusinessDate`, `calendar-time.ts:311`); `pick` → an `ARRIVAL_WINDOWS` value on `D`;
+  `keep` → the same wall-clock start and end on `D` (`businessWallClockToUtc`, :129; an end past midnight
+  stays on `D + 1`); `exact` → given instants (Undo only; end > start, span ≤ 24 h). `keep` with no window
+  → 400 `VALIDATION_ERROR` `{ path: ['windowRule'] }`.
+- The server recomputes from the window it read. A changed window whose end ≤ now → 400 `WINDOW_ENDED`
+  (`window-ended.ts:9`, as `POST …/appointments`, its route.ts:93-94); a lead change keeping an ended
+  window is allowed.
 
 ### 5.3 `moveVisit` (`src/lib/admin/visit-move.ts`)
 Input `{ requestId, visitId | null, expectedVersion | null, day, band, windowRule, pick?, exact?,
-technicianId?, confirm: ('started' | 'conflict')[] }`. `technicianId` = the new lead; absent or equal to
-the current lead = keep; dropping on Unassigned never unassigns (`interactive-scheduling-calendar.tsx:561-573`).
-Only the request's **active visit** is moved: the card the board shows (`displayVisitIdSql`,
-`current-visit.ts:54-59`) when it isn't ended; ended visits stay pinned.
+technicianId?, confirm: ('started' | 'conflict')[], expectStartedIds?: uuid[], restore?: Previous }`.
+`technicianId` = the new lead (absent or equal = keep); dropping on Unassigned never unassigns
+(`interactive-scheduling-calendar.tsx:561-573`). Only **visit #1** moves, and only while it is the
+displayed visit and not ended; otherwise 409 `VISIT_PINNED`.
 
-**Pre-read** (one query): request (status, source, assignee), the visit (number, version, window, ended),
-its live rows with `rowStarted` and timestamps. Refusals, in order: not in org → 404; `completed` /
-`cancelled` → `REQUEST_TERMINAL`; visit cancelled or ended → `VISIT_ENDED`; id or version differs →
-`STALE`; FieldPulse and the lead changes → `MANAGED_EXTERNALLY`; new lead not an active technician of the
-org (`activeTechnicianIds`, `appointment-queries.ts:63`) → `TECHNICIAN_NOT_FOUND`; changed window ended →
-`WINDOW_ENDED`; a capacity-removing shift of any crew member after the move overlaps the window →
-`TIME_OFF` (never overridable, §5.5). Then the confirm needs, computed for the crew after the move:
+**Pre-read** (one query): request (status, source, assignee), visit #1 (version, window, ended), its live
+rows with `rowStarted` and timestamps, open time entries per technician. Refusals in order: 404;
+`REQUEST_TERMINAL`; `VISIT_ENDED`; `VISIT_PINNED`; `STALE` (id or version); `MANAGED_EXTERNALLY`
+(§5.1); `TECHNICIAN_NOT_FOUND` (`activeTechnicianIds`, `appointment-queries.ts:63`); `WINDOW_ENDED`;
+`TIME_OFF`. **Who is checked for time off and conflicts** is the technicians the move assigns: the new
+lead when the lead changes, and, when the window changes, every live crew member who stays on the visit.
+A crew member whose time doesn't change is never re-checked, and the old lead leaves the visit (below), so
+their time off never blocks a handover.
+
+Confirm needs:
 - `started`: the lead changes and the current lead's row is started; or the window changes and any live
-  row is started. A lead swap with only a helper working and the window unchanged needs nothing.
-- `conflict`: a crew member has an open row (`OPEN_ASSIGNMENT_STATUSES`, `ownership.ts:13-15`) on another
-  live visit of an open request overlapping the window (half-open, as `checkScheduleConflict`,
+  row is started. A lead swap with only a helper working and the window unchanged needs nothing. With
+  `expectStartedIds` (Undo), `started` counts as confirmed only when the set of started rows equals it.
+- `conflict`: a checked technician has an open row (`OPEN_ASSIGNMENT_STATUSES`, `ownership.ts:13-15`) on
+  another live visit of an open request overlapping the window (half-open, as `checkScheduleConflict`,
   `scheduling-queries.ts:237`), or the window is outside the new lead's hours (a span variant of
-  `isWindowWithinAvailability`, `availability-coverage.ts:88`, over the private `spanIsCovered`, :56).
-Unconfirmed needs → 409, code `HAS_PROGRESS` when `started` is among them, else `SCHEDULE_CONFLICT`,
-`details: { needs, started?: [{ technicianId, status, hasTimestamp, openTimeEntry }], conflicts?: [{ id,
-referenceNumber, technicianId, arrivalWindowStart, arrivalWindowEnd }], outsideAvailability? }`. Ids,
-enums, booleans and the conflicting request's window only. Nothing is written.
+  `isWindowWithinAvailability`, `availability-coverage.ts:88`, over `spanIsCovered`, :56).
+Unconfirmed needs → 409 `HAS_PROGRESS` when `started` is among them, else `SCHEDULE_CONFLICT`; `details:
+{ needs, started?: [{ technicianId, status, hasTimestamp, openTimeEntry }], conflicts?: [{ id,
+referenceNumber, technicianId, arrivalWindowStart, arrivalWindowEnd }], outsideAvailability? }`. `TIME_OFF`
+details: `{ timeOff: [{ technicianId, startsAt, endsAt, kind }] }`, no `needs` (never overridable,
+admin-pages skill; that is why it isn't a "Schedule anyway?" confirm).
 
-**Batch, visit #1** (request columns; the trigger mirrors them). Every table predicate carries
-`organization_id = $org`. `<gate>` = `EXISTS (SELECT 1 FROM service_requests r WHERE r.id = $rid AND
-r.organization_id = $org AND r.xmin = pg_current_xact_id()::xid)`.
+**Batch** (every predicate carries `organization_id = $org`; `<gate>` = `EXISTS (SELECT 1 FROM
+service_requests r WHERE r.id = $rid AND r.organization_id = $org AND r.xmin = pg_current_xact_id()::xid)`):
 0. L_req.
-1. `UPDATE service_requests SET assigned_to = $lead, scheduled_date = $start, arrival_window_start =
-   $start, arrival_window_end = $end, status = <CASE>, updated_at = now() WHERE id = $rid AND
-   organization_id = $org AND status NOT IN ('completed','cancelled') AND <version gate> AND NOT <visit
-   ended> AND (fieldpulse_job_id IS NULL OR assigned_to IS NOT DISTINCT FROM $lead) AND <no time off, every
-   crew member> AND (<'started' confirmed> OR NOT <started arm>) AND (<'conflict' confirmed> OR <no
-   conflict>) RETURNING id, status`. Each guard is the SQL twin of a pre-read check.
-   `<CASE>`: `pending` with a lead → `assigned` (the technician app hides `pending`; as
+1. (`restore` only, when the current lead was a helper in `previous`) `UPDATE appointment_assignments
+   SET is_lead = false WHERE … appointment_id = <#1> AND technician_id = <current lead>`, so the trigger's
+   step 3 (which only touches `is_lead` rows, 0050:125–133) leaves that row alone.
+2. `UPDATE service_requests SET assigned_to = $lead, scheduled_date = $start, arrival_window_start =
+   $start, arrival_window_end = $end, status = <CASE>, hold_reason = <…>, follow_up_date = <…>, updated_at
+   = now() WHERE id = $rid AND organization_id = $org AND status NOT IN ('completed','cancelled') AND
+   <version gate> AND NOT <#1 ended> AND fieldpulse_job_id IS NULL AND <no time off, checked technicians> AND (<'started' confirmed> OR NOT <started arm>) AND
+   (<'conflict' confirmed> OR <no conflict>) RETURNING id, status`. Every guard is the SQL twin of a
+   pre-read check. `<CASE>`, native only: `pending` with a lead → `assigned` (as
    `create-request-queries.ts:375-387`); a lead change past a started lead while `status IN
-   ('en_route','arrived','in_progress','on_hold')` and no other live row is started → `scheduled`
-   (an override-only edge: `en_route` and `on_hold → scheduled` are in `TRANSITIONS`,
-   `request-status.ts:33`, :38; `arrived` and `in_progress → scheduled` are not, and are recorded as
-   such, §5.3 After); otherwise unchanged.
-2. Only on a lead change, the old lead: the trigger deletes an untouched row and demotes a progressed one
-   to `cancelled` (or keeps `completed`), 0050:125–133. A progressed old lead stays on the crew as a
-   helper: `UPDATE appointment_assignments SET status = 'assigned' WHERE organization_id = $org AND
-   appointment_id = <#1> AND technician_id = $oldLead AND NOT is_lead AND status = 'cancelled' AND <any
-   timestamp> AND <gate>`.
-3. Only on a lead change, the new lead (inserted by the trigger with the request's status, or revived,
-   0050:134–145, which keeps a `cancelled` row `cancelled`): `UPDATE appointment_assignments a SET status
-   = CASE WHEN r.status IN ('en_route','arrived','in_progress','on_hold') THEN 'assigned' ELSE r.status END
-   FROM service_requests r WHERE r.id = $rid AND r.organization_id = $org AND a.organization_id = $org AND
-   a.appointment_id = <#1> AND a.technician_id = $lead AND a.is_lead AND (a.status = 'cancelled' OR
-   (a.status IN ('en_route','arrived','in_progress','on_hold') AND <no timestamp>)) AND <gate>`. So a new
-   or revived lead never reads as started without doing anything.
-4. A progressed old lead's open time stops: `closeJobEntriesSql({ organizationId, requestId: $rid,
-   technicianIds: [$oldLead], gate })` (`time-entry-sql.ts:34`) with the visit filter widened to
-   `(t.appointment_id = <#1> OR t.appointment_id IS NULL)` (dev: 1 of 6 job entries has none).
-5. Audit `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM appointments p WHERE p.organization_id = $org AND
-   p.service_request_id = $rid AND p.appointment_number = 1 AND p.xmin = pg_current_xact_id()::xid)` (the
-   M3c gate, `equipment-writes.ts:89`).
+   ('en_route','arrived','in_progress','on_hold')` and no other live row is started → `scheduled`, clearing
+   `hold_reason` and `follow_up_date` (as `appointment-queries.ts:121-122`); `restore` → `previous.requestStatus`;
+   otherwise unchanged. `en_route` and `on_hold → scheduled` are listed edges (`request-status.ts:33`,
+   :38); the rest are override-only, recorded as such (After).
+3. The old lead on a lead change. The trigger deletes an untouched row, demotes a progressed one to
+   `cancelled` and keeps a `completed` one (0050:125–133). M2 also cancels the kept `completed` row:
+   `UPDATE appointment_assignments SET status = 'cancelled' WHERE … technician_id = $oldLead AND NOT
+   is_lead AND status = 'completed' AND <gate>` (not under `restore`). Timestamps stay. **The old lead
+   leaves the crew; this supersedes the round-1 ruling that kept them as a helper.**
+4. The new lead's row (trigger insert, or a revived row, which the trigger keeps `cancelled`,
+   0050:134–145): `UPDATE appointment_assignments a SET status = CASE WHEN r.status IN
+   ('en_route','arrived','in_progress','on_hold') THEN 'assigned' ELSE r.status END FROM service_requests r
+   WHERE r.id = $rid AND … a.technician_id = $lead AND a.is_lead AND (a.status = 'cancelled' OR (a.status
+   IN ('en_route','arrived','in_progress','on_hold') AND <no timestamp>)) AND <gate>` — the shared
+   `reviveLeadSql(org, rid, gate)`.
+5. `restore` only: each technician in `previous.crew` gets back `is_lead` and `status` (§5.4).
+6. The old lead's open time stops (on a lead change, not under `restore`): `closeJobEntriesSql({
+   organizationId, requestId: $rid, technicianIds: [$oldLead], gate })` (`time-entry-sql.ts:34`) with the
+   visit filter `(t.appointment_id = <#1> OR t.appointment_id IS NULL)`.
+7. Audit, gated on `#1.xmin = pg_current_xact_id()::xid` (the M3c gate, `equipment-writes.ts:89`).
+8. `SELECT version FROM appointments WHERE … appointment_number = 1` (after the trigger), for the 200.
 
-**Batch, active visit #2+** (written directly; request columns untouched):
-0. L_req. 1. `UPDATE appointments SET scheduled_date, starts_at, ends_at, arrival_window_start,
-   arrival_window_end, version = version + 1, updated_at = now() WHERE id = $vid AND organization_id =
-   $org AND service_request_id = $rid AND appointment_number > 1 AND version = $v AND cancelled_at IS NULL
-   AND <request not terminal; FieldPulse lead unchanged> AND <the same guards> RETURNING id`.
-2. Lead swap gated on `landed()` (`appointment-queries.ts:89-91`): the old lead row is deleted when
-   untouched, else `is_lead = false, status = CASE WHEN status = 'completed' THEN status ELSE 'assigned'
-   END`; the new lead `INSERT … (is_lead true, 'assigned') ON CONFLICT (appointment_id, technician_id) DO
-   UPDATE SET is_lead = true, status = CASE WHEN status = 'cancelled' OR (<started status> AND <no
-   timestamp>) THEN 'assigned' ELSE status END`.
-3. The request status reset of step 1's CASE, as its own `UPDATE service_requests … WHERE <landed()>`.
-4. Steps 4–5 above for this visit.
-
-**Zero rows** → re-read in the pre-read's order and answer the first failing code (a guard that now
-fails answers its 409 with fresh `details`); nothing failing → `STALE`. A deadlock (`isDeadlock`,
+**Zero rows** → re-read in the pre-read's order; nothing failing → `STALE`. A deadlock (`isDeadlock`,
 `status-writes.ts:53`) → `STALE`.
 
-**After the batch** (best-effort, as `placeAndAssignRequest` does today, `scheduling-queries.ts:843-868`):
-- `recordStatusEvent(from: <old status>, to: 'assigned', actor: human)` on every first assignment (old
-  `assigned_to` null, lead now set), whatever the status column did, as `scheduling-queries.ts:843-855`
-  does for the first-response KPI; and `<old> → scheduled` (actor human) on an override reset;
-- `stampDispatchOverride(org, rid, lead, user)` when a lead is set (`dispatch-override.ts`);
-- visit #1 and the window changed: `after()` `syncRequestToCalendar`, `pushJobToHcp`, `pushJobToFieldpulse`;
-  a lead change on a native or HCP request: `syncRequestToCalendar`, `pushJobToHcp` (today's calls,
-  `reschedule/route.ts:184`, :189).
-- No customer or technician message is sent.
+**After the batch** (best-effort, as `scheduling-queries.ts:843-868`): `recordStatusEvent(old →
+'assigned', human)` on every first assignment, whatever the status column did; `old → scheduled` (human)
+on an override reset; `stampDispatchOverride(org, rid, lead, user)` when a lead is set; `after()`
+`syncRequestToCalendar` and `pushJobToHcp` on a window or lead change (today's calls). No FieldPulse call.
+No customer or technician message.
 
 Success → 200 `{ visitId, visitVersion, requestStatus, arrivalWindowStart, arrivalWindowEnd, leadId,
-previous: { arrivalWindowStart, arrivalWindowEnd, leadId }, confirmed }`.
+startedIds, previous: Previous, confirmed }`, `Previous = { arrivalWindowStart, arrivalWindowEnd,
+requestStatus, crew: [{ technicianId, isLead, status }] }`.
 
-**What an override hands over.** The old lead stays on the visit as a helper: they still read the job
-(`techCanReadSql`, `ownership.ts:169-171`), keep M3d form access on that visit (the visit gate needs a
-live row, `src/lib/forms/form-gates.ts:16`; the native on-site window still applies, so an en-route helper gets
-NOT_ON_SITE until someone is on site), and their open time stops. Lead-only work (request status taps,
-close-out, field invoice, estimates, payments) passes to the new lead, who is the active visit's lead. A
-draft field invoice or estimate stays on the request for the new lead to continue once on site
-(`BILL_STATUSES`, `field-sale-statuses.ts:7`).
+**What an override hands over.** The old lead's row is `cancelled` with its timestamps; their time entries
+are kept and their open time stops. They still read the job (`techCanReadSql`, `ownership.ts:169-171`,
+admits cancelled rows with progress) but can't write forms on that visit (the gate needs a live row,
+`src/lib/forms/form-gates.ts:16`). Their M3d draft stays on the visit (submissions belong to the visit,
+not the row) and the new crew can edit it. Lead-only work (status taps, close-out, field invoice,
+estimates, payments) passes to the new lead; drafts stay on the request (`BILL_STATUSES`,
+`field-sale-statuses.ts:7`). Undo revives them.
 
-**Audit** `visit_moved`, entity `appointment`, entityId the visit: `{ requestId, appointmentNumber,
-fromTechnicianId, toTechnicianId, windowRule, window: 'morning' | 'afternoon' | 'evening' | 'anytime' |
-'custom', dayChanged, confirmed, startedStatuses, conflictCount, outsideAvailability, undo }`. No
-instants.
+**Audit** `visit_moved`, entity `appointment`, entityId #1: `{ requestId, fromTechnicianId,
+toTechnicianId, windowRule, window: 'morning' | 'afternoon' | 'evening' | 'anytime' | 'custom', dayChanged,
+confirmed, startedStatuses, conflictCount, outsideAvailability, undo }`. No instants.
 
-### 5.4 Drag-to-tray (`unscheduleRequest`, `scheduling-queries.ts:916`)
-Unchanged except: FieldPulse requests are refused (`MANAGED_EXTERNALLY`; it clears the assignee) in the
-guarded UPDATE and the classifier; the started check is §3.2's through `visitOneGuardSql`. HCP requests
-are pushed as today (`unschedule/route.ts:72-73`). Only a visit #1 card may go to the tray; a #2+ card
-dropped there does nothing and shows its line (§8). A visit with a form submission keeps its row (0058);
-M2 deletes no visit.
+### 5.4 Undo
+After "Move anyway" the banner offers Undo when `previous.crew` has a lead and the previous window hasn't
+ended. Undo = `POST …/move` with `restore: previous`, `windowRule: 'exact'` (the previous window), the
+previous lead, the new `visitVersion`, `confirm: response.confirmed`, `expectStartedIds:
+response.startedIds`. It restores the exact previous crew: the same lead and helpers with their previous
+statuses (step 1 keeps a helper-turned-lead from being deleted; step 4 revives the old lead; step 5 writes
+each previous row's `is_lead` and `status`), and the request status. A technician added by the move and
+not in `previous.crew` is removed by the trigger as an untouched old lead. Not restored: the closed time
+entry (the old lead's time between the move and Undo isn't counted). Anything that changed since (a new
+start, another move) asks again or answers `STALE`. An ended previous window → "Can't undo. The original
+time has passed."
 
-### 5.5 Time off
-Never overridable (admin-pages skill: "Time off … is never overridable"; every writer guards it in SQL,
-`noTimeOff`, `appointment-queries.ts:76`). That is why the lead's suggested "Schedule anyway?" confirm is
-not used. 409 `TIME_OFF` `details: { timeOff: [{ technicianId, startsAt, endsAt, kind }] }`, one per crew
-member. The client checks the loaded blocks first and shows the same dialog without a request (§7.4);
-the server is the gate.
+### 5.5 Drag-to-tray (`unscheduleRequest`, `scheduling-queries.ts:916`)
+Unchanged except: FieldPulse refused (it clears the assignee); the started check is §3.2's via
+`visitOneGuardSql`. HCP pushed as today (`unschedule/route.ts:72-73`). A visit with a form submission
+keeps its row (0058); M2 deletes no visit.
 
 ### 5.6 The sheet
-`reassignTechnician` (`queries.ts:662`), `assignTechnician` (:506), `scheduleRequest` (:914) and
-`updateAppointment` keep their writers and gain §3.2 through the shared guard; no override there.
-`visitOneRefusalResponse` (`visit-one-guard.ts:59-62`) takes a context: sheet, native/HCP "A technician
-has started this visit. To move it anyway, drag it on the calendar."; sheet, FieldPulse "A technician
-has started this job. Change it in FieldPulse."; the tray keeps its own copy.
+- `assignTechnician`, `reassignTechnician`, `scheduleRequest` gain §3.2 through the shared guard (no
+  override there), refuse FieldPulse technician changes, and append `reviveLeadSql` to their
+  `lockedUpdate` batch (`visit-one-guard.ts:32-36`) gated on the request xmin, so a sheet reassign A → B →
+  A never leaves a `cancelled` lead (the trigger keeps a cancelled row cancelled). `placeAndAssignRequest`
+  (autopilot, office booking) appends it too.
+- `visitOneRefusalResponse` (`visit-one-guard.ts:59-62`) takes a context: sheet "A technician has started
+  this visit. To move it anyway, drag it on the calendar on a computer."; FieldPulse "Change the technician
+  for this request in FieldPulse."; the tray its own line (§8).
 
 ### 5.7 Mass reschedule (`src/lib/admin/mass-reschedule.ts`)
-Every active visit on business day `D` whose lead is `T` moves to day `D2` and/or lead `T2`, keeping each
-window's wall-clock times (`keep`). No `deltaMinutes` (architecture.md:144): minute shifts make custom
-windows. No undo: the dispatcher mass-moves back.
-- **Preview** (read-only) lists every visit `T` is on that day: `moves`, or skipped `started` (never
-  overridden in bulk), `ended`, `time_off`, `window_ended`, `already_on_visit` (`T2` has any row on it,
-  cancelled included), `fieldpulse_technician` (FieldPulse request and `T2` set), `helper` (`T` only
-  helps; it moves with its lead), plus the soft flag `conflict`.
+Every displayed visit #1 on business day `D` whose lead is `T` moves to day `D2` and/or lead `T2`,
+keeping wall-clock times. No `deltaMinutes` (architecture.md:144). No undo (move them back).
+- **Preview** lists every visit `T` is on that day: `moves`, or skipped `started`, `ended`,
+  `later_visit` (a visit #2+), `time_off` (checked: `T2`, plus the crew when the day changes),
+  `window_ended`, `already_on_visit` (`T2` has any row, cancelled included), `fieldpulse` (any FieldPulse-mapped request),
+  `helper`; plus the soft flag `conflict`.
 - **Commit** `{ technicianId, fromDate, toDate, toTechnicianId?, visits: [{ visitId, expectedVersion }]
-  (1–30), confirmSoft }`, keyed (§4.2). One batch: L_req over all requests, then per visit the §5.3
-  statements, each with its own version gate, lead gate `= T` and `start on D` predicate; `confirmSoft`
-  confirms `conflict` for every visit, else those are skipped. Each visit lands or misses independently;
-  any statement error rolls back all and answers 500 (nothing moved; the client refetches). Then the audit
-  row (§4.2).
+  (1–30), confirmConflict }`, keyed. One batch: L_req over all, then per visit the §5.3 statements with
+  their own version gate, lead gate `= T` and `starts on D`; `started` never confirmed in bulk;
+  `confirmConflict` confirms `conflict` for all, else those skip. Any statement error rolls back all and
+  answers 500. Then the audit row (§4.2).
 - After: per moved request the §5.3 after-calls, and `stampDispatchOverride(org, rid, T2, user)` when `T2`
   is set.
-- Result `{ moved: [{ visitId, requestId, visitVersion }], skipped: [{ visitId, reason }] }`.
-- Audit `dispatch_mass_rescheduled`, entity `user`, entityId `T`, id `derivedId(scope, 'audit')`: `{
-  toTechnicianId, dayShift, movedVisitIds, skippedVisitIds, skippedReasons: { reason: count },
-  confirmSoft }`.
+- Result `{ moved: [{ visitId, requestId, visitVersion }], skipped: [{ visitId, reason }] }`, reasons
+  incl. `stale` and `conflict`.
+- Audit `dispatch_mass_rescheduled`, entity `user`, entityId `T`: `{ toTechnicianId, dayShift,
+  movedVisitIds, skipped: [[visitId, reason]], confirmConflict }`.
 
 ## 6. Routes (`force-dynamic`, admin session, logs carry codes and ids only)
 
 | route | gate | success |
 | --- | --- | --- |
-| `GET /api/admin/calendar` (exists) | unchanged, `adminRead` | §7.1 fields; day view adds `blocks` |
-| `POST /api/admin/requests/[id]/move` (new) | `isUuid`, `admin:visit-move:<user>` `adminMutation`, `readJsonBody`, zod | 200 §5.3 |
+| `GET /api/admin/calendar` (exists) | `adminRead` | §7.1 fields; day view adds `blocks` |
+| `POST /api/admin/requests/[id]/move` (new) | `isUuid`, `admin:visit-move:<user>` `adminMutation`, `readJsonBody`, zod | §5.3 |
 | `POST /api/admin/requests/[id]/unschedule` (exists) | + FieldPulse refusal | unchanged |
-| `POST /api/admin/dispatch/mass-reschedule/preview` (new) | `adminRead`; dates `isRealIsoDate` within today − 1 … today + 365; ids `isUuid` | `{ candidates }` |
+| `POST /api/admin/requests/[id]/assign`, `PATCH …` (exist) | + FieldPulse refusal, revive | unchanged |
+| `POST /api/admin/dispatch/mass-reschedule/preview` (new) | `adminRead`; `isRealIsoDate`, today − 1 … today + 365; `isUuid` | `{ candidates }` |
 | `POST /api/admin/dispatch/mass-reschedule` (new) | `adminMutation`, zod, Idempotency-Key | §5.7 |
-| `POST /api/admin/requests/[id]/appointments/[aid]/assignments`, `DELETE …/[tid]` (exist) | unchanged; insert revives (§3.3) | unchanged |
-| `POST /api/admin/requests/[id]/reschedule` | **removed** with its tests (`tests/api/admin/reschedule.test.ts`, `route.test.ts`); its only caller was `use-reschedule-job.ts:99`, which keeps `unschedule` | — |
-
-The move route sits under the request, not `appointments/[id]/move` (architecture.md:139), because a
-tray request may have no visit. 400 bodies are `VALIDATION_ERROR` with `details.path`.
+| `POST/DELETE …/appointments/[aid]/assignments` (exist) | + `NO_LEAD`, `VISIT_FULL`, revive (§3.3) | unchanged |
+| `PATCH …/appointments/[aid]` (exists) | unchanged | used by `Change time` |
+| `POST /api/admin/requests/[id]/reschedule` | **removed** with `tests/api/admin/reschedule.test.ts` and its route test; only caller `use-reschedule-job.ts:99`, which keeps `unschedule` | — |
 
 ## 7. Client
 
-Admin primitives and tokens, sentence case, "request" and "technician", no `err.message`. Logic in pure
-helpers.
+Admin primitives, sentence case, "request" and "technician", no `err.message`. Logic in pure helpers.
 
 ### 7.1 Board data (`getSchedulingCalendar`, `queries.ts:1661`)
-After `mergePlacedRows` (:1573), one query reads, for every placed and tray card's displayed visit,
-`appointments.id`, `version` and its rows joined to `users` (`name`, `is_active`), org-scoped. Cards gain
-`visitId`, `visitVersion`, `crew: [{ technicianId, name, isLead, state: 'open' | 'working' | 'done' }]`
-(live rows; inactive names withheld as `dashboardRequestSelect` does, :1263-1267), `started`,
-`movable: 'yes' | 'time_only' | 'no'` (FieldPulse → `time_only`; ended → `no`), and per lane `laneRole:
-'lead' | 'helper'`. Day view adds `blocks` (new `listShiftsInRange`, all kinds, `shift-queries.ts`).
-`queries.test.ts`: the new queries run after the existing five; the visit feed stays index 4.
+After `mergePlacedRows` (:1573), one query reads each placed and tray card's visit (§4.1's `visitId`
+expression), its `version` and live rows joined to `users`, org-scoped. Cards gain `visitId`,
+`visitVersion`, `crew: [{ technicianId, name, isLead, state: 'open' | 'working' | 'done' }]` (inactive
+names withheld as `dashboardRequestSelect`, :1263-1267), `started`, `movable: 'yes' | 'no'`
+(FieldPulse-mapped, a displayed #2+ or an ended visit → `no`), `laneRole`.
+Day view adds `blocks` (`listShiftsInRange`, all kinds). `queries.test.ts`: new queries after the
+existing five; the visit feed stays index 4.
 
-### 7.2 Lanes, crew and cues (Day view)
-- A card renders in its lead's lane and, as a helper copy (`laneCards`, pure), in each active helper's
-  lane: not draggable, a "Helping <lead first name>" line, tap opens the sheet. Keys
+### 7.2 Lanes, crew and cues
+- Helper copies (`laneCards`, pure): each active helper's lane; not draggable; "Helping <lead first
+  name>"; title "<customer> · <ref>. Helping <lead>. Drag the card in <lead>'s lane."; keys
   `${requestId}:${technicianId}`.
-- Crew chips (`crew-chips.tsx`) on their own row under the customer, only when the crew has 2 or more:
-  initials, the lead first with the `marker` border, working filled, done with a check, more than 3 →
-  `+N`; each chip has a title and an `aria-label` with name and state. Below 120 px card width (pure
-  `chipLayout`) or in Week view: a people icon and the count, `aria-label="2 technicians"`.
-- FieldPulse cards show the `SyncPill` at `md` size ("FieldPulse", `sync-pill.tsx:3`; today `sm` "FP")
-  in the card's top row, and a small lock on the pill with title "Technician set in FieldPulse". HCP cards
-  keep the `sm` pill.
-- Started cards show a lock icon (title "Started. Moving it asks first.") and stay draggable (design
-  deviation, §9).
-- Lane counts include helper copies; ended visits skipped (`liveJobCount`, :127).
-- The time axis is `sticky left-0` with the surface background, so it stays put while lanes scroll.
-- Width at 1440: viewport − sidebar 232 (`sidebar.tsx:329`) − `PageShell` `p-6` 48 = 1160; − tray 288 +
-  gap 16 (`draggable-unscheduled-panel.tsx:125`) = 856; − board `p-3` and border 26 = 830; − axis 56 + gap
-  8 = 766 for lanes at 224 + 8 each. **Unassigned plus two technician lanes are fully visible**; the third
-  shows 70 px; the rest scroll horizontally as today (dnd-kit auto-scrolls at the edge while dragging).
+- Crew chips (`crew-chips.tsx`), own row under the customer, only with 2+ crew: initials, lead first with
+  the `marker` border, working filled, done with a check, `+N` past 3, `aria-label` with name and state.
+  `chipLayout(width, height)`: below 120 px wide, in Week view, or below 72 px high → a people icon and
+  the count in the top row, `aria-label="2 technicians"`.
+- FieldPulse: the `SyncPill` (`sync-pill.tsx:3`) at `md` ("FieldPulse") in Day view when the card is ≥ 160
+  px wide, else `sm` ("FP"), with a lock beside it; the time never truncates before the pill. Pill title and
+  `aria-label` addition: "Change this request in FieldPulse." The card isn't draggable (no grab cursor) and
+  has no `Move…`; a tap opens the sheet.
+- Started: a lock icon (title "Started. Moving it asks first."), and "started" in the `aria-label`.
+- Visit #2+ (pinned, today's `:224`): tag "Visit #2" (today), title "Visit #2. Change its time in the
+  request.", the same appended to the `aria-label`; no grab cursor.
+- Lane counts include helper copies; ended skipped (`liveJobCount`, :127).
+- Layout: `TimeAxis` moves out of the `overflow-x-auto` element; the lanes sit in their own `overflow-x-auto
+  min-w-0 flex-1` scroller (dnd-kit auto-scrolls that scroller). Width at 1440: 1440 − sidebar 232
+  (`sidebar.tsx:329`) − `PageShell p-6` 48 − tray 288 + gap 16 (`draggable-unscheduled-panel.tsx:125`) −
+  board `p-3` and border 26 − axis 56 + gap 8 = 766 px of lanes at 224 + 8: **Unassigned plus two
+  technician lanes are fully visible**, the third shows 70 px, the rest scroll.
 
 ### 7.3 Blocks
-`lane-blocks.tsx` draws blocks behind the cards (`placeJobInLane`): `time_off` and a capacity-removing
-`non_job` hatched with the title or "Time off" / "Non-job event"; a `non_job` that keeps capacity
-outlined only; `on_call` a 3 px left rail titled "On call". A block links to the Staff page
-(`/admin/staff`). Bands stay droppable (a disabled droppable would send the drop to a neighbour); a
-fully covered band gets "Time off" in its accessible name. Ended bands on today are shaded and named
-"Ended".
+`lane-blocks.tsx`, behind the cards (`placeJobInLane`): `time_off` and a capacity-removing `non_job`
+hatched with the title or "Time off" / "Non-job event"; a non-removing `non_job` outlined; `on_call` a 3 px
+rail titled "On call"; each links to `/admin/staff`. Bands stay droppable. `describeDropTarget`
+(`calendar-dnd.ts`) appends ", Sam is off" or ", ended" to the spoken target. Ended bands on today are
+shaded.
 
 ### 7.4 Drop flow (`handleDragEnd`, `interactive-scheduling-calendar.tsx:534`)
-`collisionDetection` becomes `pointerWithin`, falling back to `closestCenter` when the pointer is over no
-droppable (keyboard drags). `handleDragStart` (:523-532) finds the overlay card by `visitId` and
-`laneRole === 'lead'`.
-1. Tray drop → §5.4 (a #2+ card or a FieldPulse card is refused client-side with its line).
-2. Band drop: FieldPulse card on another lane → banner (§8), nothing sent. Resolved crew overlaps a
-   capacity-removing block → the time-off dialog, nothing sent. `promptPlan`; same lead and window →
-   nothing.
-3. Prompt (opened on the next frame, so the key that ended a keyboard drop doesn't submit it); Escape or
-   Cancel → nothing moved; after Keep with the same lead and day → nothing.
-4. Optimistic move (`applyOptimisticReschedule` / `currentScopeOf`, `calendar-optimistic.ts:58`, :85, keyed
-   by `visitId`, moving every copy), then `POST …/move`.
-5. 200 → `applyMoveResult` writes `visitVersion`, `leadId` and the window into the board for that
-   `visitId` (a quick second drag doesn't meet its own STALE), then refetch. A lead change that shrank the
-   crew shows "Sam is now the lead. Alex is off this visit."
-6. 409 `HAS_PROGRESS` / `SCHEDULE_CONFLICT` → roll back, open the confirm (§7.5) holding the body; "Move
-   anyway" re-sends with `confirm = needs`. `TIME_OFF` → the time-off dialog. `STALE` → refetch; if
-   `moveLanded`, keep quietly; else the banner. Other codes → roll back, banner, refetch. Network failure
-   or 5xx → refetch; `moveLanded` decides as for STALE.
-In-flight state is per visit (`Set<visitId>`): only that card and its copies are disabled; `isRescheduling`
-leaves the lane and tray props (:702, :715, :727).
+`KeyboardSensor` with `sortableKeyboardCoordinates` (:513-515) is removed: it never moves (the active id
+`job:<uuid>` has no droppable), and keyboard moves go through `Move…` (§7.5). `handleDragStart`
+(:523-532) finds the card by `requestId` and `laneRole === 'lead'`. All client move state (overlay,
+optimistic board, in-flight set, `applyMoveResult`, Undo) is keyed by `requestId`; `visitId` only rides
+in the body.
+1. Tray drop → §5.5. (FieldPulse cards can't be dragged at all.)
+2. `promptPlan`; the prompt if needed.
+3. `resolveMoveWindow`.
+4. `timeOffHits(blocks, checkedTechnicians, window)` (pure) → the time-off dialog, nothing sent.
+5. No-op → nothing (or the covered line, §5.2).
+6. Optimistic move: `optimisticCrew(crew, newLeadId)` (new lead out of the helpers, old lead off the
+   visit), `laneCards` re-derived; then `POST …/move`.
+7. 200 → `applyMoveResult` (version, lead, window), refetch, `moveBanner`. 409 needs → roll back, confirm
+   (§7.5). `TIME_OFF` → time-off dialog. `STALE` or network failure → refetch; `moveLanded` keeps it
+   quietly, else the banner. Other codes → roll back, banner, refetch.
+The in-flight set disables only that request's card and copies; `isRescheduling` leaves the lane and tray
+props (:702, :715, :727).
+**Focus.** After a drop, a refusal, or any dialog closing (Move, Cancel, OK, Escape), focus moves on the
+next frame to the card for that `requestId` (`[data-request-id]` on its button); if that card isn't on the
+board, to the lane header of the drop scope. Dialogs set `onCloseAutoFocus={e => e.preventDefault()}` and
+call this helper.
 
-### 7.5 Dialogs and Undo
+### 7.5 Dialogs, banner, `Move…`
 - **Window prompt** (`window-prompt-dialog.tsx`): title "Arrival window"; description "Moving <customer> ·
-  <ref> to the <band>."; options "Keep 9:00 AM – 11:00 AM" (+ " on Wed, Nov 11" when the day changes),
-  "Use the afternoon window · 12:00 PM – 4:00 PM", "Choose a window" with a `Select` (Morning, Afternoon,
-  Evening, Anytime with hours; `selectLabel`; ended ones disabled "Already ended"); default per §5.2.
-  Footnote "The customer isn't told about this change." Enter anywhere = Move; Escape = Cancel. Buttons
-  "Move" / "Cancel".
-- **Confirm** (`ConflictDialog` generalised, `conflict-dialog.tsx`): title "Move anyway?"; blocks per need
-  (§8); "Cancel" and "Move anyway" (destructive, "Moving…").
-- **Time-off dialog**: title "Can't move this request"; one line per crew member; single "OK".
-- **Undo after Move anyway:** the banner (`CalendarStatus`, `calendar/page.tsx:47`, gains an optional
-  action) says "Moved. Alex stays on as a helper." (or "Moved." for a time-only override) with `Undo`,
-  until the next move or 60 s. Undo = the inverse move from the response's `previous`: `windowRule:
-  'exact'`, the previous lead, the new `visitVersion`; it may itself ask to confirm. It puts the lead and
-  window back; it doesn't restore progress (the old lead's row is `assigned` with their earlier
-  timestamps; they tap again) or the request status.
+  <ref> to Sam's afternoon." (lane named when it changes); a `RadioGroup`: "Keep 9:00 AM – 11:00 AM" (+ "
+  on Wed, Nov 11"), "Use the afternoon window · 12:00 PM – 4:00 PM", "Choose a window" revealing a
+  `Select` (Morning, Afternoon, Evening, Anytime with hours; `selectLabel`; ended ones "Already ended");
+  defaults §5.2; footnote "The customer isn't told about this change."; Enter = Move except while the
+  Select is open; Escape = Cancel; buttons "Move" / "Cancel".
+- **Confirm** (`ConflictDialog` generalised; its time-off branch, `conflict-dialog.tsx:71-93`, is deleted):
+  title "Move anyway?"; §8 blocks; "Cancel" / "Move anyway" ("Moving…").
+- **Time-off dialog**: "Can't move this request"; one line per technician (§8); "Pick another time or
+  technician."; "OK".
+- **`Move…`**: each draggable lead card (never a FieldPulse card) has a sibling icon button (`aria-label="Move <customer> · <ref>"`,
+  in the tab order after the card, visible on hover and focus-within). It opens a dialog: Technician
+  (`Select` of active technicians, current selected), Date (date input), Window (`RadioGroup`: Keep current, Morning, Afternoon, Evening,
+  Anytime). "Move" sends the same route (`windowRule` `keep` or `pick`), then the same 409 flow, confirm and
+  banner. It is offered also when the board isn't interactive.
+- **Banner** (`moveBanner(response, crewBefore, crewAfter, confirmed)`, pure): "Moved." / "Sam is now the
+  lead. Alex is off this visit." / errors. Rendered `fixed` bottom-right of the viewport (`CalendarStatus`,
+  `calendar/page.tsx:47`, moves there and gains an action and a close ×); `role="status"`, errors
+  `role="alert"`. Clears on the next drag start; Undo shows for 60 s; errors stay until closed. The text is
+  announced after the server answers.
 
 ### 7.6 Mass reschedule
 Lane header `⋯` (`aria-label="More for <name>"`) → `Move this day…`. Dialog "Move <name>'s requests on
-Tue, Nov 10": `To day` (default: the same day when a technician is picked, else the next weekday), `To
-technician` (`Select`, "Same technician"), the preview (skeleton after 300 ms; "Couldn't load the preview.
-Try again."; "No requests to move on this day."), rows "9:00 AM – 11:00 AM · <customer> · <ref>" with
-"Moves" or the reason, a checkbox "Move them even where they overlap" when any `conflict` shows, and
-"Move 1 request" / "Move N requests". After: "Moved 3 of Alex's requests to Sam on Wed, Nov 11. 2 stayed."
+Tue, Nov 10": `To day` (default the next weekday; picking a technician sets it to the same day only if the
+dispatcher hasn't changed it; min today, max today + 365), `To technician` ("Same technician"), the preview
+(skeleton after 300 ms; "Couldn't load the preview. Please try again." + Try again; "No requests to move
+on this day."), rows "9:00 AM – 11:00 AM · <customer> · <ref>" with "Moves" or the reason, a checkbox
+"Move them even where they overlap" when any `conflict` shows. "Move N requests" counts the rows that will
+move; disabled when nothing changes. After commit the dialog stays open on the result: "Moved 3 of Alex's
+requests to Sam on Wed, Nov 11." (variants without day or technician; "None of Alex's requests moved."),
+then what stayed, with reasons.
 
-### 7.7 Sheet: technicians on a visit
-Each live visit row in Visits (`request-detail-sheet.tsx:578-615`) gains `Technicians`: the crew with
-"Lead" on the lead, a × on each helper ("Remove <name> from this visit", `DELETE …/assignments/[tid]`),
-and "Add technician", a `Select` of active technicians not live on the visit (disabled at 5) calling `POST
-…/assignments`. Hidden on FieldPulse requests (with "Change technicians for this job in FieldPulse.") and
-for HCP (the M3a writers refuse both, `assignment-queries.ts:83`). Error copy maps the existing codes (§8).
-The lead changes on the board, not here.
+### 7.7 Sheet: Visits section
+- **Technicians** on each live visit row: the crew with "Lead"; a × on each helper not working ("Remove
+  <name> from this visit", `DELETE …/assignments/[tid]`); "Add technician", a `Select` of active
+  technicians not live on the visit (`POST …/assignments`), disabled at 5 with "A visit can have up to 5
+  technicians.", hidden with "Set a lead first." while the visit has no lead. FieldPulse rows: "Change the
+  technicians for this request in FieldPulse."; HCP: "Helpers aren't available for Housecall Pro
+  requests." Success calls `onAssigned` (`calendar/page.tsx:342`) so the board refetches. The lead changes
+  with Reassign above or on the calendar.
+- **Change time** on each live visit #2+: dialog "Change visit #2" (date, window `Select`, "Save" /
+  "Cancel") → `PATCH …/appointments/[aid]` with the row's `version` and its current technicians lead first
+  (`updateAppointment`, unchanged, keeps its timestamp progress gate). Copy: HAS_PROGRESS "A technician has
+  started this visit. Ask them to pause it first."; VERSION_CONFLICT "This visit changed. It has been
+  refreshed."; TIME_OFF "<name> is off during this time."; WINDOW_ENDED `WINDOW_ENDED_MESSAGE`; other
+  "Couldn't change the visit. Please try again."
 
-### 7.8 Below 1024 px
-Pure `boardInteractive(width)`; `useMinWidth(1024)` initialised lazily from `matchMedia` (the board is
-`ssr: false`, `calendar/page.tsx:28-43`, so the first paint is right). Read-only: no sensors, no lane
-menu; chips and blocks shown; notice "Moving requests needs a wider screen. Tap a request to change its
-technician or time." Today's touch drag goes: 224 px lanes, the prompt and the confirm don't fit, and
-horizontal scroll competes with drag; the sheet still schedules.
+### 7.8 When the board isn't interactive
+`boardInteractive(width, finePointer)`: interactive at ≥ 1024 px with `(pointer: fine)`; a lazy
+`matchMedia` init (the board is `ssr: false`, `calendar/page.tsx:28-43`). Otherwise no sensors and no lane
+menu; chips, blocks and `Move…` stay; notice "Dragging needs a computer. Use Move… on a request, or open
+it." Today's touch drag goes.
 
 ### 7.9 Week view
-Columns stay under the unassigned scope (no technician change); the prompt applies; one card per request.
+Columns under the unassigned scope (no technician change); the prompt applies; one card per request.
 
 ## 8. Copy
 
 | where | copy |
 | --- | --- |
-| Confirm · started, lead change | line 1 from the details: "<Alex Rivera> is en route to this visit." / "…has arrived." / "…is in progress on this visit." / "…is paused on this visit." / "…is done with this visit."; status without a timestamp: "This visit is marked in progress." Line 2: "<Alex> stays on as a helper. <Sam> becomes the lead and takes over close-out, the invoice and estimates. The request goes back to Scheduled." (the last sentence only when the reset applies; "Alex's time on it stops." only when `openTimeEntry`). Line 3: "Neither technician is told. Call them." |
-| Confirm · started, time change | "<Alex Rivera> is in progress on this visit. It moves to 12:00 PM – 4:00 PM." (one line per started crew member) + line 3 |
-| Confirm · conflict | "Overlapping requests:" + the existing rows (`conflict-dialog.tsx:88-106`), prefixed with the technician's first name when the crew has more than one; the out-of-hours line unchanged |
-| Time off | "<Sam> is off 4:00 PM – 8:00 PM on Tue, Nov 10." |
-| Banners | STALE "This request changed. The calendar has been refreshed." · FieldPulse lane change "Change the technician for this job in FieldPulse." · VISIT_ENDED "This visit has ended. Add a new visit instead." · REQUEST_TERMINAL "This request is completed, so it can't be moved." / "…cancelled…" · TECHNICIAN_NOT_FOUND "That technician isn't active any more." · WINDOW_ENDED `WINDOW_ENDED_MESSAGE` · other "Couldn't move the request. Please try again." |
-| Tray | started "A technician has started this visit, so it can't go back to the tray." · #2+ "Visit #2 can't go back to the tray. Cancel it in the request's Visits section." · FieldPulse "Change the technician for this job in FieldPulse." |
-| Sheet | §5.6; crew control: ALREADY_ASSIGNED "<name> is already on this visit." · HAS_PROGRESS "<name> has started, so they stay on this visit." · TIME_OFF "<name> is off during this visit." · VISIT_ENDED "This visit has ended." · other "Couldn't change the technicians. Please try again." |
-| Mass skip reasons | started "Started" · ended "Visit ended" · time_off "Time off that day" · window_ended "That time has passed" · already_on_visit "<Sam> is already on it" · fieldpulse_technician "Technician set in FieldPulse" · helper "Helping <lead first name>. Change it in the request." · stale "Changed since you opened this" · soft "Overlaps another request" |
+| Confirm · started, lead change | line 1: "<Alex Rivera> is en route to this visit." / "…has arrived." / "…is in progress on this visit." / "…is paused on this visit." / "…is done with this visit."; no timestamp: "This visit is marked in progress." Line 2: "<Alex> comes off the visit. <Sam> becomes the lead and takes over close-out, the invoice and estimates." + "The request goes back to scheduled." when it does + "Alex's time on it stops." when `openTimeEntry`. Line 3: "Neither technician is told. Call them." |
+| Confirm · started, time change | "<Alex Rivera> is in progress on this visit. It moves to 12:00 PM – 4:00 PM." per started technician + line 3 |
+| Confirm · conflict | "Overlapping requests:" + rows (`conflict-dialog.tsx:88-106`), first names when more than one technician; out-of-hours line unchanged |
+| Time off | `time_off`: "<Sam> is off 4:00 PM – 8:00 PM on Tue, Nov 10." · `non_job`: "<Sam> has a non-job event 4:00 PM – 8:00 PM on Tue, Nov 10." · a helper adds "Or remove <Sam> in the request." |
+| Banners | STALE "This request changed. The calendar has been refreshed." · MANAGED_EXTERNALLY "Change this request in FieldPulse." · VISIT_ENDED "This visit has ended. Add a new visit instead." · VISIT_PINNED "Visit #2. Change its time in the request." · REQUEST_TERMINAL "This request is completed, so it can't be moved." / "…cancelled…" · TECHNICIAN_NOT_FOUND "That technician isn't active any more." · WINDOW_ENDED `WINDOW_ENDED_MESSAGE` · Undo ended "Can't undo. The original time has passed." · other "Couldn't move the request. Please try again." |
+| Tray | started "A technician has started this visit, so it can't go back to the tray." · FieldPulse "Change this request in FieldPulse." |
+| Sheet crew | ALREADY_ASSIGNED "<name> is already on this visit." · HAS_PROGRESS "<name> has started, so they stay on this visit." · TIME_OFF "<name> is off during this visit." · VISIT_ENDED "This visit has ended." · NO_LEAD "Set a lead first." · VISIT_FULL "This visit already has 5 technicians." · other "Couldn't change the technicians. Please try again." |
+| Mass reasons | started "Started" · ended "Visit ended" · later_visit "Visit #2. Change it in the request." · time_off "Time off then" · window_ended "That time has passed" · already_on_visit "<Sam> is already on it" · fieldpulse "Change it in FieldPulse" · helper "Helping <lead first name>. Change it in the request." · stale "Changed since you opened this" · conflict "Overlaps another request" |
 
 Dates in `BUSINESS_TIME_ZONE` (`calendar-time.ts:27`), times via `formatBusinessTimeRange`.
 
@@ -477,144 +487,160 @@ Dates in `BUSINESS_TIME_ZONE` (`calendar-time.ts:27`), times via `formatBusiness
 
 No jsdom/RTL. Capture the vitest baseline first.
 
-**Drag spike (plan task 0, before any feature code).** A throwaway script against a throwaway org proves
-a Playwright pointer drag lands on the intended band and lane at 1440: scroll source and target into view
-(`scrollIntoViewIfNeeded` + `boundingBox()`), `mouse.move` to the card centre, `down`, move 10 px
-(`PointerSensor` distance 6, :507-509), `move` to the target band centre with `steps: 12`, `up`; assert
-with today's code that the request's window and assignee changed as intended, including a lane that
-started off screen. If it can't, the walk is redesigned before M2 is built.
+**Task 0, drag spike (before feature code).** A throwaway script against a throwaway org at 1440 × 900,
+sidebar expanded, with `pointerWithin` swapped in locally, proves: (a) lane 1 → lane 5: pointer down, move
+to within 20 px of the lanes scroller's right edge, hold until the target band's `boundingBox()` is in the
+viewport (poll with a timeout), move onto its centre, release → assignee and window changed as intended;
+(b) tray → an off-screen lane, the same way; (c) a drop 4 px inside a band edge lands on that band, not
+its neighbour. Steps: `mouse.move` in `steps: 12`, past `PointerSensor`'s 6 px (:507-509). Any failure
+redesigns the walk or the drag model first.
 
-**Pure:** `rowStarted` (lead and helper statuses; done helper not started; revived `assigned` with
-timestamps not started; pause; mirrored `in_progress`); `currentWindowKind`; `covers`; `promptPlan` (tray;
-lane change; anytime and custom dropped on a covered band; 7–9 lane change; crossing → defaults);
-`resolveMoveWindow` (match, pick, keep across days and the 2027-03-14 DST start, end past midnight,
-exact, keep without a window); no-op detection; `moveNeeds`; `laneCards`; `chipLayout`;
-`applyMoveResult`; `moveLanded`; optimistic move by `visitId`; mass classification and default day;
-`boardInteractive`; §8 copy builders.
+**Pure:** `rowStarted`; `currentWindowKind`; `covers`; `promptPlan` (tray; covered lane change; anytime,
+11–1, 7–9; crossing defaults; same day and lead without Keep); `resolveMoveWindow` (match, pick, keep
+across days and the 2027-03-14 DST start, end past midnight, exact, keep without a window);
+`timeOffHits`; `moveNeeds` (checked technicians; old lead excluded); `optimisticCrew` (drop on a helper's
+lane; old lead untouched and progressed); `laneCards`; `chipLayout`; `applyMoveResult`; `moveLanded`;
+`moveBanner`; optimistic tray drag with two tray cards (no `visitId`); mass classification and default
+day; `boardInteractive`; §8 copy builders.
 
-**SQL renders (`PgDialect`):** batches start with `lockRequestSql`; every table carries `organization_id`;
-the version gate includes the id (null → no #1); the status CASE incl. `on_hold`; steps 2–4 only on a
-lead change, gated; the entries filter with `IS NULL`; the #2+ swap; the audit xmin gate; `startedRowSql`
-in `visitOneGuardSql` and `visitProgressed`; the FieldPulse lead predicate; the unschedule FieldPulse
-predicate; the `addVisitTechnician` revive clause; the mass audit id.
+**SQL renders (`PgDialect`):** L_req first; `organization_id` everywhere; the version gate with the id
+(null → no #1); the native-only CASE incl. `on_hold` and the hold fields; steps 1, 3–6 on their
+conditions, gated; `reviveLeadSql` in the sheet writers and `placeAndAssignRequest`; the entries filter;
+the audit xmin gate; the final version read; `startedRowSql` in `visitOneGuardSql` only
+(`visitProgressed` unchanged); FieldPulse predicates; `addVisitTechnician` revive, lead and cap clauses;
+`removeVisitTechnician`'s cancel branch; the mass `NOT EXISTS` audit predicate.
 
-**Route tests:** every code and its order; 400 on a non-UUID id, `keep` without a window, `exact` over
-24 h; TIME_OFF details have no `needs`; 409 details carry no names; mass: missing key → 400, replay,
-reused key → 422, a 31st visit refused; `/reschedule` → 404; tech cookie → 401 on every new route.
+**Route tests:** every code and its order; 400s (non-UUID, `keep` without a window, `exact` over 24 h);
+TIME_OFF has no `needs`; details carry no names; mass key rules, a 31st visit refused; `/reschedule` →
+404; tech cookie → 401; no route in M2 imports a FieldPulse client or push function (render/import test).
 
 **Integration (`tests/integration/dispatch-board.test.ts`, `VITEST_INTEGRATION=1`, dev DB, throwaway orgs
 by SQL via `createOrgCore`, never the default org; pushes mocked):**
-(a) window: a 9–11 request on Alex → Sam's lane, morning → 9–11 kept, no prompt needed; afternoon match
-→ 12–4; pick anytime; keep to another day; a match into an ended band → WINDOW_ENDED;
-(b) done-when, working: Alex taps en route (`status-writes`) → move to Sam → 409 HAS_PROGRESS → confirm →
-request `scheduled`, Sam lead `scheduled`, Alex a helper `assigned` with `en_route_at` kept, Alex's open
-entry closed, one audit row with `confirmed: ['started']`, one status event `en_route → scheduled`; Alex
-still reads the job and his form gate passes the assignment check;
-(b2) then drag back to Alex → no confirm needed; Alex lead `scheduled` (revived), Sam deleted (untouched),
-the crew shows Alex; Undo body from (b)'s `previous` does the same;
-(b3) pause: Alex arrives and pauses (request `on_hold`) → override to Sam → request `scheduled`, Sam
-`scheduled`, Alex helper `assigned`;
-(c) done: Alex taps done (request `in_progress`) → time move → 409 → confirm → Alex stays `completed`;
-lead change → Alex a done helper; a later time move needs no confirm;
-(d) helper working, lead untouched → lead swap → 200 without confirm, helper unchanged; time move → 409;
-(e) mirrored only: office PATCH `in_progress` → board move 409; sheet reassign 409 with the sheet copy;
-FieldPulse request → the FieldPulse sheet copy;
-(f) FieldPulse (`fieldpulse_job_id` by SQL): time move → 200, `pushJobToFieldpulse` called once; lane
-change → MANAGED_EXTERNALLY; tray → MANAGED_EXTERNALLY; mass with `T2` → `fieldpulse_technician`;
-HCP (`hcp_job_id`): lane and time move → 200, `pushJobToHcp` called;
-(g) concurrency: two moves from one version on two connections → one 200, one STALE; a tap between
-render and drop → STALE; (g') tray then re-place (new visit #1 at version 0) → an old card's drop → STALE;
-(h) multi-assignee, done-when: Sam added through `POST …/assignments` → calendar GET has the card in both
-lanes with both chips; remove → gone; add again after a cancel → the row revived; drop the lead card on
-Sam's lane → Sam lead, Alex removed; helper time off → TIME_OFF naming Sam; helper double-booked →
-SCHEDULE_CONFLICT naming Sam;
-(i) active visit #2: drag moves the appointment only, request columns unchanged, version + 1;
-(j) `pending` with Alex dropped on Alex → `assigned`, lead row `assigned`, event pending → assigned;
-(j') `scheduled` with no lead dropped on Alex → one `assigned` event;
-(l) blocks: three kinds listed in the day GET;
-(m) mass: Alex's day with 2 movable, 1 started, 1 FieldPulse (with `T2`), 1 helper → preview reasons;
-commit → 2 moved with wall-clock times, one audit row; same key → the same result; delete the key row and
-re-send → the same `moved` list rebuilt from the audit row, nothing re-written;
-(n) M3d: visit #1 with a form submission dragged to the tray → the visit survives;
-(o) tenancy: other org's request, visit and technician ids → 404 / TECHNICIAN_NOT_FOUND;
+(a) window: 9–11 on Alex → Sam's morning → 9–11; afternoon match → 12–4; pick; keep to another day; match
+into an ended band → WINDOW_ENDED;
+(b) done-when: Alex taps en route → move to Sam → 409 HAS_PROGRESS → confirm → request `scheduled`, Sam
+lead `scheduled`, Alex `cancelled` with `en_route_at` kept, Alex's open entry closed, one audit row, one
+event `en_route → scheduled`; Alex reads the job; Sam can edit Alex's form draft;
+(b2) drag back to Alex → no confirm; Alex lead `scheduled` (revived by step 4), Sam deleted (untouched);
+(b2u) Undo instead → Alex lead `en_route`, request `en_route`, Sam gone;
+(b2h) Alex lead en route + Sam helper `assigned` → Move anyway to Sam → Undo → Alex lead `en_route`, Sam
+helper `assigned` (not deleted);
+(b3) pause: request `on_hold` → override → `scheduled`, hold fields cleared;
+(b4) Alex en route, then Alex's time off from now → move to Sam with confirm → 200;
+(c) done lead: Alex `completed` → time move → confirm; lead change → Alex `cancelled`;
+(d) helper working, lead untouched → lead swap without confirm; time move → 409;
+(e) office PATCH `in_progress` → board 409; sheet reassign 409 with the sheet copy; sheet reassign A → B
+→ A where A has timestamps → A lead with an open status;
+(f) FieldPulse (`fieldpulse_job_id` by SQL): time move, day move, lane change, tray, sheet reassign →
+MANAGED_EXTERNALLY with nothing written; mass → `fieldpulse`; GET `movable: 'no'`; a native request in a
+FieldPulse-connected throwaway org (a connection row with a dummy key, client mocked) → move → 200 and no
+FieldPulse call; HCP: lane and time → 200, `pushJobToHcp`;
+(g) two moves from one version on two connections → one STALE; a lead `en_route` tap from `scheduled`
+between render and drop → STALE; a helper's tap → HAS_PROGRESS; (g') tray then re-place → an old card →
+STALE;
+(h) done-when: Sam added through `POST …/assignments` → both lanes, two chips; remove → gone; add after a
+cancel → revived; a 6th → VISIT_FULL; add on an unassigned visit → NO_LEAD; drop the lead card on Sam's
+lane → Sam lead, Alex removed; time move with helper time off → TIME_OFF naming Sam; (h2) helper Sam off,
+lead swap with the window unchanged → 200;
+(i') `Change time` on a #2 visit → the board GET shows it moved; a displayed #2 card → `movable: 'no'`,
+the move route → VISIT_PINNED;
+(j) `pending` with Alex dropped on Alex → `assigned`, event; (j') `scheduled` with no lead → one `assigned`
+event; (j'') a placed unassigned request → GET `visitId` = #1's id → drop on Alex → 200;
+(l) blocks: three kinds in the day GET;
+(m) mass: 2 movable, 1 started, 1 FieldPulse, 1 helper, 1 later visit → reasons; commit → 2 moved,
+wall-clock kept, one audit row with per-visit skips; same key → same result; delete the key row and
+re-send → same result, nothing re-written, pushes re-sent;
+(n) visit #1 with a form submission to the tray → the visit survives;
+(o) tenancy: other org ids → 404 / TECHNICIAN_NOT_FOUND;
 (p) audit rows carry ids, enums, booleans and counts only.
 
-**Browser walk** (1440 × 900; throwaway org via `scripts/agent/m2-walk.mts` modelled on `m3d-walk.mts`;
-everything by SQL; admin session with `MINT_ORG_ID`, org asserted; queue guard before, zero
-`communication_jobs` after): Alex and Sam with hours; a 9–11 request on Alex; Alex en route on another;
-Sam's time off 4–8 PM. Add Sam as helper on a third request through the sheet → both lanes, two chips →
-drag the 9–11 card to afternoon → prompt, default Keep → Cancel → unchanged → Use the afternoon window →
-12–4 → drag the en-route card to Sam → "Move anyway?" → Cancel → again → Move anyway → Sam's lane, Alex
-chip as helper → Undo → back → drop on Sam's evening → time-off dialog, nothing moved → Week view, next
-day same band → no prompt → `Move this day…` → preview → move → resize to 390: notice, tap opens the sheet.
-Screenshots at each step; look at them. `python3 .claude/skills/replica-design/contrast.py` on the new
-chip and pill tokens.
+**Browser walk** (1440 × 900; `scripts/agent/m2-walk.mts` modelled on `m3d-walk.mts`; throwaway org by
+SQL; `MINT_ORG_ID`, org asserted; queue guard before, zero `communication_jobs` after): Alex and Sam with
+hours; a 9–11 request on Alex; Alex en route on another; an afternoon request on Alex; Sam off 4–8 PM; a
+FieldPulse card set by SQL. Add Sam as helper through the sheet → both lanes, chips → 9–11 to Alex's
+afternoon → prompt, default "Use the afternoon window" (same day and lead) → Cancel → again → Move → 12–4 →
+en-route card to Sam → "Move anyway?" → Cancel → again → Move anyway → banner → Undo → back → the
+afternoon request on Sam's evening → Use the new window → Move → time-off dialog, nothing moved → the
+FieldPulse card: pill and lock visible, no grab cursor, no `Move…` → `Move…` from the keyboard on a card → dialog →
+move → focus returns to the card → Week view, next day same band → no prompt → `Move this day…` with a
+skipped row → move → 1023 px and 390 px: notice, `Move…` works. Screenshots at each step; look at them.
+`python3 .claude/skills/replica-design/contrast.py` on the chip, pill and hatch tokens.
 
-Design deviations from `replica/design/components.md`: started cards stay draggable (the server
-decides; :81 says no grab cursor); the prompt's button is "Move" and Keep is listed first (:98–104 say
-"Move job", the canon says "request").
+Design deviations from `replica/design/components.md`: started cards stay draggable (:81 says no grab
+cursor); the prompt's button is "Move", Keep listed first (:98–104 say "Move job").
 
 ## 10. Out of scope
 
-- Capacity: the window-load strip, holds-aware office moves, closing the placed + reserved race, and
-  capacity adjustments (row 82) go to a capacity milestone; `reserveCapacitySlot` is unchanged. Zones
-  (row 100).
-- Pushing the FieldPulse assignee; helpers on FieldPulse or HCP requests (M3a refuses both).
-- Named teams; skills (99); tray tabs (93); late outlines (101); route view (103); custom window picker
+- Capacity: the window-load strip, holds-aware office moves, the placed + reserved race, capacity
+  adjustments (row 82); `reserveCapacitySlot` unchanged. Zones (100).
+- Any board write to FieldPulse (schedule or assignee); helpers on FieldPulse or HCP requests (M3a refuses
+  both).
+- Dragging visits #2+ (the sheet changes their time); keyboard drag (`Move…` instead).
+- Named teams, skills (99), tray tabs (93), late outlines (101), route view (103), custom window picker
   (79).
-- Telling the customer or a technician about a move.
-- Adding helpers by drag; dragging helper copies; resizing cards; arrow-key minute moves.
+- Telling the customer or a technician about a move; adding helpers by drag; resizing cards.
 - `/admin/dispatch`, month, agenda; blocks in Week view; editing shifts on the board.
 - Mass undo, `deltaMinutes`, more than 30 visits per run.
 
+**Follow-up (needs the owner).** FieldPulse time moves from the board: a `pushScheduleToFieldpulse(org,
+rid)` wrapper calling `updateJob(id, { scheduleStart, scheduleEnd })`, which serialises only the two
+schedule keys (`JSON.stringify` drops undefined ones, `fieldpulse/client.ts:984-999`). `updateJob` is a
+PUT, and whether FieldPulse clears omitted fields is unknown. The owner verifies on a test job in their
+own FieldPulse that a schedule-only PUT keeps the description and assignee; then the push is built and
+FieldPulse time moves are enabled (`movable` gains `time_only`). Not done autonomously: the dev default
+org's key reaches the owner's live account, and a PUT there can't be undone by us.
+
 ## 11. Rulings and things not verified
 
-Rulings (lead rulings L1–L11 in the log):
-1. Window = `arrival_window_*`. The prompt fires only when the pointer's band isn't covered by the window;
-   lane changes never prompt; default Keep for anytime and custom, Use the new window for a band.
-2. Synced: HCP moves like native and is pushed; FieldPulse moves in time and is pushed like the sheet;
-   FieldPulse technician changes are refused with honest copy and a visible FieldPulse pill.
-3. Started = live lead row working or done, or live helper row working. An override keeps a progressed
-   old lead as a helper, starts the new lead unstarted, resets the request to `scheduled` (incl. from
-   `on_hold`) when no one else is working, and hands lead-only work to the new lead.
-4. A cancelled row is revived when its technician becomes lead or crew again.
-5. Version gate on visit id + version; the single move is unkeyed; mass is keyed with audit-row recovery.
-6. Only the active visit is draggable. Crew UI lives in the sheet.
-7. Time off is refused, never confirmed (repo invariant).
-8. Mass reschedule: preview + confirm, no undo. Row 82 cut.
-9. Row 98's team grouping = the visit's crew.
-10. No migration; read-only below 1024 px.
+Rulings (lead rulings L1–L11 round 1, L2-1…L2-10 round 2, in the log):
+1. Window = `arrival_window_*`; prompt only when the pointer's band isn't covered; defaults §5.2.
+2. Synced: HCP moves and is pushed. FieldPulse-mapped requests are read-only on the board (time, window,
+   day and technician) and their technician is refused in the sheet; M2 makes no FieldPulse call (L3.1-1).
+   Unmapped native requests in a FieldPulse org move as today.
+3. Started = live lead row working or done, or live helper row working.
+4. Move anyway: the old lead's row is `cancelled` (timestamps and entries kept, time stopped); the new
+   lead starts unstarted; the request resets to `scheduled` (incl. `on_hold`) when nobody else works.
+   Supersedes round 1's "old lead stays as a helper".
+5. Undo restores the exact previous crew and request status; it re-asks only for new starts.
+6. A cancelled row is revived whenever its technician becomes lead (board, sheet, autopilot) or helper.
+7. Time off is never overridable; only the technicians a move assigns are checked.
+8. Visit #1 only, while displayed; visits #2+ pinned and changed in the sheet.
+9. `visitId` falls back to #1; version gate on id + version; single move unkeyed; mass keyed with
+   audit-row recovery.
+10. Keyboard: `Move…` action, no keyboard drag. No migration. Row 98's team grouping = the visit's crew.
 
 Not closed by M2:
-- Capacity over-commit as today: office moves ignore holds, and the placed + reserved race in
-  `capacity-hold.ts:71-79` stands (capacity milestone).
-- Autopilot: after a dispatcher moves a freshly booked, still unassigned request within the Unassigned
-  lane, an autopilot run already scoring can re-place it at its held slot (`requireUnassigned` checks the
-  assignee only, `scheduling-queries.ts:780-785`; docs/DISPATCH.md:56-62). A dispatcher's drag after the
-  autopilot's write meets STALE.
-- A FieldPulse push that fails is undone overnight, as for the sheet.
-- `idempotency_keys` isn't pruned (mass adds one row per run).
+- Capacity over-commit as today (`capacity-hold.ts:71-79`; capacity milestone).
+- Autopilot: after a dispatcher moves a fresh, still unassigned request within the Unassigned lane, an
+  autopilot run already scoring can re-place it at its held slot (`requireUnassigned` checks the assignee
+  only; docs/DISPATCH.md:56-62).
+- The sheet's `pushJobToFieldpulse` on a schedule change still creates FieldPulse jobs for native requests
+  and overwrites the FieldPulse description (pre-existing bug; reported, not fixed here).
+- In an HCP-connected org the first move of a native request creates its HCP job, after which helpers are
+  refused (pre-existing push; M3a rule).
+- `idempotency_keys` isn't pruned.
 
-Verified: column names (§3.1); dev counts (§1); `/reschedule` callers; technicians can't hold an admin
-session; the sheet's FieldPulse push path; layout arithmetic (§7.2).
+Verified: column names; dev counts (§1); `/reschedule` callers; `updateJob` drops undefined keys; layout
+arithmetic.
 
-Not verified: the Playwright drag (task 0); `pointerWithin` with `restrictToWindowEdges` and auto-scroll
-on a lane that starts off screen; the day GET's latency with the crew query (measure before and after).
+Not verified: task 0 (drag spike); FieldPulse PUT semantics (follow-up, §10); the day GET's latency with the
+crew query (measure before and after).
 
 ## 12. Review focus
 
-- §3.2's started rule and its call sites; revived rows.
-- The visit #1 batch: the trigger's step 3 under a lead change, steps 2–4 and their gates; the #2+ swap.
-- Guards in the UPDATE matching the pre-read; the zero-row order.
-- FieldPulse: time moves pushed like the sheet, lead changes refused in SQL and on the client.
-- Mass recovery after a crash; the version gate with the id.
+- §3.2 and its single call site change (`progressed()`), with `updateAppointment` left alone.
+- The batch: steps 1–6 and their conditions under the trigger's step 3; `restore`.
+- `reviveLeadSql` in every request-column writer that changes the lead.
+- FieldPulse: refused on every board path and the sheet's technician paths; no FieldPulse import in M2 code.
+- Mass recovery; the `visitId` fallback.
 
 ## 13. Docs
 
-`page-calendar` (drop flow, prompt, confirm, Undo, crew, blocks, FieldPulse cue, read-only below 1024,
-`/reschedule` removed, queries.test indices), `page-requests` (started rule, sheet copy, crew control,
-tray), `page-dispatch` (helpers show only in their lead's column), `admin-pages` (started rule),
-`docs/DISPATCH.md` §5 (move route, `/reschedule` removed, the autopilot invariant and its residual),
-`replica/features.csv` rows 96/97/98/102, `replica/parity.md`, `replica/build-log.md`,
-`replica/architecture.md` annotation (move route under the request, no `deltaMinutes`,
-`REASSIGNABLE_STATUSES` unchanged and in `request-status.ts`, synced rules, capacity deferred), memory.
+`page-calendar` (drop flow, prompt, confirm, Undo, `Move…`, focus, crew, blocks, FieldPulse cue,
+FieldPulse read-only on the board, interactivity rule, `/reschedule` removed, queries.test indices), `page-requests` (started rule, sheet copy,
+crew control, Change time, FieldPulse reassign refusal, revive), `page-dispatch` (helpers show only in
+their lead's column), `admin-pages` (started rule), `docs/DISPATCH.md` §5 (move route, `/reschedule`
+removed, the autopilot invariant and residual), `replica/features.csv` rows 96/97/98/102,
+`replica/parity.md`, `replica/build-log.md`, `replica/architecture.md` annotation (move route under the
+request, no `deltaMinutes`, `REASSIGNABLE_STATUSES` unchanged and in `request-status.ts`, synced rules,
+capacity deferred), memory.

@@ -120,3 +120,118 @@ Rejected / moot:
   move or 60 s; no Undo for mass (L7).
 
 Verdict: v2 for round 2. All five round-1 blockers are resolved by L1, L2, L5 and L6.
+
+## Spec round 2 (v2 → v3), 2026-11-08 — 2 critics (A correctness/data/concurrency/tenancy/FieldPulse-HCP, B UX and buildability)
+
+Counts: A 2 blocker / 4 major / 8 minor; B 1 blocker / 11 major / 15 minor. Neither signed off. Lead
+rulings L2-1…L2-10 binding.
+
+Lead rulings:
+- L2-1 (A-B1) `visitId` falls back to visit #1's id; null = no #1; test.
+- L2-2 (A-B2) A board move never creates a FieldPulse job or touches its description. Mapped jobs get a
+  schedule-only update; if no safe schedule-only call exists, FieldPulse time moves are refused too.
+  Unmapped native requests behave as today's drag.
+- L2-3 (A-M1, B-B1) On Move anyway the old lead's row is cancelled, not kept as a helper; timestamps and
+  entries kept, time stopped; the draft stays and the new crew can edit it; Undo revives. Supersedes L3's
+  helper clause.
+- L2-4 (A-M2) Undo restores the exact previous crew; a helper promoted to lead goes back to helper; fix
+  (b2).
+- L2-5 (pending ruling) Visits #2+ stay pinned with a tag and title; the sheet gets `Change time` through
+  `updateAppointment`, which keeps its old progress gate; mass skips `later_visit`; fix v2's six
+  contradictions.
+- L2-6 (A-M4) The sheet path revives a cancelled lead as the board does.
+- L2-7 Time off: check only the technicians the move assigns.
+- L2-8 (B-M10) No keyboard drag; a `Move…` action per card; focus rules.
+- L2-9 (B-M9) The spike proves auto-scroll, `pointerWithin` band detection and tray-to-lane.
+- L2-10 Apply the remaining majors and minors, incl. per-visit skip reasons in the mass audit and pushes
+  re-sent on recovery.
+
+Applied:
+- `visitId` fallback (A-B1; L2-1): §4.1 and §7.1 use the displayed visit, else #1; integration (j'').
+- FieldPulse (A-B2; L2-2): today's drag route was checked (`reschedule/route.ts:184-189`: Google Calendar
+  and HCP only), so native requests get no FieldPulse call. A schedule-only call exists:
+  `updateJob(id, { scheduleStart, scheduleEnd })` serialises only the two schedule keys because
+  `JSON.stringify` drops undefined ones (`fieldpulse/client.ts:984-999`). New `pushScheduleToFieldpulse`
+  wraps it for mapped jobs only. Because `updateJob` is a PUT whose treatment of omitted fields is
+  unverified, FieldPulse time moves are enabled only after task 0b proves it keeps the description and
+  assignee; otherwise they are refused ("Change this request in FieldPulse."). The sheet's create and
+  description overwrite are recorded as a pre-existing bug. Route test asserts the body keys.
+- Old lead cancelled (A-M1, B-B1; L2-3): §5.3 step 3 (the kept `completed` row is cancelled too); time
+  off and conflicts check only the technicians the move assigns (L2-7), so a sick technician's time off
+  never blocks the handover; integration (b4), (h2); §8 confirm copy rewritten.
+- Undo (A-M2, B-m9, A-m6; L2-4): `previous` carries the crew and request status; `restore` mode (steps 1,
+  5) keeps a helper-turned-lead from the trigger's delete and writes back each row; Undo sends the
+  original confirm with `expectStartedIds`, so it re-asks only for new starts and never blindly replays;
+  offered only with a previous lead and an unended window; the 200's version is read after the trigger.
+  (b2) now expects Alex lead `scheduled` after a drag back (step 4 revives to the request's status);
+  (b2u) and (b2h) cover Undo.
+- Visits #2+ pinned (A-M3, B pending ruling; L2-5): the #2+ batch, test (i), the tray #2+ line, the #2+
+  `movable` case and "every active visit" in mass are gone; `VISIT_PINNED`; card tag, title and
+  `aria-label`; sheet `Change time` (§7.7) with its copy; `updateAppointment` keeps `visitProgressed`
+  (§3.2 explains the unique-constraint 500); mass `later_visit`; integration (i').
+- Revive on every lead writer (A-M4; L2-6): `reviveLeadSql` appended to `assignTechnician`,
+  `reassignTechnician` and `placeAndAssignRequest`; integration (e) A → B → A.
+- Keyboard (B-M10; L2-8): `KeyboardSensor` and `sortableKeyboardCoordinates` removed (verified they never
+  move); `Move…` per card with its dialog using the same route and 409 flow; focus after drops,
+  refusals and dialogs (§7.4); walk step.
+- Spike (B-M9; L2-9): task 0 now proves auto-scroll to an off-screen lane, `pointerWithin` 4 px from a
+  band edge, and tray to an off-screen lane.
+- Mass (A-m4, B-m7, B-m8; L2-10): per-visit `skipped: [[visitId, reason]]` in the audit; org-scoped
+  recovery read; `NOT EXISTS` audit predicate in each statement; recovery re-sends the after-calls
+  (idempotent: calendar upsert, update-path pushes, HCP create guarded by `hcp_job_id IS NULL`,
+  last-write-wins telemetry); `conflict` named once, `stale` listed; button count, disabled when nothing
+  changes, result variants, dialog stays open on the result, date min and max, default-day rule.
+- A-m1 server cap `VISIT_FULL`; A-m2 `NO_LEAD`; A-m3 status CASE native only, `on_hold` reset clears hold
+  fields; A-m5 HCP conversion stated in §5.1 and §11; A-m7 test (g) split into lead tap → STALE and helper
+  tap → HAS_PROGRESS; A-m8 paths now under `src/lib/integrations/`.
+- A-M1 (c): `removeVisitTechnician` cancels a timestamped, not-started helper instead of refusing.
+- B-M2 time-off pre-check after the prompt resolves the window (`timeOffHits`); walk fixed.
+- B-M3 same day and lead: Keep isn't offered, default Use the new window; covered no-op line.
+- B-M4 pill size by width, no lock on the pill, started in the `aria-label`.
+- B-M5 sheet assign/reassign refuse FieldPulse technician changes; §7.7 wording fixed.
+- B-M6 client move state keyed by `requestId`; pure test with two tray cards.
+- B-M7 `optimisticCrew`.
+- B-M8 `moveBanner`, fixed bottom-right, roles, lifecycle, close ×.
+- B-M11 time axis out of the scroller; lanes in their own scroller.
+- B minors: 1 "job" → "request"; 2 sentence case; 3 "Please try again."; 4 time-off copy by kind with a
+  way out; 5 covered-lane wording; 6 `RadioGroup`, Enter except while a Select is open, lane named; 10
+  `onAssigned`, HCP and cap copy, × hidden on working helpers; 11 `ConflictDialog` time-off branch
+  deleted; 12 `chipLayout(width, height)`; 13 `describeDropTarget` speaks time off and ended; 14
+  `(pointer: fine)` and "on a computer"; 15 walk adds the FieldPulse card, `Move…`, a skipped mass row,
+  1023 px. B's internal check: server `MANAGED_EXTERNALLY` mapped to the banner.
+
+Rejected / moot:
+- A-m8's "`import/jobs.ts:528-536` is now :513-527": not taken; `.update(serviceRequests)` is at :528 and
+  the window fields follow it (re-grepped); :513-527 is the insert path.
+- B-M10's `bandKeyboardCoordinates`: superseded by L2-8 (no keyboard drag).
+- B-M3's "Keep reads 'Don't move'": replaced by not offering Keep when it would change nothing.
+- B-m9 "send `response.confirmed` with Undo" and A-M2 "Undo always sends `confirm: []`": merged; Undo sends
+  the confirm with `expectStartedIds`, which honours only the starts that were confirmed.
+- A-M1 (a), (b), the "ghost helper": moot under L2-3 (no demoted helper exists).
+- B-M8's `sticky bottom-4` placement: the fixed bottom-right toast was chosen (one rule for both).
+
+Verdict: v3 for round 3. Round 2's three blockers are resolved by L2-1, L2-2 and L2-3.
+
+## Lead ruling before round 3 (v3 → v3.1), 2026-11-08
+
+- L3.1-1 The dev default org's FieldPulse key reaches the owner's real, live FieldPulse account; task 0b
+  would PUT to a real FieldPulse job, which is outward-facing and not reversible by us, so it isn't done
+  autonomously. Supersedes L2-2's schedule-only push.
+
+Applied:
+- FieldPulse-mapped requests are read-only on the board: time, window, day and technician moves, the tray
+  and mass reschedule refuse them with 409 `MANAGED_EXTERNALLY` "Change this request in FieldPulse."; the
+  move UPDATE carries `fieldpulse_job_id IS NULL`; `movable` is `'yes' | 'no'` (FieldPulse → `no`); the
+  card shows the FieldPulse pill with a lock, no grab cursor and no `Move…`; the mass reason is
+  `fieldpulse`. The sheet's FieldPulse technician refusal (B-M5) stays.
+- Task 0b and `pushScheduleToFieldpulse` removed from M2; listed in §10 "Follow-up (needs the owner)": the
+  owner verifies on a test job in their own FieldPulse that a schedule-only `updateJob` PUT keeps the
+  description and assignee, then the push is built and FieldPulse time moves are enabled.
+- Unmapped native requests in a FieldPulse org move as today with no FieldPulse call; Housecall Pro is
+  unchanged from v3.
+- Goal and Done-when state that the done-when is proved on native requests and FieldPulse-mapped requests
+  refuse every board move; features.csv notes for 96 and 102 say so; §4.2 recovery no longer mentions a
+  FieldPulse push; §5.3 after-calls make no FieldPulse call; tests: route test asserts no M2 route imports a
+  FieldPulse client or push, integration (f) expects MANAGED_EXTERNALLY for every FieldPulse board move and
+  no FieldPulse call for a native request in a connected throwaway org (client mocked), (m) and the walk
+  updated; §11 rulings, "not closed", "not verified" and §12 updated.
