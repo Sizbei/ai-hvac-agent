@@ -4,6 +4,7 @@
  * These types are used by admin route handlers and the admin query module.
  * All interfaces use readonly properties for immutability.
  */
+import type { BoardBlock, CrewMember, LaneRole, Movable } from './board-types';
 
 // Request list item (includes decrypted customer name for list display)
 export interface AdminRequest {
@@ -223,6 +224,20 @@ export interface DashboardRequest {
   readonly visitNumber?: number;
   /** A hold ended this visit and nothing is booked yet: shown, never dragged. */
   readonly visitEnded?: boolean;
+  // ── M2: calendar-only fields (getSchedulingCalendar); absent on other lists ──
+  /** The displayed visit, else visit #1 (spec §4.1); null when no visit #1 exists. */
+  readonly visitId?: string | null;
+  readonly visitVersion?: number | null;
+  /** Live rows on the displayed visit, lead first. */
+  readonly crew?: readonly CrewMember[];
+  readonly started?: boolean;
+  readonly movable?: Movable;
+  /** "helper" on a copy laneCards puts in a helper's lane; server cards are "lead". */
+  readonly laneRole?: LaneRole;
+  /** On a helper copy: whose lane it sits in. */
+  readonly laneTechnicianId?: string;
+  /** FieldPulse-mapped: read-only on the board. */
+  readonly fieldpulse?: boolean;
 }
 
 /** Max rows any single dashboard list returns. A list at this length is shown
@@ -344,6 +359,8 @@ export interface SchedulingCalendar {
    * the server gate can't disagree. Empty when no availability is configured.
    */
   readonly availability: readonly AvailabilitySlot[];
+  /** Day view only: every technician_shifts row overlapping the day (spec §7.1). */
+  readonly blocks?: readonly BoardBlock[];
 }
 
 // ─── Month calendar (read-only overview) ────────────────────────────────────

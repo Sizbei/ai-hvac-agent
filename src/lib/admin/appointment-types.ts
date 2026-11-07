@@ -8,6 +8,10 @@ export interface AppointmentAssignmentRecord {
   readonly technicianName: string;
   readonly isLead: boolean;
   readonly status: string;
+  /** M2 §3.3: started by the board's rule (rowStarted). Set by listAppointments / getAppointment. */
+  readonly started?: boolean;
+  /** Any progress timestamp on the row. */
+  readonly hasProgress?: boolean;
 }
 
 export interface AppointmentRecord {
