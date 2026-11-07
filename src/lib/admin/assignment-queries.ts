@@ -4,8 +4,9 @@ import { appointmentAssignments, appointments, serviceRequests } from "@/lib/db/
 import { withTenant } from "@/lib/db/tenant";
 import { OPEN_ASSIGNMENT_STATUSES } from "@/lib/tech/ownership";
 import { activeTechnicianIds, anyTimeOff, getAppointment } from "./appointment-queries";
-import type { AppointmentRecord } from "./appointment-types";
+import { MAX_TECHNICIANS_PER_VISIT, type AppointmentRecord } from "./appointment-types";
 import { BUSINESS_TIME_ZONE, businessDayBounds, businessIsoDate } from "./calendar-time";
+import { anyTimestampSql, startedRowSql } from "./visit-started";
 
 // Helpers on ANY visit (including #1): add or remove a technician on a visit.
 // Visit #1's lead is owned by the request->visit trigger; these writes only
@@ -16,11 +17,13 @@ export type AddVisitTechnicianResult =
   | {
       readonly reason:
         | "not_found" | "technician_not_found" | "already_assigned" | "visit_cancelled"
-        | "visit_ended" | "request_cancelled" | "request_completed" | "time_off" | "managed_externally";
+        | "visit_ended" | "request_cancelled" | "request_completed" | "time_off" | "managed_externally"
+        | "no_lead" | "visit_full";
     };
 
 export type RemoveVisitTechnicianResult =
-  | { readonly ok: true }
+  /** `cancelled`: the helper had progress stamps but wasn't working, so the row was kept as cancelled (M2 §3.3). */
+  | { readonly ok: true; readonly cancelled: boolean }
   | {
       readonly reason:
         | "not_found" | "has_progress" | "is_lead"
@@ -72,23 +75,31 @@ export async function addVisitTechnician(
   }
   const window = visitWindow(visit);
 
-  // The request row is locked FOR SHARE first (a concurrent cancel/complete either
-  // commits before the INSERT's checks run, or waits for this batch); the checks
-  // are in the INSERT so they see the post-lock snapshot.
+  // The request row is locked FOR NO KEY UPDATE first (M2 §3.3: two adds can't
+  // both see four), so a concurrent cancel/complete/move either commits before
+  // the statement's checks run, or waits for this batch. One statement inserts
+  // (or revives a cancelled non-lead row clean) and bumps the visit's version
+  // only when a row was written, so a stale board card answers STALE.
+  const org = sql`${organizationId}::uuid`;
+  const aid = sql`${appointmentId}::uuid`;
   const [, inserted] = await db.batch([
-    db.execute(sql`SELECT 1 FROM service_requests WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid FOR SHARE`),
-    db.execute(sql`INSERT INTO appointment_assignments (organization_id, appointment_id, technician_id, is_lead, status, assigned_by)
-      SELECT ${organizationId}::uuid, ${appointmentId}::uuid, ${technicianId}::uuid, false, 'assigned'::request_status, ${actorUserId}::uuid
-      WHERE EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${requestId}::uuid AND r.organization_id = ${organizationId}::uuid
+    db.execute(sql`SELECT 1 FROM service_requests WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid FOR NO KEY UPDATE`),
+    db.execute(sql`WITH ins AS (INSERT INTO appointment_assignments (organization_id, appointment_id, technician_id, is_lead, status, assigned_by)
+      SELECT ${org}, ${aid}, ${technicianId}::uuid, false, 'assigned'::request_status, ${actorUserId}::uuid
+      WHERE EXISTS (SELECT 1 FROM service_requests r WHERE r.id = ${requestId}::uuid AND r.organization_id = ${org}
           AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL AND r.status NOT IN ('completed'::request_status, 'cancelled'::request_status))
-        AND EXISTS (SELECT 1 FROM appointments p WHERE p.id = ${appointmentId}::uuid AND p.service_request_id = ${requestId}::uuid
-          AND p.organization_id = ${organizationId}::uuid AND p.cancelled_at IS NULL)
-        AND (NOT EXISTS (SELECT 1 FROM appointment_assignments x WHERE x.appointment_id = ${appointmentId}::uuid)
-          OR EXISTS (SELECT 1 FROM appointment_assignments x WHERE x.appointment_id = ${appointmentId}::uuid
-            AND x.status IN (${OPEN_LIST})))
+        AND EXISTS (SELECT 1 FROM appointments p WHERE p.id = ${aid} AND p.service_request_id = ${requestId}::uuid
+          AND p.organization_id = ${org} AND p.cancelled_at IS NULL)
+        AND EXISTS (SELECT 1 FROM appointment_assignments x WHERE x.appointment_id = ${aid} AND x.organization_id = ${org} AND x.status IN (${OPEN_LIST}))
+        AND EXISTS (SELECT 1 FROM appointment_assignments l WHERE l.appointment_id = ${aid} AND l.organization_id = ${org} AND l.is_lead AND l.status <> 'cancelled'::request_status)
+        AND (SELECT count(*) FROM appointment_assignments c WHERE c.appointment_id = ${aid} AND c.organization_id = ${org} AND c.status <> 'cancelled'::request_status AND c.technician_id <> ${technicianId}::uuid) < ${MAX_TECHNICIANS_PER_VISIT}::int
         AND ${noTimeOffForVisit(organizationId, technicianId, appointmentId)}
-      ON CONFLICT (appointment_id, technician_id) DO NOTHING
-      RETURNING id`),
+      ON CONFLICT (appointment_id, technician_id) DO UPDATE SET status = 'assigned'::request_status, assigned_by = EXCLUDED.assigned_by, assigned_at = now(),
+        en_route_at = NULL, arrived_at = NULL, started_at = NULL, completed_at = NULL
+        WHERE appointment_assignments.status = 'cancelled'::request_status AND NOT appointment_assignments.is_lead
+      RETURNING id),
+    bump AS (UPDATE appointments SET version = version + 1, updated_at = now() WHERE id = ${aid} AND organization_id = ${org} AND EXISTS (SELECT 1 FROM ins) RETURNING id)
+    SELECT id FROM ins`),
   ]);
   if (inserted.rows.length === 0) return classifyAddMiss(organizationId, requestId, appointmentId, technicianId, window);
 
@@ -112,9 +123,12 @@ async function classifyAddMiss(
   if (req.status === "cancelled") return { reason: "request_cancelled" };
   if (req.status === "completed") return { reason: "request_completed" };
   if (req.fp !== null || req.hcp !== null) return { reason: "managed_externally" };
-  if (visit.assignments.some((a) => a.technicianId === technicianId)) return { reason: "already_assigned" };
+  const live = visit.assignments.filter((a) => a.status !== "cancelled");
+  if (live.some((a) => a.technicianId === technicianId)) return { reason: "already_assigned" };
   const hasOpen = visit.assignments.some((a) => (OPEN_ASSIGNMENT_STATUSES as readonly string[]).includes(a.status));
   if (visit.assignments.length > 0 && !hasOpen) return { reason: "visit_ended" };
+  if (!live.some((a) => a.isLead)) return { reason: "no_lead" };
+  if (live.filter((a) => a.technicianId !== technicianId).length >= MAX_TECHNICIANS_PER_VISIT) return { reason: "visit_full" };
   if (window && (await anyTimeOff(organizationId, [technicianId], window.start, window.end))) {
     return { reason: "time_off" };
   }
@@ -128,15 +142,31 @@ export async function removeVisitTechnician(
   appointmentId: string,
   technicianId: string,
 ): Promise<RemoveVisitTechnicianResult> {
-  const deleted = await db.execute(sql`DELETE FROM appointment_assignments a USING appointments p
-    WHERE a.appointment_id = p.id AND p.id = ${appointmentId}::uuid AND p.service_request_id = ${requestId}::uuid
-      AND p.organization_id = ${organizationId}::uuid AND a.organization_id = ${organizationId}::uuid
+  // One batch: request lock, then ONE statement — an untouched helper is
+  // deleted (today), a helper with progress stamps who isn't working is kept
+  // as cancelled (M2 §3.3), and the visit's version bumps when either landed.
+  // A working (started) helper matches neither: has_progress below.
+  const org = sql`${organizationId}::uuid`;
+  const rowOnVisit = sql`a.appointment_id = p.id AND p.id = ${appointmentId}::uuid AND p.service_request_id = ${requestId}::uuid
+      AND p.organization_id = ${org} AND a.organization_id = ${org}
       AND a.technician_id = ${technicianId}::uuid AND NOT a.is_lead
-      AND a.en_route_at IS NULL AND a.arrived_at IS NULL AND a.started_at IS NULL AND a.completed_at IS NULL
-      AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = p.service_request_id
-        AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL AND r.status NOT IN ('completed'::request_status, 'cancelled'::request_status))
-    RETURNING a.id`);
-  if (deleted.rows.length > 0) return { ok: true };
+      AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = p.service_request_id AND r.organization_id = ${org}
+        AND r.fieldpulse_job_id IS NULL AND r.hcp_job_id IS NULL AND r.status NOT IN ('completed'::request_status, 'cancelled'::request_status))`;
+  const [, written] = await db.batch([
+    db.execute(sql`SELECT 1 FROM service_requests WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid FOR NO KEY UPDATE`),
+    db.execute(sql`WITH del AS (DELETE FROM appointment_assignments a USING appointments p
+        WHERE ${rowOnVisit} AND a.status <> 'cancelled'::request_status AND NOT ${anyTimestampSql("a")}
+        RETURNING a.id),
+      can AS (UPDATE appointment_assignments a SET status = 'cancelled'::request_status FROM appointments p
+        WHERE ${rowOnVisit} AND a.status <> 'cancelled'::request_status AND ${anyTimestampSql("a")} AND NOT ${startedRowSql("a")}
+        RETURNING a.id),
+      bump AS (UPDATE appointments SET version = version + 1, updated_at = now()
+        WHERE id = ${appointmentId}::uuid AND organization_id = ${org} AND (EXISTS (SELECT 1 FROM del) OR EXISTS (SELECT 1 FROM can)) RETURNING id)
+      SELECT (SELECT count(*) FROM del)::int AS deleted, (SELECT count(*) FROM can)::int AS cancelled`),
+  ]);
+  const counts = (written.rows[0] ?? {}) as { deleted?: number; cancelled?: number };
+  if (Number(counts.deleted ?? 0) > 0) return { ok: true, cancelled: false };
+  if (Number(counts.cancelled ?? 0) > 0) return { ok: true, cancelled: true };
 
   // Why the guarded DELETE matched nothing (re-read after the fact, request first like add).
   const [req] = await db.select({
@@ -148,12 +178,12 @@ export async function removeVisitTechnician(
   if (req.status === "completed") return { reason: "request_completed" };
   if (req.status === "cancelled") return { reason: "request_cancelled" };
 
-  const [row] = await db.select({ isLead: appointmentAssignments.isLead }).from(appointmentAssignments)
+  const [row] = await db.select({ isLead: appointmentAssignments.isLead, status: appointmentAssignments.status }).from(appointmentAssignments)
     .innerJoin(appointments, eq(appointments.id, appointmentAssignments.appointmentId))
     .where(withTenant(appointmentAssignments, organizationId,
       and(eq(appointments.id, appointmentId), eq(appointments.serviceRequestId, requestId),
         eq(appointmentAssignments.technicianId, technicianId))!)).limit(1);
-  if (!row) return { reason: "not_found" };
+  if (!row || row.status === "cancelled") return { reason: "not_found" };
   if (row.isLead) return { reason: "is_lead" };
   return { reason: "has_progress" };
 }

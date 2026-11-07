@@ -13,6 +13,7 @@ import {
   type AppointmentPatch,
   type AppointmentRecord,
 } from "./appointment-types";
+import { rowStarted } from "./visit-started";
 
 // Visits #2+ (visit #1 is owned by the sync_request_appointment trigger and is
 // read-only here: every write is CAS-gated on appointment_number > 1).
@@ -42,6 +43,8 @@ async function loadAppointments(organizationId: string, where: SQL): Promise<rea
     .select({
       appointmentId: appointmentAssignments.appointmentId, technicianId: appointmentAssignments.technicianId,
       technicianName: users.name, isLead: appointmentAssignments.isLead, status: appointmentAssignments.status,
+      enRouteAt: appointmentAssignments.enRouteAt, arrivedAt: appointmentAssignments.arrivedAt,
+      startedAt: appointmentAssignments.startedAt, completedAt: appointmentAssignments.completedAt,
     })
     .from(appointmentAssignments)
     .innerJoin(users, eq(users.id, appointmentAssignments.technicianId))
@@ -49,7 +52,13 @@ async function loadAppointments(organizationId: string, where: SQL): Promise<rea
     .orderBy(desc(appointmentAssignments.isLead), asc(appointmentAssignments.assignedAt), asc(users.name));
   return rows.map((row) => toRecord(row, assigned
     .filter((a) => a.appointmentId === row.id)
-    .map(({ technicianId, technicianName, isLead, status }) => ({ technicianId, technicianName, isLead, status }))));
+    .map((a) => {
+      const hasProgress = Boolean(a.enRouteAt || a.arrivedAt || a.startedAt || a.completedAt);
+      return {
+        technicianId: a.technicianId, technicianName: a.technicianName, isLead: a.isLead, status: a.status,
+        started: rowStarted({ status: a.status, isLead: a.isLead, hasTimestamp: hasProgress }), hasProgress,
+      };
+    })));
 }
 
 /** Request status under the org, or null when it does not exist there. */

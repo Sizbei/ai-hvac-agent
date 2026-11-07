@@ -1153,10 +1153,50 @@ describe("visit-#1 guarded writers lock the request first", () => {
     expect((statements[2] as { __lock: unknown }).__lock).toBe("REVIVE_LEAD");
   });
 
-  it("unscheduleRequest: [lock, guarded update]", async () => {
-    selectQueue.push([{ status: "assigned" }]);
+  it("unscheduleRequest: [lock, guarded update] with the version gate, FieldPulse, started and work-logged guards", async () => {
+    selectQueue.push([{ status: "assigned", fp: null }]);
     updateQueue.push([{ id: REQ }]);
-    expect(await unscheduleRequest(ORG, REQ)).toEqual({ ok: true });
-    isLockThenUpdate(2, "VISIT_ONE_GUARD");
+    expect(await unscheduleRequest(ORG, REQ, { visitId: "v1", expectedVersion: 2 })).toEqual({ ok: true });
+    isLockThenUpdate(2, "VISIT_ONE_STARTED_GUARD");
+    const where = JSON.stringify(whereCalls);
+    for (const marker of ["VERSION_GATE", "FIELDPULSE_FREE", "NO_WORK_LOGGED"]) expect(where).toContain(marker);
+  });
+});
+
+describe("unscheduleRequest pins its tenant, request and status CAS", () => {
+  it("the guarded update is org-scoped, by id, and CAS on the status read", async () => {
+    selectQueue.push([{ status: "assigned", fp: null }]);
+    updateQueue.push([{ id: REQ }]);
+    await unscheduleRequest(ORG, REQ, { visitId: "v1", expectedVersion: 2 });
+    const tenant = whereCalls[1][0] as { __tenant: string; conditions: unknown[] };
+    expect(tenant.__tenant).toBe(ORG);
+    const conds = JSON.stringify(tenant.conditions);
+    expect(conds).toContain('["eq","sr.id","' + REQ + '"]');
+    expect(conds).toContain('["eq","sr.status","assigned"]');
+    expect(tenantOrgOf(0)).toBe(ORG);
+  });
+});
+
+describe("unscheduleRequest refusals (spec §5.4)", () => {
+  const gate = { visitId: "v1", expectedVersion: 2 };
+  const miss = (row: Record<string, unknown>) => {
+    selectQueue.push([{ status: "scheduled", fp: null }]);
+    updateQueue.push([]);
+    selectQueue.push([{ status: "scheduled", fieldpulse: false, versionOk: true, started: false, ended: false, workLogged: false, ...row }]);
+    return unscheduleRequest(ORG, REQ, gate);
+  };
+  it("FieldPulse first, then STALE, started, ended, work logged", async () => {
+    expect(await miss({ fieldpulse: true, versionOk: false })).toEqual({ ok: false, reason: "managed_externally" });
+    expect(await miss({ versionOk: false, started: true })).toEqual({ ok: false, reason: "stale" });
+    expect(await miss({ started: true, workLogged: true })).toEqual({ ok: false, reason: "has_progress" });
+    expect(await miss({ ended: true })).toEqual({ ok: false, reason: "visit_ended" });
+    expect(await miss({ workLogged: true })).toEqual({ ok: false, reason: "work_logged" });
+    expect(await miss({})).toEqual({ ok: false, reason: "stale" });
+  });
+  it("terminal and not found are decided before the write", async () => {
+    selectQueue.push([{ status: "completed", fp: null }]);
+    expect(await unscheduleRequest(ORG, REQ, gate)).toEqual({ ok: false, reason: "request_terminal", currentStatus: "completed" });
+    selectQueue.push([]);
+    expect(await unscheduleRequest(ORG, REQ, gate)).toEqual({ ok: false, reason: "request_not_found" });
   });
 });

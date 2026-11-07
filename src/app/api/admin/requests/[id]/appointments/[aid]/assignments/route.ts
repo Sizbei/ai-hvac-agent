@@ -55,6 +55,10 @@ export async function POST(request: NextRequest, { params }: Params) {
           return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);
         case "time_off":
           return errorResponse("That technician is off during this visit.", "TIME_OFF", 409);
+        case "no_lead":
+          return errorResponse("Assign a technician to this request first.", "NO_LEAD", 409);
+        case "visit_full":
+          return errorResponse("This visit already has 5 technicians.", "VISIT_FULL", 409);
       }
     }
 

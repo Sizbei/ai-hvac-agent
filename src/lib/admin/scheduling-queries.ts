@@ -58,8 +58,8 @@ import {
 import { releaseReservationsForRequest } from "./capacity-reservation-queries";
 import { notifyCustomerOfAssignment } from "./notify-assignment";
 import { stampDispatchOverride } from "./dispatch-override";
-import { classifyVisitOne, lockedUpdate, visitOneGuardSql, visitOneStartedGuardSql, type VisitOneRefusal } from "./visit-one-guard";
-import { requestXminGateSql, reviveLeadSql } from "./visit-move-sql";
+import { classifyVisitOne, lockedUpdate, visitOneStartedGuardSql, type VisitOneRefusal } from "./visit-one-guard";
+import { fieldpulseFreeSql, noWorkLoggedSql, requestXminGateSql, reviveLeadSql, startedOnVisitOneSql, versionGateSql } from "./visit-move-sql";
 import { isWindowWithinAvailability } from "./availability-coverage";
 import {
   listCapacityBlocks,
@@ -910,26 +910,27 @@ export async function placeAndAssignRequest(
   };
 }
 
+export type UnscheduleResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: "request_not_found" }
+  | { readonly ok: false; readonly reason: "request_terminal"; readonly currentStatus: string }
+  | { readonly ok: false; readonly reason: "managed_externally" | "stale" | "has_progress" | "visit_ended" | "work_logged" };
+
 /**
- * Clear a job's placement: null its schedule + arrival window and unassign it,
- * returning it to the unscheduled "to place" queue (status reset to 'pending').
- * The inverse of placeAndAssignRequest — backs drag-back-to-Unscheduled. A single
- * status-guarded UPDATE (neon-http has no transactions); terminal jobs are refused.
+ * Clear a job's placement (drag back to Unscheduled): null its schedule and
+ * window and unassign it (status → pending). One status-guarded UPDATE after
+ * the request lock, carrying the M2 guards (spec §5.4): the card's version gate,
+ * FieldPulse, the started rule, and no job time logged on visit #1 — a revive
+ * clears stamps, and the trigger keeps #1 only for stamps or a form submission,
+ * so time entries are what keep a worked visit from being deleted.
  */
 export async function unscheduleRequest(
   organizationId: string,
   requestId: string,
-): Promise<
-  | { readonly ok: true }
-  | {
-      readonly ok: false;
-      readonly reason: "request_not_found" | "request_terminal";
-      readonly currentStatus?: string;
-    }
-  | { readonly ok: false; readonly reason: VisitOneRefusal }
-> {
+  gate: { readonly visitId: string | null; readonly expectedVersion: number | null },
+): Promise<UnscheduleResult> {
   const [existing] = await db
-    .select({ status: serviceRequests.status })
+    .select({ status: serviceRequests.status, fp: serviceRequests.fieldpulseJobId })
     .from(serviceRequests)
     .where(
       withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
@@ -939,6 +940,7 @@ export async function unscheduleRequest(
     return { ok: false, reason: "request_terminal", currentStatus: existing.status };
   }
 
+  const versionGate = versionGateSql(organizationId, requestId, gate.visitId, gate.expectedVersion);
   const [updated] = await lockedUpdate(organizationId, requestId, db
     .update(serviceRequests)
     .set({
@@ -956,16 +958,35 @@ export async function unscheduleRequest(
         and(
           eq(serviceRequests.id, requestId),
           eq(serviceRequests.status, existing.status),
-          visitOneGuardSql(),
+          fieldpulseFreeSql(),
+          versionGate,
+          visitOneStartedGuardSql(organizationId),
+          noWorkLoggedSql(organizationId),
         )!,
       ),
     )
     .returning({ id: serviceRequests.id }));
 
   if (!updated) {
-    const now = await classifyVisitOne(organizationId, requestId);
-    if (now?.refusal && now.status === existing.status) return { ok: false, reason: now.refusal };
-    return { ok: false, reason: "request_not_found" };
+    const [now] = await db
+      .select({
+        status: serviceRequests.status,
+        fieldpulse: sql<boolean>`("service_requests"."fieldpulse_job_id" IS NOT NULL)`,
+        versionOk: sql<boolean>`${versionGate}`,
+        started: sql<boolean>`${startedOnVisitOneSql(organizationId, "any")}`,
+        ended: sql<boolean>`EXISTS (SELECT 1 FROM appointments e1 WHERE e1.service_request_id = "service_requests"."id" AND e1.organization_id = ${organizationId}::uuid AND e1.appointment_number = 1 AND e1.cancelled_at IS NOT NULL)`,
+        workLogged: sql<boolean>`NOT ${noWorkLoggedSql(organizationId)}`,
+      })
+      .from(serviceRequests)
+      .where(withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)));
+    if (!now) return { ok: false, reason: "request_not_found" };
+    if (isTerminal(now.status as RequestStatus)) return { ok: false, reason: "request_terminal", currentStatus: now.status };
+    if (now.fieldpulse) return { ok: false, reason: "managed_externally" };
+    if (!now.versionOk) return { ok: false, reason: "stale" };
+    if (now.started) return { ok: false, reason: "has_progress" };
+    if (now.ended) return { ok: false, reason: "visit_ended" };
+    if (now.workLogged) return { ok: false, reason: "work_logged" };
+    return { ok: false, reason: "stale" };
   }
   // Back to the unscheduled pile → its confirm-time capacity hold no longer
   // applies; free it so the band re-opens. Best-effort.

@@ -24,8 +24,9 @@ import { getAdminSession } from "@/lib/auth/session";
 import { unscheduleRequest } from "@/lib/admin/scheduling-queries";
 
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
-const req = () =>
-  new Request("http://t/api", { method: "POST" }) as never;
+const GATE = { visitId: "22222222-2222-4222-8222-222222222222", expectedVersion: 3 };
+const req = (body: unknown = GATE) =>
+  new Request("http://t/api", { method: "POST", body: JSON.stringify(body) }) as never;
 const VALID_ID = "11111111-1111-1111-1111-111111111111";
 
 beforeEach(() => vi.clearAllMocks());
@@ -78,5 +79,33 @@ describe("POST unschedule", () => {
       expect(res.status).toBe(409);
       expect((await res.json()).error.code).toBe(code);
     }
+  });
+});
+
+describe("POST unschedule — M2", () => {
+  beforeEach(() => {
+    (getAdminSession as unknown as Mock).mockResolvedValue({ userId: "u", organizationId: "o" });
+  });
+  it("passes the card's visit and version (lowercased) to the writer", async () => {
+    (unscheduleRequest as unknown as Mock).mockResolvedValue({ ok: true });
+    await POST(req({ visitId: GATE.visitId.toUpperCase(), expectedVersion: 3 }), ctx(VALID_ID.toUpperCase()) as never);
+    expect(unscheduleRequest).toHaveBeenCalledWith("o", VALID_ID, { visitId: GATE.visitId, expectedVersion: 3 });
+  });
+  it("a null visit with a null version is allowed; a half-null body is 400", async () => {
+    (unscheduleRequest as unknown as Mock).mockResolvedValue({ ok: true });
+    expect((await POST(req({ visitId: null, expectedVersion: null }), ctx(VALID_ID) as never)).status).toBe(200);
+    expect((await POST(req({ visitId: null, expectedVersion: 1 }), ctx(VALID_ID) as never)).status).toBe(400);
+    expect((await POST(req({}), ctx(VALID_ID) as never)).status).toBe(400);
+  });
+  it.each([
+    ["managed_externally", "MANAGED_EXTERNALLY", "Change this request in FieldPulse."],
+    ["stale", "STALE", "This request changed. The calendar has been refreshed."],
+    ["work_logged", "WORK_LOGGED", "Work was logged on this visit, so it can’t go back to Unscheduled."],
+    ["has_progress", "HAS_PROGRESS", "A technician has started this visit, so it can’t go back to Unscheduled."],
+  ])("%s → 409 %s", async (reason, code, message) => {
+    (unscheduleRequest as unknown as Mock).mockResolvedValue({ ok: false, reason });
+    const res = await POST(req(), ctx(VALID_ID) as never);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toEqual({ code, message });
   });
 });

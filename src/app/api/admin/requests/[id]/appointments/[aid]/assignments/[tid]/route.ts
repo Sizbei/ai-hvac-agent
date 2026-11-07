@@ -55,7 +55,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       logger.error({ error: auditError }, "Failed to audit visit technician removal");
     });
 
-    return successResponse({ removed: true });
+    return successResponse({ removed: true, cancelled: result.cancelled });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to remove visit technician");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
