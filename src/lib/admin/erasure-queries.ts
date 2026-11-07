@@ -52,7 +52,6 @@ import {
   requestNotes,
   customFieldValues,
   technicianTimeEntries,
-  auditLog,
   platformAuditLog,
   invoices,
 } from "@/lib/db/schema";
@@ -63,6 +62,7 @@ import { encrypt, decrypt } from "@/lib/crypto";
 import { getStorageClient } from "@/lib/storage/r2-client";
 import { storageKeyFromPublicUrl } from "@/lib/storage/storage-key";
 import { logger } from "@/lib/logger";
+import { eraseAnswersSql, eraseAttachmentsSql, eraseAuditSql, eraseLockSql } from "@/lib/admin/erasure-sql";
 
 /** Sentinel plaintext written into the two NOT NULL encrypted columns. */
 const DELETED_PLACEHOLDER = "[deleted]";
@@ -175,18 +175,6 @@ export async function anonymizeCustomer(
   ];
   const requestIds = requestRows.map((r) => r.id);
 
-  // Attachments: the customer's own (admin uploads) AND every chat upload in
-  // their sessions — those carry only session_id/message_id, and must go
-  // before the messages they point at (attachments.message_id FK).
-  const attachmentMatch = or(
-    eq(attachments.customerId, customerId),
-    inArray(attachments.sessionId, sessionIds),
-  )!;
-  const attachmentRows = await db
-    .select({ storageKey: attachments.storageKey })
-    .from(attachments)
-    .where(withTenant(attachments, organizationId, attachmentMatch));
-
   // Invoice signature snapshots (M3b): the customer's own invoices OR any
   // invoice on the customer's requests (an estimate-born invoice may carry a
   // different customer id). Read BEFORE the scrub so the objects can be deleted.
@@ -205,26 +193,20 @@ export async function anonymizeCustomer(
     .from(invoices)
     .where(withTenant(invoices, organizationId, invoiceSignatureMatch));
 
-  const attachmentKeys = attachmentRows.map((r) => r.storageKey);
-  const storageKeys = [
-    ...attachmentKeys,
-    ...signatureKeys([
-      ...requestRows.map((r) => r.signatureUrl),
-      ...invoiceSignatureRows.map((r) => r.signatureUrl),
-    ]),
-  ];
-
   const now = new Date();
 
   // ONE non-interactive atomic batch. All statements are tenant + customer
   // scoped. Deletes target the genuinely-personal child rows; everything else
   // is an order-independent UPDATE that nulls/scrubs PII in place.
-  await db.batch([
-    // Attachments first: a chat upload's message_id references a message
-    // deleted just below.
-    db
-      .delete(attachments)
-      .where(withTenant(attachments, organizationId, attachmentMatch)),
+  // M3d (spec §4.5, §5.4): statement 0 locks every request of the customer, so
+  // the audit count (1) and the attachments DELETE (2) see the same set and any
+  // in-flight form or photo writer has committed; the answers UPDATE runs last,
+  // after the service_requests UPDATE (request → rows, the writers' lock order).
+  const results = (await db.batch([
+    db.execute(eraseLockSql(organizationId, customerId)),
+    db.execute(eraseAuditSql(organizationId, customerId, sessionIds)),
+    // Attachments before the messages a chat upload's message_id references.
+    db.execute(eraseAttachmentsSql(organizationId, customerId, sessionIds)),
     // Delete chat transcript for this customer's sessions (PII free-text).
     // inArray over an empty list is a valid no-op (matches nothing).
     db
@@ -483,19 +465,18 @@ export async function anonymizeCustomer(
     db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "customer"), eq(entityTags.entityId, customerId))),
     db.delete(entityTags).where(withTenant(entityTags, organizationId, eq(entityTags.entity, "location"),
       inArray(entityTags.entityId, db.select({ id: customerLocations.id }).from(customerLocations).where(withTenant(customerLocations, organizationId, eq(customerLocations.customerId, customerId)))))),
-    // Audit: counts/table names ONLY — never name/email/phone.
-    db.insert(auditLog).values({
-      organizationId,
-      userId: null,
-      action: "customer_erased",
-      entity: "customers",
-      entityId: customerId,
-      details: JSON.stringify({
-        sessions: sessionIds.length,
-        attachmentsDeleted: attachmentKeys.length,
-      }),
-    }),
-  ]);
+    // M3d: form answers on the customer's requests (after the requests UPDATE).
+    db.execute(eraseAnswersSql(organizationId, customerId)),
+  ] as never)) as unknown as { rows?: { storage_key?: unknown }[] }[];
+
+  const attachmentKeys = (results[2]?.rows ?? []).map((r) => String(r.storage_key));
+  const storageKeys = [
+    ...attachmentKeys,
+    ...signatureKeys([
+      ...requestRows.map((r) => r.signatureUrl),
+      ...invoiceSignatureRows.map((r) => r.signatureUrl),
+    ]),
+  ];
 
   invalidateCustomerSearchCache(organizationId);
   scheduleStorageCleanup(storageKeys);

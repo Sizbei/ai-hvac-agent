@@ -15,8 +15,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // ── builder capture harness ────────────────────────────────────────────────
 interface Captured {
-  readonly op: "update" | "delete" | "insert";
+  readonly op: "update" | "delete" | "insert" | "execute";
   table: string;
+  /** M3d raw statements: the erasure-sql builder's arguments. */
+  args?: readonly unknown[];
   set?: Record<string, unknown>;
   values?: Record<string, unknown>;
   /** What .where(...) was given (the withTenant mock passes the conditions through). */
@@ -25,6 +27,7 @@ interface Captured {
 
 const {
   batchCalls,
+  attachmentReturn,
   insertCalls,
   selectQueue,
   selectWhereCalls,
@@ -33,6 +36,8 @@ const {
   makeInsert,
 } = vi.hoisted(() => {
     const batchCalls: Captured[][] = [];
+    // Rows the attachments DELETE … RETURNING storage_key hands back.
+    const attachmentReturn: { rows: { storage_key: string }[] } = { rows: [] };
     const insertCalls: Captured[] = [];
     const selectQueue: unknown[][] = [];
     // Records whatever each db.select(...).from(...).where(x) call was given,
@@ -82,6 +87,7 @@ const {
 
     return {
       batchCalls,
+      attachmentReturn,
       insertCalls,
       selectQueue,
       selectWhereCalls,
@@ -104,10 +110,10 @@ vi.mock("@/lib/db", () => ({
     update: (t: unknown) => makeUpdate(t),
     delete: (t: unknown) => makeDelete(t),
     insert: (t: unknown) => makeInsert(t),
+    execute: (q: { tag: string; args: unknown[] }): Captured => ({ op: "execute", table: q.tag, args: q.args }),
     batch: (stmts: Captured[]) => {
       batchCalls.push(stmts);
-      // Pull out any insert builders that recorded via .values() inside the batch
-      return Promise.resolve([]);
+      return Promise.resolve(stmts.map((c) => (c.table === "eraseAttachments" ? { rows: attachmentReturn.rows } : { rows: [] })));
     },
   },
 }));
@@ -147,6 +153,15 @@ vi.mock("@/lib/db/schema", () => {
     invoices: t("invoices"),
   };
 });
+
+// M3d raw statements: tagged markers so the batch order and arguments are observable
+// (their SQL is rendered for real in erasure-sql.test.ts).
+vi.mock("@/lib/admin/erasure-sql", () => ({
+  eraseLockSql: (...args: unknown[]) => ({ tag: "eraseLock", args }),
+  eraseAuditSql: (...args: unknown[]) => ({ tag: "eraseAudit", args }),
+  eraseAttachmentsSql: (...args: unknown[]) => ({ tag: "eraseAttachments", args }),
+  eraseAnswersSql: (...args: unknown[]) => ({ tag: "eraseAnswers", args }),
+}));
 
 vi.mock("@/lib/db/tenant", () => ({
   withTenant: (_t: unknown, _org: string, ...c: unknown[]) => c,
@@ -222,6 +237,7 @@ function opFor(table: string): Captured | undefined {
 
 beforeEach(() => {
   batchCalls.length = 0;
+  attachmentReturn.rows = [];
   insertCalls.length = 0;
   selectQueue.length = 0;
   selectWhereCalls.length = 0;
@@ -240,7 +256,8 @@ describe("anonymizeCustomer", () => {
       { id: "req-1", signatureUrl: `${PUB}/signatures/req-1.png`, sessionId: "sess-1" },
       { id: "req-2", signatureUrl: null, sessionId: "sess-3" },
     ]); // service requests
-    selectQueue.push([{ storageKey: "k1" }, { storageKey: "k2" }]); // attachments
+    // The attachments DELETE … RETURNING storage_key (no pre-read since M3d).
+    attachmentReturn.rows = [{ storage_key: "k1" }, { storage_key: "k2" }];
     selectQueue.push([
       // The invoice's snapshot copy of req-1's signature (same object).
       { signatureUrl: `${PUB}/signatures/req-1.png` },
@@ -330,9 +347,10 @@ describe("anonymizeCustomer", () => {
     expect(appt?.set).toEqual({ specialInstructions: null });
     const batch = batchCalls.at(-1) ?? [];
     expect(batch.filter((c) => c.table === "appointments")).toHaveLength(1);
-    // 21 statements before visits #2+ existed; the appointments scrub is the
-    // 22nd; the invoice signature scrub (M3b) is the 23rd.
-    expect(batch).toHaveLength(23);
+    // 23 statements through M3c; M3d replaces the attachments delete and the
+    // audit insert with the lock, the SQL audit, the DELETE … RETURNING and
+    // the answers UPDATE: 25.
+    expect(batch).toHaveLength(25);
   });
 
   it("scrubs locations, sessions, comms, service history, and review feedback", async () => {
@@ -378,8 +396,8 @@ describe("anonymizeCustomer", () => {
     expect(sess?.cond).toEqual([["customerSessions.id", all]]);
     // Their transcripts go too (deduped union: sess-1 appears on both paths).
     expect(opFor("messages")?.cond).toEqual([["messages.sessionId", all]]);
-    const audit = opFor("auditLog");
-    expect(JSON.parse(String(audit?.values?.details))).toMatchObject({ sessions: 3 });
+    // The audit counts the deduped sessions (eraseAuditSql gets the full list).
+    expect(opFor("eraseAudit")?.args).toEqual([ORG, CUST, all]);
   });
 
   it("nulls session metadata + next steps and rewrites only sms: tokens", async () => {
@@ -409,17 +427,8 @@ describe("anonymizeCustomer", () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
     const batch = batchCalls.at(-1) ?? [];
-    const att = opFor("attachments");
-    expect(att?.cond).toEqual([
-      {
-        op: "or",
-        args: [
-          { op: "eq", args: ["attachments.customerId", CUST] },
-          ["attachments.sessionId", ["sess-1", "sess-2", "sess-3"]],
-        ],
-      },
-    ]);
-    expect(selectWhereCalls[3]).toEqual(att?.cond);
+    const att = opFor("eraseAttachments");
+    expect(att?.args).toEqual([ORG, CUST, ["sess-1", "sess-2", "sess-3"]]);
     expect(batch.indexOf(att!)).toBeLessThan(batch.indexOf(opFor("messages")!));
   });
 
@@ -439,7 +448,7 @@ describe("anonymizeCustomer", () => {
     await anonymizeCustomer(ORG, CUST);
     expect(opFor("messages")?.op).toBe("delete");
     expect(opFor("customerNotes")?.op).toBe("delete");
-    expect(opFor("attachments")?.op).toBe("delete");
+    expect(opFor("eraseAttachments")?.op).toBe("execute");
   });
 
   it("deletes follow-ups (reason is free-text PII)", async () => {
@@ -507,8 +516,8 @@ describe("anonymizeCustomer", () => {
   it("reads invoice signatures on the customer's invoices OR the customer's requests", async () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
-    // Reads: existence, sessions, requests, attachments, invoices.
-    const [invoiceMatch] = selectWhereCalls[4] as TaggedCondition[];
+    // Reads: existence, sessions, requests, invoices (the attachments pre-read is gone, M3d).
+    const [invoiceMatch] = selectWhereCalls[3] as TaggedCondition[];
     expect(invoiceMatch.op).toBe("or");
     expect(invoiceMatch.args).toHaveLength(2);
     expect(invoiceMatch.args[0]).toMatchObject({
@@ -536,15 +545,22 @@ describe("anonymizeCustomer", () => {
     expect(keys.some((k) => String(k).includes("://"))).toBe(false);
   });
 
-  it("audits with counts only — NO name/email/phone in the details", async () => {
+  it("audits with counts only — the SQL audit gets ids and the session list, never PII", async () => {
     seedExisting();
     await anonymizeCustomer(ORG, CUST);
-    const audit = opFor("auditLog");
-    expect(audit?.values?.action).toBe("customer_erased");
-    const details = String(audit?.values?.details ?? "");
-    expect(details).not.toMatch(/@/); // no email
-    expect(details).toContain("sessions");
-    expect(details).toContain("attachmentsDeleted");
+    expect(opFor("eraseAudit")?.args).toEqual([ORG, CUST, ["sess-1", "sess-2", "sess-3"]]);
+    expect(insertCalls.filter((c) => c.table === "auditLog")).toHaveLength(0);
+  });
+
+  it("M3d batch order: lock → audit → attachments DELETE → … → service_requests UPDATE → answers UPDATE", async () => {
+    seedExisting();
+    await anonymizeCustomer(ORG, CUST);
+    const batch = batchCalls.at(-1) ?? [];
+    expect(batch.slice(0, 3).map((c) => c.table)).toEqual(["eraseLock", "eraseAudit", "eraseAttachments"]);
+    expect(batch.at(-1)?.table).toBe("eraseAnswers");
+    expect(batch.indexOf(opFor("serviceRequests")!)).toBeLessThan(batch.length - 1);
+    expect(opFor("eraseAnswers")?.args).toEqual([ORG, CUST]);
+    expect(opFor("eraseLock")?.args).toEqual([ORG, CUST]);
   });
 
   it("schedules R2 cleanup of the collected storage keys via after()", async () => {
