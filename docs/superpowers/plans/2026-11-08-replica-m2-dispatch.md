@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Prerequisite:** main at `b9cfba1` or later (spec v4.1 FINAL committed; migrations through 0058 applied on dev; no migration in M2, `drizzle/0059` stays free). Vitest baseline on `b9cfba1`: **533 files, 6 760 passed, 1 skipped** (`npx vitest run`). **Plan v1.** Every code block of Tasks 1–10 was applied mechanically to a scratch worktree of `b9cfba1` and compiled (`npx tsc --noEmit` → 0, `npx eslint` → 0 errors) with the unit suite run (`npx vitest run` → 549 files, 7 008 passed, 1 skipped); the Task 11 integration suite was type-checked only (it needs the dev DB); the walk fixture, drag helpers, spike, probes and walks were not compiled or run (they need a dev server). Details in the Self-review.
+**Prerequisite:** main at `b9cfba1` or later (spec v4.1 FINAL committed; migrations through 0058 applied on dev; no migration in M2, `drizzle/0059` stays free). Vitest baseline on `b9cfba1`: **533 files, 6 760 passed, 1 skipped** (`npx vitest run`). **Plan v2** after adversarial review round 1 (critic A: spec fidelity, SQL, concurrency, test strength; critic B: buildability, UI/copy, task boundaries; reports in the session scratchpad `m2/plan-r1-A.md`, `m2/plan-r1-B.md`) and the lead's rulings on them. v2 changes: mass reschedule excludes the run's own requests from the overlap check (SQL and preview), reclassifies every visit at commit (never trusting the preview), records a changed or vanished visit as `stale` instead of refusing the commit, answers a taken-over run as recovery, and refuses a no-change body; the started arm is pinned in the mass render test; `othersStarted` makes the confirm's reset line exact; FieldPulse is answered before time off on the sheet; the walk fixture never lands on a busy band, every walk move asserts 200, and the 1023/390 steps assert read-only and refusal outcomes; Task 3 keeps `reschedule/route.test.ts` green; the prompt's Enter never overrides a focused Cancel; Task 9a runs `contrast.py`; no `git stash`; the spike's retune loop stops after 3; the Unscheduled FieldPulse row has its lock and an absent `movable` means not movable everywhere. Every code block of Tasks 1–10 was re-applied to one scratch worktree and compiled; see the Self-review.
 
 **Goal:** The office runs the day on the existing day view: a drag into a window the current one doesn't cover asks which window; a started visit refuses a move with 409 until "Move anyway"; a visit worked by two technicians shows in both lanes with crew chips; blocks show time off, non-job events and on-call; every movable card has `Move…`; a technician's day moves after a preview; FieldPulse-mapped requests are read-only on the board.
 
@@ -45,7 +45,7 @@
 - `.env.local` is the DEV Neon branch. NEVER point it at prod (`ep-withered-hill`). The integration suite, `scripts/agent/m2-walk.mts` and every probe refuse that host.
 - **Walk and probe safety (owner's rules):** UI walks and probes run on THROWAWAY orgs only (`createOrgCore` via `scripts/agent/m2-walk.mts seed`), with the comms queue at 0 before seeding (`SELECT count(*) FROM communication_jobs WHERE status='pending' AND scheduled_for <= now() + interval '15 minutes'` must be 0), never touching the default org `00000000-0000-0000-0000-000000000001`, and the org is deleted afterwards (`m2-walk.mts delete <org>` asserts zero `communication_jobs` for it first). **No step writes to FieldPulse**: the dev default org's FieldPulse key reaches the owner's LIVE account. FieldPulse-mapped rows are made by setting `fieldpulse_job_id` with SQL on a throwaway org that has no FieldPulse connection; the FieldPulse-connected case in integration (f) uses a dummy key and a mocked client. Requests are inserted by SQL, never through `POST /api/admin/requests`.
 - neon-http: `db.transaction()` throws; every writer is ONE `db.batch` (`runBatch` from `src/lib/admin/invoice-field-writes.ts` for raw SQL lists, `lockedUpdate` for the drizzle sheet writers), led by L_req (`lockRequestSql`); a deadlock (40P01) is `STALE`, never a 500.
-- SQL rules (M3b/M3c/M3d, kept): every enum literal cast (`'cancelled'::request_status`); every fragment holding `OR` in its own parentheses and pinned by a `PgDialect` render test; `organization_id = $org` on EVERY table reference, subqueries and EXISTS bodies included (correlated fragments may bind `"service_requests"."organization_id"`); array parameters through `sql.param([...])::uuid[]` or `uuidArraySql` (a bare JS array expands to `($1, $2)`); trusted aliases only through `sql.raw` after a `/^[a-z][a-z0-9_]*$/` check.
+- SQL rules (M3b/M3c/M3d, kept): every enum literal cast (`'cancelled'::request_status`); every fragment holding `OR` in its own parentheses and pinned by a `PgDialect` render test; `organization_id = $org` on EVERY table reference that M2 writes, subqueries and EXISTS bodies included. Reused correlated fragments from before M2 (`visitEndedSql`, `displayVisitIdSql`, `placedByVisitSql`, the guard's `ended()`) bind no org of their own; they are correlated on an outer request row the statement already filters by `organization_id`, so tenancy holds (critic A hygiene note); array parameters through `sql.param([...])::uuid[]` or `uuidArraySql` (a bare JS array expands to `($1, $2)`); trusted aliases only through `sql.raw` after a `/^[a-z][a-z0-9_]*$/` check.
 - Tenancy and envelopes: `getAdminSession()` (`@/lib/auth/session`); `successResponse` / `errorResponse` / `readJsonBody` (`@/lib/api-response`); `isUuid` (`@/lib/validation/uuid`); `slidingWindow(key, max, windowMs)` with `RATE_LIMITS.adminMutation` for writes and `adminRead` for the preview; `logAudit` (`@/lib/admin/audit`) or an in-batch audit INSERT; audit details are ids, enums, booleans and counts only — no names, no instants. Logs carry codes and ids only (`errorCode` from `@/lib/logger`); responses never carry `err.message`. Route files export only HTTP methods and `dynamic = "force-dynamic"`: helpers live in `src/lib`.
 - **No M2 file imports a FieldPulse client or push** (`@/lib/integrations/fieldpulse/*`); Task 8's route test greps for it.
 - Copy canon: sentence case; office copy says "request" and "technician"; "cancelled"; Unicode `…` and `’`; no exclamation marks; human error copy only. Every user-facing string in this plan is EXACT (spec §8 plus lead ruling 10); do not reword. Times through `formatBusinessTimeRange` ("9 AM–11 AM"), days through `formatDayLabel` ("Tue, Nov 10") in `BUSINESS_TIME_ZONE`.
@@ -55,7 +55,7 @@
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
   `Claude-Session: https://claude.ai/code/session_01GuWoF63tQU1i7ELqyYU3A6`
 - Order: execution is SEQUENTIAL — Tasks 0, 1, 2, … 8, 9a, 9b, 10, 11, one at a time, each committed (and reviewed) before the next starts, and each compiles and passes the full suite at its own boundary. A task whose change breaks an existing test owns updating it; that test is listed in the task's **Files**.
-- Disk: about 4 GB free on the dev machine. One scratch worktree at a time (`git worktree add /tmp/m2-wt <sha>` + `ln -s "$PWD/node_modules" /tmp/m2-wt/node_modules`), removed with `git worktree remove --force /tmp/m2-wt` when done. Walk screenshots go to the session scratchpad and are deleted after review.
+- Disk: about 4 GB free on the dev machine. One scratch worktree at a time (`git worktree add /tmp/m2-wt <sha>` + `ln -s "$PWD/node_modules" /tmp/m2-wt/node_modules`), removed with `git worktree remove --force /tmp/m2-wt` when done. Never run `npm install` / `npm uninstall` in a symlinked scratch worktree (it rewrites the main checkout's `node_modules`); Task 9b's `npm uninstall` runs in the real tree. Never `git stash` (the tree is shared). Walk screenshots go to the session scratchpad and are deleted after review.
 
 ## Review Focus
 
@@ -82,7 +82,7 @@
 | 8 | `src/lib/admin/move-pushes.ts`, `src/lib/admin/move-body.ts` (+test), `src/app/api/admin/requests/[id]/move/route.ts` (+`route.test.ts`), `src/app/api/admin/dispatch/mass-reschedule/route.ts`, `src/app/api/admin/dispatch/mass-reschedule/preview/route.ts` (+`mass-reschedule/route.test.ts`), `src/lib/admin/m2-imports.test.ts` | deletes `src/app/api/admin/requests/[id]/reschedule/route.ts`, its `route.test.ts`, `tests/api/admin/reschedule.test.ts` |
 | 9a | `src/components/ui/radio-group.tsx`, `src/hooks/use-move-request.ts`, `src/lib/admin/move-request-client.ts` (+test), `src/components/admin/calendar/{crew-chips,lane-blocks,window-prompt-dialog,time-off-dialog,move-dialog,move-banner}.tsx` | `src/components/admin/calendar/{calendar-job-card,draggable-job-card,droppable-window-band,conflict-dialog}.tsx`, `src/lib/admin/calendar-dnd.ts` (+test) |
 | 9b | — | `src/components/admin/calendar/interactive-scheduling-calendar.tsx`, `src/components/admin/calendar/draggable-unscheduled-panel.tsx`, `src/app/admin/(dashboard)/calendar/page.tsx`, `src/lib/admin/calendar-optimistic.ts` (+test); deletes `src/hooks/use-reschedule-job.ts`; `package.json` / `package-lock.json` (drop `@dnd-kit/sortable`) |
-| 10 | `src/components/admin/calendar/{mass-move-dialog,lane-menu}.tsx`, `src/hooks/use-mass-reschedule.ts`, `src/components/admin/visit-crew-control.tsx`, `src/components/admin/visit-change-time-dialog.tsx`, `src/lib/admin/sheet-visit-copy.ts` (+test) | `src/components/admin/calendar/interactive-scheduling-calendar.tsx` (lane menu), `src/components/admin/request-detail-sheet.tsx` |
+| 10 | `src/components/admin/calendar/{mass-move-dialog,lane-menu}.tsx`, `src/hooks/use-mass-reschedule.ts`, `src/components/admin/visit-crew-control.tsx`, `src/components/admin/visit-change-time-dialog.tsx`, `src/lib/admin/sheet-visit-copy.ts` (+test), `src/lib/admin/mass-dialog-state.ts` (+test), `src/lib/admin/mass-dialog-key.ts` (+test) | `src/app/admin/(dashboard)/calendar/page.tsx` (lane menu slot + dialog), `src/components/admin/request-detail-sheet.tsx` |
 | 11 | `tests/integration/field-dispatch.test.ts` | `vitest.config.ts`, `.claude/skills/{page-calendar,page-requests,page-dispatch,admin-pages}/SKILL.md`, `docs/DISPATCH.md`, `replica/{features.csv,parity.md,build-log.md,architecture.md}`, memory `replica-program-fp-st.md` (not committed) |
 
 The spec §9 browser walk runs in pieces: Task 0 proves the drag mechanics, Task 9b walks the board (prompt, confirm, Move anyway, drag back, time off, FieldPulse card, `Move…` by keyboard, Week view, 1023 px and 390 px), Task 10 walks the sheet crew control and `Move this day…`. Each walk seeds its own throwaway org with `m2-walk.mts` and deletes it.
@@ -98,7 +98,7 @@ The spike runs before any feature code. It proves, against today's board with on
 
 **Interfaces:**
 - Consumes: today's board (`/admin/calendar`, the `POST …/reschedule` drag route, `placeAndAssignRequest`), `createOrgCore`, `signToken`.
-- Produces: `m2-walk.mts seed [--spike]` prints ONE JSON line `{ org, admin, techs: { alex, sam, casey?, drew?, eli? }, day, bands: { morning|afternoon|evening: { start, end } }, requests: { … }, tokens: { admin } }` (`day` = tomorrow's business day; `bands` are that day's band instants); `state <org> <rid>` prints `{ assignedTo, start, end, status }`; `delete <org>` prints `{ deleted }`. `m2-drag.mts` exports `bandLocator(page, scope, day, window)`, `laneScroller(page)`, `scrollLeft(page)`, `dragToBand(page, source, target, opts?)`, `openBoard(page, base, token, day)`. Data attributes the helpers read (added locally here, permanently in Task 9a/9b): `data-lanes-scroller` on the lanes scroller; `data-band-scope` / `data-band-day` / `data-window` on each band.
+- Produces: `m2-walk.mts seed [--spike]` prints ONE JSON line `{ org, admin, techs: { alex, sam, casey?, drew?, eli? }, day, bands: { morning|afternoon|evening: { start, end } }, requests: { … }, tokens: { admin } }` (`day` = tomorrow's business day; `bands` are that day's band instants); `state <org> <rid>` prints `{ assignedTo, start, end, status }`; `delete <org>` prints `{ deleted }`. `m2-drag.mts` exports `bandLocator(page, scope, day, window)`, `laneScroller(page)`, `scrollLeft(page)`, `dragToBand(page, source, target, opts?)`, `openBoard(page, base, day)` (the caller sets the session cookie on the context). Data attributes the helpers read (added locally here, permanently in Task 9a/9b): `data-lanes-scroller` on the lanes scroller; `data-band-scope` / `data-band-day` / `data-window` on each band.
 
 - [ ] **Step 1: The walk fixture** — `scripts/agent/m2-walk.mts`:
 
@@ -143,10 +143,14 @@ async function queueGuard(): Promise<void> {
   if (Number(r!.n) !== 0) throw new Error(`comms queue holds ${String(r!.n)} due message(s); not walking`);
 }
 
-/** Tomorrow's business day: every window on it is still ahead, whatever the hour of the walk. */
+/**
+ * Tomorrow's business day: every window on it is still ahead, whatever the hour of the walk. Never a
+ * Saturday: the walks step to the next day in a Sunday-first Week view, which must be the same week.
+ */
 function tomorrow(): string {
   const d = new Date(`${businessIsoDate(new Date())}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + 1);
+  if (d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
 const at = (day: string, h: number, m = 0) => businessWallClockToUtc(day, h, m).toISOString();
@@ -342,18 +346,22 @@ export async function dragToBand(page: Page, source: Locator, target: Locator, o
   await page.mouse.up();
 }
 
-/** Open /admin/calendar with the minted session and step to `day` (tomorrow in every M2 walk). */
+/** Open /admin/calendar (the context carries the session cookie) and step forward to `day` (one or two days ahead in every M2 walk). */
 export async function openBoard(page: Page, base: string, day: string): Promise<void> {
   await page.goto(`${base}/admin/calendar`, { waitUntil: "load", timeout: 60_000 });
-  await page.getByRole("button", { name: "Next day" }).click();
-  await page.locator(`[data-band-day="${day}"]`).first().waitFor({ timeout: 30_000 });
+  const band = page.locator(`[data-band-day="${day}"]`).first();
+  for (let i = 0; i < 3; i++) {
+    await page.getByRole("button", { name: "Next day" }).click();
+    if (await band.waitFor({ timeout: 10_000 }).then(() => true, () => false)) return;
+  }
+  throw new Error(`the board never showed ${day}`);
 }
 ```
 
 - [ ] **Step 3: Type-check both files**
 
 Run: `npx tsc --noEmit && npx eslint scripts/agent/m2-walk.mts scripts/agent/m2-drag.mts`
-Expected: 0 errors. (If tsc does not include `scripts/`, run `npx tsc --noEmit -p tsconfig.json scripts/agent/m2-walk.mts scripts/agent/m2-drag.mts --module esnext --moduleResolution bundler --target es2022 --skipLibCheck --allowImportingTsExtensions --noEmit` instead; the fixture must compile.)
+Expected: 0 errors (`tsconfig.json` includes `**/*.mts`, so both scripts are type-checked).
 
 - [ ] **Step 4: Apply §7.2's layout and drag settings LOCALLY (not committed).** Three edits:
 
@@ -442,10 +450,14 @@ const OUT = process.env.SPIKE_OUT ?? "/tmp";
 const state = (rid: string) => fixture("state", fx.org, rid) as { assignedTo: string | null; start: string | null; end: string | null };
 const results: Record<string, string> = {};
 const check = (name: string, ok: boolean, detail: unknown) => {
-  results[name] = ok ? "PASS" : `FAIL ${JSON.stringify(detail)}`;
+  results[name] = ok ? "PASS" : `FAIL ${JSON.stringify(detail)} (route: ${statuses.at(-1) ?? "no response"})`;
   console.log(name, results[name]);
 };
-const settle = (page: import("playwright").Page) => page.waitForResponse((r) => r.url().includes("/reschedule") || r.url().includes("/unschedule"), { timeout: 15_000 });
+// Records the response status: a non-2xx, or a timeout here, is infrastructure, not evidence about the drag (Step 6).
+const statuses: string[] = [];
+const settle = (page: import("playwright").Page) =>
+  page.waitForResponse((r) => r.url().includes("/reschedule") || r.url().includes("/unschedule"), { timeout: 15_000 })
+    .then((r) => { statuses.push(`${r.url().split("/").at(-1)} ${r.status()}`); return r; });
 
 const browser = await chromium.launch();
 try {
@@ -521,13 +533,13 @@ Expected: five `PASS` lines, then `{"deleted":"<org>"}` from the fixture. Look a
 
 Every assertion compares exact instants against the fixture's `bands` (computed server-side for the walk day, so EST/EDT never matters). Never widen one to "any start".
 
-- [ ] **Step 6: Retune or redesign on failure.** Decision table (record the outcome in the Task 0 report and in Task 9b's `DndContext`):
+- [ ] **Step 6: Retune or redesign on failure.** First tell the drag model from the script: a check that failed on a timeout, a missing element or a non-2xx route status (printed after `route:`) is **infrastructure** — fix the script or the seed and re-run Step 5; it is not evidence about dragging. Then use this table (record the outcome in the Task 0 report and in Task 9b's `DndContext`):
 
 | failing check | change |
 | --- | --- |
-| (d) and/or (e) only | Retune in the spike: `threshold.x` 0.06 → 0.04 (31 px), then `acceleration` 5 → 3; re-run Steps 5–6 until (d) and (e) pass; the final values replace §7.2's `{ x: 0.06, y: 0.2 }, acceleration 5` in Task 9b Step 3 and in Task 11's page-calendar skill text. |
-| (c) | `pointerWithin` is unreliable at band edges on this layout. Spec change: keep `pointerWithin` but give each band a 2 px transparent inset (bands no longer touch); record in §7.2 and redo (c). If (c) still fails, stop and return to the spec owner: the prompt's `covers` rule depends on the band under the pointer (§5.2). |
-| (a) or (b) | Auto-scroll can't reach off-screen lanes. Spec change (return to the owner before feature code): §7.2 drops the "rest scroll" layout for a lane-picker (`Move…` names the lane; drag only between visible lanes), §9's walk replaces every off-screen drag with `Move…`, and Task 0 (a)/(b) are rewritten against `Move…`. |
+| (d) and/or (e) only | Retune and re-run Steps 5–6, **at most 3 retunes**, in this order: (1) `threshold.x` 0.06 → 0.04 (31 px); (2) `acceleration` 5 → 3; (3) `threshold.x` → 0.03. The first passing values replace §7.2's `{ x: 0.06, y: 0.2 }, acceleration 5` in Task 9b Step 3 and in Task 11's page-calendar text. If (d)/(e) still fail after the third retune, **stop**: report to the spec owner that §7.2 needs a layout change (e.g. a narrower Unscheduled panel or lanes narrow enough that the second technician lane is clear of the edge zone), and build nothing until the spec says which. |
+| (c) | `pointerWithin` is unreliable at band edges on this layout. One try: give each band a 2 px transparent inset (bands no longer touch) and re-run (c). If it still fails, **stop** and report: §5.2's `covers` rule depends on the band under the pointer, so the spec owner picks the fallback (e.g. `closestCenter` among bands of the hovered lane). |
+| (a) or (b) | Auto-scroll can't reach off-screen lanes. **Stop** and report the spec change: §7.2 drops "the rest scroll" for a lane picker (`Move…` names the lane; drags only between visible lanes), §9's walk replaces every off-screen drag with `Move…`, and Task 0 (a)/(b) are rewritten against `Move…`. |
 | measured width ≠ 766 ± 2 | Not a failure: record the real width; Task 11 corrects page-calendar's lane-count sentence ("Unassigned plus two technician lanes are fully visible") if the count changes. |
 
 - [ ] **Step 7: Revert the local edits, delete the spike, commit the fixture**
@@ -643,6 +655,8 @@ export interface MoveNeedsDetails {
   readonly started?: readonly StartedDetail[];
   readonly conflicts?: readonly ConflictDetail[];
   readonly outsideAvailability?: boolean;
+  /** A live row other than the current lead's is started (so a lead change won't reset the request to scheduled). */
+  readonly othersStarted?: boolean;
 }
 
 /** One entry of TIME_OFF's `details.timeOff` (never overridable, so no `needs`). */
@@ -1330,6 +1344,9 @@ describe("resetsToScheduled", () => {
     expect(resetsToScheduled({ status: "arrived", native: false, oldLeadId: ALEX, started })).toBe(false);
     expect(resetsToScheduled({ status: "scheduled", native: true, oldLeadId: ALEX, started })).toBe(false);
   });
+  it("not when the 409 says another row is started (a lead-only change lists only the lead)", () => {
+    expect(resetsToScheduled({ status: "arrived", native: true, oldLeadId: ALEX, started, othersStarted: true })).toBe(false);
+  });
 });
 
 describe("optimisticCrew", () => {
@@ -1662,6 +1679,11 @@ describe("classifyMassVisit (order: fieldpulse, helper, later_visit, ended, star
     expect(classifyMassVisit(facts(), ctx({ busy }))).toMatchObject({ outcome: "moves", conflict: true });
     expect(classifyMassVisit(facts(), ctx({ outsideHours: (id) => id === T2 }))).toMatchObject({ outcome: "moves", conflict: true });
   });
+  it("a request moving in the same run never conflicts (two shared-band visits both move)", () => {
+    const busy = [{ technicianId: T2, requestId: "r2", start: new Date("2026-11-11T14:00:00.000Z"), end: new Date("2026-11-11T16:00:00.000Z") }];
+    expect(classifyMassVisit(facts(), ctx({ busy })).conflict).toBe(true);
+    expect(classifyMassVisit(facts(), ctx({ busy, batchRequestIds: ["r1", "r2"] })).conflict).toBe(false);
+  });
   it("its own request never conflicts", () => {
     const busy = [{ technicianId: T2, requestId: "r1", start: new Date("2026-11-11T15:00:00.000Z"), end: new Date("2026-11-11T17:00:00.000Z") }];
     expect(classifyMassVisit(facts(), ctx({ busy })).conflict).toBe(false);
@@ -1760,8 +1782,10 @@ export function resetsToScheduled(p: {
   readonly native: boolean;
   readonly oldLeadId: string | null;
   readonly started: readonly StartedDetail[];
+  /** From the 409's details: a row other than the old lead's is started (a lead-only 409 lists only the lead in `started`). */
+  readonly othersStarted?: boolean;
 }): boolean {
-  if (!p.native || !RESET_FROM.includes(p.status) || !p.oldLeadId) return false;
+  if (!p.native || !RESET_FROM.includes(p.status) || !p.oldLeadId || p.othersStarted) return false;
   return p.started.some((s) => s.technicianId === p.oldLeadId) && p.started.every((s) => s.technicianId === p.oldLeadId);
 }
 
@@ -2218,6 +2242,8 @@ export interface MassContext {
   /** Open rows of other requests' live visits, per technician. */
   readonly busy: readonly { readonly technicianId: string; readonly requestId: string; readonly start: Date; readonly end: Date }[];
   readonly outsideHours: (technicianId: string, window: TimeWindow) => boolean;
+  /** Requests moving together in this run: they already sat together on D, so they never conflict with each other (plan v2, critic A MAJOR-1). */
+  readonly batchRequestIds?: readonly string[];
 }
 
 export interface MassClassification {
@@ -2242,8 +2268,10 @@ export function classifyMassVisit(f: MassVisitFacts, ctx: MassContext): MassClas
   if (leadChanges && f.toTechOnVisit) return skip("already_on_visit");
   if (timeOffHits(ctx.blocks, needs.checked, newWindow).length > 0) return skip("time_off");
   const checked = new Set(needs.checked);
+  const batch = new Set(ctx.batchRequestIds ?? []);
   const overlap = ctx.busy.some(
-    (b) => checked.has(b.technicianId) && b.requestId !== f.requestId && b.start.getTime() < newWindow.end.getTime() && b.end.getTime() > newWindow.start.getTime(),
+    (b) => checked.has(b.technicianId) && b.requestId !== f.requestId && !batch.has(b.requestId) &&
+      b.start.getTime() < newWindow.end.getTime() && b.end.getTime() > newWindow.start.getTime(),
   );
   const outside = checked.has(lead) && ctx.outsideHours(lead, newWindow);
   return { outcome: "moves", conflict: overlap || outside, newWindow };
@@ -2300,7 +2328,7 @@ EOF
 
 **Files:**
 - Create: `src/lib/admin/visit-move-sql.ts`, `src/lib/admin/visit-move-sql.test.ts`
-- Modify: `src/lib/admin/visit-one-guard.ts` (whole file below), `src/lib/admin/visit-one-guard.test.ts`, `src/lib/admin/queries.ts` (`assignTechnician`, `reassignTechnician`, imports), `src/lib/admin/queries.test.ts` (mocks + new cases), `src/lib/admin/scheduling-queries.ts` (`placeAndAssignRequest`, import), `src/lib/admin/scheduling-queries.test.ts` (mocks + the lock test), `src/app/api/admin/requests/[id]/assign/route.ts`, `src/app/api/admin/requests/[id]/assign/route.test.ts`, `src/app/api/admin/requests/[id]/route.ts` (schedule-edit refusal names FieldPulse)
+- Modify: `src/lib/admin/visit-one-guard.ts` (whole file below), `src/lib/admin/visit-one-guard.test.ts`, `src/lib/admin/queries.ts` (`assignTechnician`, `reassignTechnician`, imports), `src/lib/admin/queries.test.ts` (mocks + new cases), `src/lib/admin/scheduling-queries.ts` (`placeAndAssignRequest`, import), `src/lib/admin/scheduling-queries.test.ts` (mocks + the lock test), `src/app/api/admin/requests/[id]/assign/route.ts`, `src/app/api/admin/requests/[id]/assign/route.test.ts`, `src/app/api/admin/requests/[id]/route.ts` (schedule-edit refusal names FieldPulse), `src/app/api/admin/requests/[id]/route.test.ts`, `src/app/api/admin/requests/[id]/reschedule/route.test.ts` (its HAS_PROGRESS expectation follows the new copy until Task 8 deletes the route)
 
 **Interfaces:**
 - Consumes (Task 1): `startedRowSql`, `anyTimestampSql`; (Task 2): `FIELDPULSE_SHEET_STARTED`, `FIELDPULSE_SHEET_TECH`, `SHEET_STARTED_NATIVE`, `UNSCHEDULE_COPY`. Existing: `closeJobEntriesSql` (`src/lib/tech/time-entry-sql.ts`), `OPEN_ASSIGNMENT_STATUSES` (`src/lib/tech/ownership.ts`), `OPEN_STATUSES` (`request-status.ts`).
@@ -2413,6 +2441,12 @@ describe("noOverlapSql (lead ruling 5)", () => {
     expect(text).toContain("AND cp.cancelled_at IS NULL AND cr.id <> $5::uuid AND cr.status IN ('pending'::request_status,");
     expect(text).toContain("AND cp.arrival_window_start < $6::timestamptz AND cp.arrival_window_end > $7::timestamptz)");
     expect(params).toEqual([ORG, ORG, ORG, [ALEX, SAM], RID, "2026-11-10T21:00:00.000Z", "2026-11-10T17:00:00.000Z"]);
+    expect(text).not.toContain("<> ALL(");
+  });
+  it("mass: the other requests of the run are excluded too", () => {
+    const { text, params } = q(noOverlapSql(ORG, RID, [ALEX], "a", "b", [RID, VID]));
+    expect(text).toMatch(/AND cr\.id <> ALL\(\$\d+::uuid\[\]\)\)$/);
+    expect(params.at(-1)).toEqual([RID, VID]);
   });
 });
 
@@ -2616,17 +2650,26 @@ export function activeTechnicianSql(org: string, technicianId: string): SQL {
  * request whose window overlaps [start, end) (half-open, as
  * checkScheduleConflict; lead ruling 5).
  */
-export function noOverlapSql(org: string, rid: string, technicianIds: readonly string[], startIso: string, endIso: string): SQL {
-  return sql`NOT EXISTS (SELECT 1 ${overlapFromWhereSql(org, rid, technicianIds, startIso, endIso)})`;
+export function noOverlapSql(
+  org: string, rid: string, technicianIds: readonly string[], startIso: string, endIso: string, excludeRequestIds: readonly string[] = [],
+): SQL {
+  return sql`NOT EXISTS (SELECT 1 ${overlapFromWhereSql(org, rid, technicianIds, startIso, endIso, excludeRequestIds)})`;
 }
 
-/** The FROM … WHERE shared by noOverlapSql (the in-write twin) and the move's pre-read of the overlapping rows. */
-export function overlapFromWhereSql(org: string, rid: string, technicianIds: readonly string[], startIso: string, endIso: string): SQL {
+/**
+ * The FROM … WHERE shared by noOverlapSql (the in-write twin) and the move's
+ * pre-read of the overlapping rows. `excludeRequestIds`: mass reschedule's
+ * other candidates, which move in the same batch (plan v2, A MAJOR-1).
+ */
+export function overlapFromWhereSql(
+  org: string, rid: string, technicianIds: readonly string[], startIso: string, endIso: string, excludeRequestIds: readonly string[] = [],
+): SQL {
+  const others = excludeRequestIds.length > 0 ? sql` AND cr.id <> ALL(${sql.param([...excludeRequestIds])}::uuid[])` : sql``;
   return sql`FROM appointment_assignments ca JOIN appointments cp ON cp.id = ca.appointment_id JOIN service_requests cr ON cr.id = cp.service_request_id
     WHERE ca.organization_id = ${org}::uuid AND cp.organization_id = ${org}::uuid AND cr.organization_id = ${org}::uuid
       AND ca.technician_id = ANY(${sql.param([...technicianIds])}::uuid[]) AND ca.status IN (${openRows()})
       AND cp.cancelled_at IS NULL AND cr.id <> ${rid}::uuid AND cr.status IN (${openRequests()})
-      AND cp.arrival_window_start < ${endIso}::timestamptz AND cp.arrival_window_end > ${startIso}::timestamptz`;
+      AND cp.arrival_window_start < ${endIso}::timestamptz AND cp.arrival_window_end > ${startIso}::timestamptz${others}`;
 }
 
 /**
@@ -2846,6 +2889,17 @@ and append these cases inside `describe('assignTechnician', …)`:
     expect(await assignTechnician(ORG_ID, 'req-1', 'tech-1')).toEqual({ ok: false, reason: 'managed_externally' });
   });
 
+  it('FieldPulse is answered before time off (spec §5.5)', async () => {
+    selectResolutions = [
+      [{ id: 'tech-1', name: 'John Tech' }],
+      [{ status: 'scheduled', arrivalWindowStart: new Date('2026-07-01T12:00:00.000Z'), arrivalWindowEnd: new Date('2026-07-01T16:00:00.000Z'), fieldpulseJobId: 'fp-1' }],
+    ];
+    timeOffMock.mockResolvedValueOnce([TIME_OFF_SHIFT]);
+    expect(await assignTechnician(ORG_ID, 'req-1', 'tech-1')).toEqual({ ok: false, reason: 'managed_externally' });
+    timeOffMock.mockReset();
+    timeOffMock.mockResolvedValue([]);
+  });
+
   it('a technician done on visit #1 → technician_done', async () => {
     selectResolutions = [
       [{ id: 'tech-1', name: 'John Tech' }],
@@ -3013,6 +3067,76 @@ with
 
 /** True when the technician has a capacity-removing shift overlapping the
 ```
+
+FieldPulse first (spec §5.5, plan v2 critic A m7): a FieldPulse request is refused before the time-off pre-check could answer `time_off`. In `assignTechnician`, replace
+
+```ts
+  const [before] = await db
+    .select({
+      status: serviceRequests.status,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+
+  if (
+```
+
+with
+
+```ts
+  const [before] = await db
+    .select({
+      status: serviceRequests.status,
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  if (before?.fieldpulseJobId) return { ok: false, reason: "managed_externally" };
+
+  if (
+```
+
+and in `reassignTechnician` replace
+
+```ts
+  const [windowed] = await db
+    .select({
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  if (
+```
+
+with
+
+```ts
+  const [windowed] = await db
+    .select({
+      arrivalWindowStart: serviceRequests.arrivalWindowStart,
+      arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
+      fieldpulseJobId: serviceRequests.fieldpulseJobId,
+    })
+    .from(serviceRequests)
+    .where(
+      withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
+    );
+  if (windowed?.fieldpulseJobId) return { ok: false, reason: "managed_externally" };
+  if (
+```
+
+(The SQL predicate stays the race-proof refusal; this pre-check only orders the answer.)
 
 In `assignTechnician`, replace from `  const [updated] = await lockedUpdate(organizationId, requestId, db` through the closing `}` of the `if (!updated) { … }` block (the code that ends with `reason: "request_not_assignable",\n      currentStatus,\n    };\n  }`) with
 
@@ -3223,19 +3347,18 @@ vi.mock("@/lib/admin/visit-one-guard", async (orig) => ({
 }));
 ```
 
-and in its `"PATCH /api/admin/requests/[id] — schedule branch"` table change `["has_progress", "HAS_PROGRESS", "A technician has already started this visit."],` to `["has_progress", "HAS_PROGRESS", "A technician has started this visit. To move it anyway, use Move… on the calendar."],`. The other two places that say "A technician has already started this visit." (`appointments/[aid]/route.ts:82`, the sheet's `VISIT_ERROR_COPY`) are not this response and stay until Task 10 changes the sheet copy.
+and in its `"PATCH /api/admin/requests/[id] — schedule branch"` table change `["has_progress", "HAS_PROGRESS", "A technician has already started this visit."],` to `["has_progress", "HAS_PROGRESS", "A technician has started this visit. To move it anyway, use Move… on the calendar."],`. In `src/app/api/admin/requests/[id]/reschedule/route.test.ts` (deleted in Task 8; it must stay green until then), change the expectation `message: "A technician has already started this visit."` (line 136) to `message: "A technician has started this visit. To move it anyway, use Move… on the calendar."` — the old route calls `visitOneRefusalResponse(result.reason)` and now gets the sheet copy. The other two places that say "A technician has already started this visit." (`appointments/[aid]/route.ts:82`, the sheet's `VISIT_ERROR_COPY`) are not this response and stay until Task 10 changes the sheet copy.
 
 - [ ] **Step 9: Run the tests to verify they pass**
 
-Run: `npx vitest run src/lib/admin/visit-move-sql.test.ts src/lib/admin/visit-one-guard.test.ts src/lib/admin/queries.test.ts src/lib/admin/scheduling-queries.test.ts "src/app/api/admin/requests/[id]/assign/route.test.ts" "src/app/api/admin/requests/[id]/route.test.ts"`
+Run: `npx vitest run src/lib/admin/visit-move-sql.test.ts src/lib/admin/visit-one-guard.test.ts src/lib/admin/queries.test.ts src/lib/admin/scheduling-queries.test.ts "src/app/api/admin/requests/[id]/assign/route.test.ts" "src/app/api/admin/requests/[id]/route.test.ts" "src/app/api/admin/requests/[id]/reschedule/route.test.ts"`
 Expected: PASS.
 
 - [ ] **Step 10: Gates and commit**
 
 ```bash
 npx tsc --noEmit && npx eslint src/lib/admin/visit-move-sql.ts src/lib/admin/visit-move-sql.test.ts src/lib/admin/visit-one-guard.ts src/lib/admin/visit-one-guard.test.ts src/lib/admin/queries.ts src/lib/admin/queries.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts "src/app/api/admin/requests/[id]/assign/route.ts" "src/app/api/admin/requests/[id]/assign/route.test.ts" "src/app/api/admin/requests/[id]/route.ts" && npx vitest run
-git add src/lib/admin/visit-move-sql.ts src/lib/admin/visit-move-sql.test.ts src/lib/admin/visit-one-guard.ts src/lib/admin/visit-one-guard.test.ts src/lib/admin/queries.ts src/lib/admin/queries.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts "src/app/api/admin/requests/[id]/assign/route.ts" "src/app/api/admin/requests/[id]/assign/route.test.ts" "src/app/api/admin/requests/[id]/route.ts"
-# plus src/app/api/admin/requests/[id]/route.test.ts and any test whose copy expectation Step 8 changed
+git add src/lib/admin/visit-move-sql.ts src/lib/admin/visit-move-sql.test.ts src/lib/admin/visit-one-guard.ts src/lib/admin/visit-one-guard.test.ts src/lib/admin/queries.ts src/lib/admin/queries.test.ts src/lib/admin/scheduling-queries.ts src/lib/admin/scheduling-queries.test.ts "src/app/api/admin/requests/[id]/assign/route.ts" "src/app/api/admin/requests/[id]/assign/route.test.ts" "src/app/api/admin/requests/[id]/route.ts" "src/app/api/admin/requests/[id]/route.test.ts" "src/app/api/admin/requests/[id]/reschedule/route.test.ts"
 git commit -m "$(cat <<'EOF'
 feat(m2): started guard, lead revive and FieldPulse refusal on the sheet writers
 
@@ -3346,7 +3469,7 @@ describe("removeVisitTechnician", () => {
     expect(lock).toContain("FOR NO KEY UPDATE");
     expect(write).toContain("WITH del AS (DELETE FROM appointment_assignments a USING appointments p WHERE a.appointment_id = p.id AND p.id = $");
     expect(write).toContain("AND NOT a.is_lead AND EXISTS (SELECT 1 FROM service_requests r WHERE r.id = p.service_request_id AND r.organization_id = $");
-    expect(write).toContain("'cancelled'::request_status)) AND NOT (a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL) RETURNING a.id)");
+    expect(write).toContain("'cancelled'::request_status)) AND a.status <> 'cancelled'::request_status AND NOT (a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL) RETURNING a.id)");
     expect(write).toContain("can AS (UPDATE appointment_assignments a SET status = 'cancelled'::request_status FROM appointments p WHERE a.appointment_id = p.id");
     expect(write).toContain("AND (a.en_route_at IS NOT NULL OR a.arrived_at IS NOT NULL OR a.started_at IS NOT NULL OR a.completed_at IS NOT NULL) AND NOT (a.status <> 'cancelled'::request_status AND (a.status IN ('en_route'::request_status,");
     expect(write).toContain("bump AS (UPDATE appointments SET version = version + 1, updated_at = now() WHERE id = $");
@@ -3599,7 +3722,7 @@ with
   const [, written] = await db.batch([
     db.execute(sql`SELECT 1 FROM service_requests WHERE id = ${requestId}::uuid AND organization_id = ${organizationId}::uuid FOR NO KEY UPDATE`),
     db.execute(sql`WITH del AS (DELETE FROM appointment_assignments a USING appointments p
-        WHERE ${rowOnVisit} AND NOT ${anyTimestampSql("a")}
+        WHERE ${rowOnVisit} AND a.status <> 'cancelled'::request_status AND NOT ${anyTimestampSql("a")}
         RETURNING a.id),
       can AS (UPDATE appointment_assignments a SET status = 'cancelled'::request_status FROM appointments p
         WHERE ${rowOnVisit} AND a.status <> 'cancelled'::request_status AND ${anyTimestampSql("a")} AND NOT ${startedRowSql("a")}
@@ -4049,6 +4172,11 @@ describe("planMove — what the move changes and checks", () => {
     expect(r).toMatchObject({ ok: true, needsStarted: true, checked: [SAM] });
     if (r.ok) expect(r.started).toEqual([{ technicianId: ALEX, status: "arrived", hasTimestamp: true, openTimeEntry: true }]);
   });
+  it("othersStarted: a working helper is reported even when only the lead's row is listed as started", () => {
+    const r = planMove(state({ status: "arrived", rows: [lead("arrived", true), { technicianId: "h", isLead: false, status: "in_progress", hasTimestamp: true, openTimeEntry: false }] }), body({ windowRule: "keep" }), NOW, active);
+    expect(r).toMatchObject({ ok: true, othersStarted: true });
+    if (r.ok) expect(r.started.map((s) => s.technicianId)).toEqual([ALEX]);
+  });
   it("a first assignment of an unassigned #1 (visitId = #1's id) is a lead change from null", () => {
     expect(planMove(state({ assignedTo: null, rows: [] }), body(), NOW, active)).toMatchObject({ ok: true, leadChanges: true, oldLeadId: null, newLeadId: SAM });
   });
@@ -4060,7 +4188,7 @@ describe("needs, time off, audit, events", () => {
   const conflict = { id: "r9", referenceNumber: "HVAC-9", technicianId: SAM, arrivalWindowStart: "2026-11-10T17:00:00.000Z", arrivalWindowEnd: "2026-11-10T19:00:00.000Z" };
   it("started unconfirmed → HAS_PROGRESS with every need listed; ids only", () => {
     const v = moveNeedsResult(plan, { conflicts: [conflict], outsideAvailability: false }, []);
-    expect(v.refusal).toMatchObject({ status: 409, code: "HAS_PROGRESS", details: { needs: ["started", "conflict"], conflicts: [conflict] } });
+    expect(v.refusal).toMatchObject({ status: 409, code: "HAS_PROGRESS", details: { needs: ["started", "conflict"], conflicts: [conflict], othersStarted: false } });
     expect(JSON.stringify(v.refusal)).not.toMatch(/Alex|Sam/);
   });
   it("only a conflict unconfirmed → SCHEDULE_CONFLICT; all confirmed → no refusal, confirmed listed", () => {
@@ -4348,6 +4476,7 @@ export function isSpanWithinAvailability(
  */
 import { moveNeeds, type NeedsRow } from "./board-move";
 import { businessIsoDate } from "./calendar-time";
+import { rowStarted } from "./visit-started";
 import { FIELDPULSE_BOARD, moveErrorBanner } from "./dispatch-copy";
 import { namedWindowOf, resolveMoveWindow, windowEqual, windowHasEndedAt, type TimeWindow } from "./move-window";
 import { WINDOW_ENDED_MESSAGE } from "./window-ended";
@@ -4399,6 +4528,8 @@ export interface MovePlan {
   readonly checked: readonly string[];
   readonly needsStarted: boolean;
   readonly started: readonly StartedDetail[];
+  /** A live row other than the current lead's is started (the client's reset prediction, critic A m2). */
+  readonly othersStarted: boolean;
 }
 
 const refuse = (status: MoveRefusal["status"], code: MoveCode, message: string, details?: unknown): MoveRefusal =>
@@ -4507,6 +4638,7 @@ export function planMove(state: MoveState | null, body: MoveBody, now: Date, fac
     checked: needs.checked,
     needsStarted: needs.started,
     started,
+    othersStarted: state.rows.some((r) => r.technicianId !== state.assignedTo && rowStarted(r)),
   };
 }
 
@@ -4526,7 +4658,7 @@ export function moveNeedsResult(
   if (needs.length === 0) return { refusal: null, confirmed };
   const details: MoveNeedsDetails = {
     needs,
-    ...(plan.needsStarted ? { started: plan.started } : {}),
+    ...(plan.needsStarted ? { started: plan.started, othersStarted: plan.othersStarted } : {}),
     ...(checks.conflicts.length > 0 ? { conflicts: checks.conflicts } : {}),
     ...(checks.outsideAvailability ? { outsideAvailability: true } : {}),
   };
@@ -4664,6 +4796,8 @@ export interface MoveUpdateParams {
   readonly confirmConflict: boolean;
   /** More guards ANDed in (mass reschedule: the lead is T, the visit starts on D, no audit row yet). */
   readonly extra?: readonly SQL[];
+  /** Mass reschedule: the run's other requests, excluded from the overlap twin (they move together). */
+  readonly excludeRequestIds?: readonly string[];
 }
 
 /** Step 1 (spec §5.3): every guard is the SQL twin of a pre-read check. */
@@ -4689,7 +4823,7 @@ export function moveUpdateSql(p: MoveUpdateParams): SQL {
     if (p.windowChanges) arms.push(startedOnVisitOneSql(p.org, "any"));
     if (arms.length > 0) guards.push(sql`NOT (${sql.join(arms, sql` OR `)})`);
   }
-  if (!p.confirmConflict && p.checked.length > 0) guards.push(noOverlapSql(p.org, p.rid, p.checked, startIso, endIso));
+  if (!p.confirmConflict && p.checked.length > 0) guards.push(noOverlapSql(p.org, p.rid, p.checked, startIso, endIso, p.excludeRequestIds ?? []));
   guards.push(...(p.extra ?? []));
 
   const lead = p.newLeadId ? sql`${p.newLeadId}::uuid` : sql`NULL`;
@@ -5040,18 +5174,22 @@ describe("previewMassReschedule", () => {
 });
 
 describe("commitMassReschedule", () => {
-  const fresh = () => {
+  const fresh = (rows = [dayRow(1), dayRow(2), dayRow(3, { rows: [{ technicianId: T, isLead: true, status: "arrived", hasTimestamp: true }] })]) => {
     m.readRows
       .mockResolvedValueOnce([]) // recovery probe: no audit row
-      .mockResolvedValueOnce([dayRow(1), dayRow(2), dayRow(3, { rows: [{ technicianId: T, isLead: true, status: "arrived", hasTimestamp: true }] })])
+      .mockResolvedValueOnce([{ id: v(1) }, { id: v(2) }]) // the org's visits
+      .mockResolvedValueOnce(rows)
       .mockResolvedValueOnce([]); // busy
   };
+  const readBackOk = (moved: number[], skipped: [string, string][]) =>
+    m.readRows
+      .mockResolvedValueOnce([{ details: JSON.stringify({ movedVisitIds: moved.map(v), skipped }) }])
+      .mockResolvedValueOnce(moved.map((n) => ({ id: v(n), service_request_id: r(n), version: 3, hcp: false })));
+
   it("one batch: lock all, per visit the move statements (+ lead follow-ons), then the SQL audit row; result read back from it", async () => {
     fresh();
     m.runBatch.mockResolvedValueOnce([[], [{ id: r(1), status: "scheduled" }], [], [], [], [{ id: r(2), status: "scheduled" }], [], [], [], [{ id: AUDIT }]]);
-    m.readRows
-      .mockResolvedValueOnce([{ details: JSON.stringify({ movedVisitIds: [v(1), v(2)], skipped: [[v(3), "started"]] }) }])
-      .mockResolvedValueOnce([{ id: v(1), service_request_id: r(1), version: 3, hcp: false }, { id: v(2), service_request_id: r(2), version: 3, hcp: false }]);
+    readBackOk([1, 2], [[v(3), "started"]]);
     const scheduled: Array<() => unknown> = [];
     const out = await commitMassReschedule(ORG, USER, body(), AUDIT, (fn) => scheduled.push(fn), NOW);
     expect(out.status).toBe(200);
@@ -5066,19 +5204,50 @@ describe("commitMassReschedule", () => {
     expect(update).toContain("AND \"service_requests\".\"assigned_to\" = $");
     expect(update).toContain("AND \"service_requests\".\"arrival_window_start\" >= $");
     expect(update).toContain("AND NOT EXISTS (SELECT 1 FROM audit_log al WHERE al.id = $");
+    // `started` is never confirmed in bulk: the started arm is in the guard.
+    expect(update).toContain("AND NOT (EXISTS (SELECT 1 FROM appointment_assignments sa");
+    // The run's own requests never conflict with each other.
+    expect(update).toContain("AND cr.id <> ALL($");
+    expect(params(statements[1]!)).toContainEqual([r(1), r(2)]);
     expect(text(statements[2]!)).toContain("AND ((EXISTS (SELECT 1 FROM service_requests xr");
     expect(text(statements[2]!)).toContain("AND NOT EXISTS (SELECT 1 FROM audit_log al WHERE al.id = $");
     expect(text(statements[9]!)).toMatch(/^INSERT INTO audit_log/);
-    // after(): registered last; two requests × (sync, HCP) + stamps.
     for (const fn of scheduled) await fn();
     expect(m.sync).toHaveBeenCalledTimes(2);
     expect(m.hcp).toHaveBeenCalledTimes(2);
     expect(m.stamp).toHaveBeenCalledWith(ORG, r(1), T2, USER);
   });
 
-  it("a visit or preSkipped id that isn't one of T's visits that day → 400, nothing written", async () => {
-    m.readRows.mockResolvedValueOnce([]).mockResolvedValueOnce([dayRow(1)]).mockResolvedValueOnce([]);
-    const out = await commitMassReschedule(ORG, USER, body({ visits: [{ visitId: v(1), expectedVersion: 2 }, { visitId: v(9), expectedVersion: 0 }], preSkipped: [] }), AUDIT, () => {}, NOW);
+  it("the commit reclassifies: a visit that started after the preview gets no statements and is skipped as started", async () => {
+    fresh([dayRow(1), dayRow(2, { rows: [{ technicianId: T, isLead: true, status: "en_route", hasTimestamp: true }] }), dayRow(3)]);
+    m.runBatch.mockResolvedValueOnce([[], [{ id: r(1), status: "scheduled" }], [], [], [], [{ id: AUDIT }]]);
+    readBackOk([1], [[v(3), "started"], [v(2), "started"]]);
+    const out = await commitMassReschedule(ORG, USER, body(), AUDIT, () => {}, NOW);
+    expect(out.status).toBe(200);
+    const statements = m.runBatch.mock.calls[0]![0] as SQL[];
+    expect(statements).toHaveLength(6); // lock + v1 × 4 + audit
+    const audit = params(statements[5]!);
+    expect(audit).toContainEqual([v(3), v(2)]); // preSkipped ids: the client's, then the server's
+    expect(audit).toContainEqual(["started", "started"]);
+    expect(audit).toContainEqual([v(1)]); // candidates: only v1
+  });
+
+  it("a listed visit no longer among T's visits that day is audited stale, not a 400", async () => {
+    fresh([dayRow(1), dayRow(3)]); // v2 was moved to another day by someone else
+    m.runBatch.mockResolvedValueOnce([[], [{ id: r(1), status: "scheduled" }], [], [], [], [{ id: AUDIT }]]);
+    readBackOk([1], [[v(3), "started"], [v(2), "stale"]]);
+    const out = await commitMassReschedule(ORG, USER, body(), AUDIT, () => {}, NOW);
+    expect(out.status).toBe(200);
+    const statements = m.runBatch.mock.calls[0]![0] as SQL[];
+    expect(statements).toHaveLength(6);
+    expect(params(statements[5]!)).toContainEqual([v(1), v(2)]); // v2 is a candidate with no statements → stale in SQL
+  });
+
+  it("an id that isn't one of the org's visits → 400; a preSkipped id that isn't the day's → 400; nothing written", async () => {
+    m.readRows.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: v(1) }]);
+    expect((await commitMassReschedule(ORG, USER, body(), AUDIT, () => {}, NOW)).status).toBe(400);
+    m.readRows.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: v(1) }, { id: v(2) }]).mockResolvedValueOnce([dayRow(1), dayRow(2)]).mockResolvedValueOnce([]);
+    const out = await commitMassReschedule(ORG, USER, body({ preSkipped: [{ visitId: v(9), reason: "started" }] }), AUDIT, () => {}, NOW);
     expect(out.status).toBe(400);
     expect(out.envelope).toMatchObject({ success: false, error: { code: "VALIDATION_ERROR" } });
     expect(m.runBatch).not.toHaveBeenCalled();
@@ -5102,6 +5271,22 @@ describe("commitMassReschedule", () => {
     expect(m.hcp).toHaveBeenCalledWith(ORG, r(1));
     expect(m.event).not.toHaveBeenCalled();
     expect(m.stamp).not.toHaveBeenCalled();
+  });
+
+  it("a taken-over run whose audit INSERT matched nothing answers as recovery (no events, no stamps, no HCP create)", async () => {
+    fresh();
+    m.runBatch.mockResolvedValueOnce([[], [], [], [], [], [], [], [], [], []]);
+    m.readRows
+      .mockResolvedValueOnce([{ details: JSON.stringify({ movedVisitIds: [v(1)], skipped: [] }) }])
+      .mockResolvedValueOnce([{ id: v(1), service_request_id: r(1), version: 3, hcp: false }]);
+    const scheduled: Array<() => unknown> = [];
+    const out = await commitMassReschedule(ORG, USER, body(), AUDIT, (fn) => scheduled.push(fn), NOW);
+    expect(out.status).toBe(200);
+    for (const fn of scheduled) await fn();
+    expect(m.sync).toHaveBeenCalledTimes(1);
+    expect(m.hcp).not.toHaveBeenCalled();
+    expect(m.stamp).not.toHaveBeenCalled();
+    expect(m.event).not.toHaveBeenCalled();
   });
 
   it("a deadlock answers 409 STALE (unstored), registers nothing", async () => {
@@ -5359,7 +5544,8 @@ async function readDay(org: string, q: MassQuery): Promise<{ visits: DayVisit[];
 
 export async function previewMassReschedule(org: string, q: MassQuery, now: Date = new Date()): Promise<readonly MassCandidate[]> {
   const { visits, ctx } = await readDay(org, q);
-  const at = { ...ctx, now };
+  // The day's visits move together: they never conflict with each other (critic A MAJOR-1).
+  const at = { ...ctx, now, batchRequestIds: visits.map((v) => v.facts.requestId) };
   return visits.map((v) => {
     const c = classifyMassVisit(v.facts, at);
     return {
@@ -5407,6 +5593,25 @@ async function readBack(org: string, auditId: string): Promise<{ moved: { visitI
   };
 }
 
+/** Recovery (spec §4.2): rebuild the 200 from the audit row; re-send only update-style pushes; no events, no stamps. */
+async function recover(
+  org: string,
+  recovered: NonNullable<Awaited<ReturnType<typeof readBack>>>,
+  schedule: (fn: () => unknown) => void,
+): Promise<RunResult> {
+  const hcpConnected = (await getHousecallConfig(org)) !== null;
+  const envelope = ok200({
+    moved: recovered.moved.map(({ visitId, requestId, visitVersion }) => ({ visitId, requestId, visitVersion })),
+    skipped: recovered.skipped,
+    pushesNotSent: hcpConnected ? recovered.moved.filter((m) => !m.hcp).map((m) => m.requestId) : [],
+  });
+  for (const m of recovered.moved) {
+    schedule(() => syncRequestToCalendar(org, m.requestId));
+    if (m.hcp) schedule(() => pushJobToHcp(org, m.requestId));
+  }
+  return envelope;
+}
+
 export async function commitMassReschedule(
   org: string,
   actorUserId: string,
@@ -5417,48 +5622,58 @@ export async function commitMassReschedule(
 ): Promise<RunResult> {
   // Recovery (spec §4.2): the audit row is the record of a committed run.
   const recovered = await readBack(org, auditId);
-  if (recovered) {
-    const hcpConnected = (await getHousecallConfig(org)) !== null;
-    const result: MassResult = {
-      moved: recovered.moved.map(({ visitId, requestId, visitVersion }) => ({ visitId, requestId, visitVersion })),
-      skipped: recovered.skipped,
-      pushesNotSent: hcpConnected ? recovered.moved.filter((m) => !m.hcp).map((m) => m.requestId) : [],
-    };
-    const envelope = ok200(result);
-    for (const m of recovered.moved) {
-      schedule(() => syncRequestToCalendar(org, m.requestId));
-      if (m.hcp) schedule(() => pushJobToHcp(org, m.requestId));
-    }
-    return envelope;
-  }
+  if (recovered) return recover(org, recovered, schedule);
 
   const q: MassQuery = { technicianId: body.technicianId.toLowerCase(), fromDate: body.fromDate, toDate: body.toDate, toTechnicianId: body.toTechnicianId?.toLowerCase() };
-  const { visits, ctx } = await readDay(org, q);
-  const byId = new Map(visits.map((v) => [v.facts.visitId, v]));
   const wanted = body.visits.map((x) => ({ ...x, visitId: x.visitId.toLowerCase() }));
   const preSkipped = body.preSkipped.map((x) => ({ ...x, visitId: x.visitId.toLowerCase() }));
-  if ([...wanted, ...preSkipped].some((x) => !byId.has(x.visitId))) {
-    return fail(400, "VALIDATION_ERROR", "Open the preview again.");
-  }
+  // Every listed visit must be one of this org's visits (a foreign or made-up id is a 400). A visit that
+  // changed since the preview is NOT an error: it is recorded `stale` below (plan v2, critic A MAJOR-3).
+  const known = await readRows(sql`SELECT id FROM appointments WHERE id = ANY(${sql.param(wanted.map((w) => w.visitId))}::uuid[]) AND organization_id = ${org}::uuid`);
+  if (known.length !== wanted.length) return fail(400, "VALIDATION_ERROR", "Open the preview again.");
+
+  const { visits, ctx } = await readDay(org, q);
+  const byId = new Map(visits.map((v) => [v.facts.visitId, v]));
+  // preSkipped carries reasons, so its ids must be the day's visits (spec §5.6 "validated").
+  if (preSkipped.some((x) => !byId.has(x.visitId))) return fail(400, "VALIDATION_ERROR", "Open the preview again.");
 
   const T = q.technicianId;
   const T2 = q.toTechnicianId ?? null;
   const leadChanges = T2 !== null && T2 !== T;
   const dayChanges = q.toDate !== q.fromDate;
   const from = businessDayBounds(q.fromDate)!;
-  const statements: SQL[] = [massLockSql(org, [...new Set(wanted.map((w) => byId.get(w.visitId)!.facts.requestId))])];
-  const updateIndex = new Map<string, number>();
+  const batchRequestIds = [...new Set(wanted.flatMap((w) => (byId.has(w.visitId) ? [byId.get(w.visitId)!.facts.requestId] : [])))];
+  const at: MassContext = { ...ctx, now, batchRequestIds };
+
+  // The commit never trusts the preview (plan v2, critic A MAJOR-2): each visit is reclassified here.
+  // A visit no longer among T's visits that day gets no statements and is audited `stale`; one whose
+  // fresh outcome isn't `moves` (or is an unconfirmed conflict) is skipped with its real reason.
+  const moving: { visitId: string; expectedVersion: number; v: DayVisit; window: { start: Date; end: Date } }[] = [];
+  const serverSkipped: { visitId: string; reason: string }[] = [];
   for (const w of wanted) {
-    const v = byId.get(w.visitId)!;
-    const rid = v.facts.requestId;
-    const window = classifyMassVisit(v.facts, { ...ctx, now }).newWindow;
-    const needs = moveNeeds({ leadChanges, windowChanges: dayChanges, currentLeadId: T, newLeadId: leadChanges ? T2 : T, rows: v.facts.rows });
+    const v = byId.get(w.visitId);
+    if (!v) continue; // stale
+    const c = classifyMassVisit(v.facts, at);
+    if (c.outcome !== "moves") serverSkipped.push({ visitId: w.visitId, reason: c.outcome });
+    else if (c.conflict && !body.confirmConflict) serverSkipped.push({ visitId: w.visitId, reason: "conflict" });
+    else moving.push({ ...w, v, window: c.newWindow });
+  }
+  const skippedIds = new Set(serverSkipped.map((x) => x.visitId));
+
+  const statements: SQL[] = [];
+  if (moving.length > 0) statements.push(massLockSql(org, [...new Set(moving.map((m) => m.v.facts.requestId))]));
+  const updateIndex = new Map<string, number>();
+  for (const m of moving) {
+    const rid = m.v.facts.requestId;
+    const needs = moveNeeds({ leadChanges, windowChanges: dayChanges, currentLeadId: T, newLeadId: leadChanges ? T2 : T, rows: m.v.facts.rows });
     const gate = sql`(${requestXminGateSql(org, rid)} AND ${noAuditYet(org, auditId)})`;
-    updateIndex.set(w.visitId, statements.length);
+    updateIndex.set(m.visitId, statements.length);
     statements.push(moveUpdateSql({
-      org, rid, visitId: w.visitId, expectedVersion: w.expectedVersion, start: window.start, end: window.end,
+      org, rid, visitId: m.visitId, expectedVersion: m.expectedVersion, start: m.window.start, end: m.window.end,
       oldLeadId: T, newLeadId: leadChanges ? T2 : T, leadChanges, windowChanges: dayChanges, checked: needs.checked,
+      // `started` is never confirmed in bulk (spec §5.6); pinned by a render test.
       confirmStarted: false, confirmConflict: body.confirmConflict,
+      excludeRequestIds: batchRequestIds,
       extra: [
         sql`"service_requests"."assigned_to" = ${T}::uuid`,
         sql`"service_requests"."arrival_window_start" >= ${from.start.toISOString()}::timestamptz AND "service_requests"."arrival_window_start" < ${from.end.toISOString()}::timestamptz`,
@@ -5473,24 +5688,32 @@ export async function commitMassReschedule(
   }
   statements.push(massAuditSql({
     org, auditId, actorUserId, technicianId: T, toTechnicianId: T2, dayShift: massDayShift(q.fromDate, q.toDate),
-    confirmConflict: body.confirmConflict, candidateIds: wanted.map((w) => w.visitId), preSkipped,
+    confirmConflict: body.confirmConflict,
+    candidateIds: wanted.map((w) => w.visitId).filter((id) => !skippedIds.has(id)),
+    preSkipped: [...preSkipped, ...serverSkipped],
   }));
 
   const rows = await runBatch(statements); // any statement error throws: all rolled back, the route answers 500
   if (!Array.isArray(rows)) return fail(409, "STALE", "Changed since you opened this.");
+  if (rows[rows.length - 1]!.length === 0) {
+    // Our audit INSERT matched nothing: a taken-over run committed first (critic A m1). Answer as recovery.
+    const theirs = await readBack(org, auditId);
+    return theirs ? recover(org, theirs, schedule) : fail(409, "STALE", "Changed since you opened this.");
+  }
 
   const done = await readBack(org, auditId);
   if (!done) throw new Error("mass reschedule committed without its audit row");
-  const result: MassResult = {
+  const envelope = ok200({
     moved: done.moved.map(({ visitId, requestId, visitVersion }) => ({ visitId, requestId, visitVersion })),
     skipped: done.skipped,
     pushesNotSent: [],
-  };
-  const envelope = ok200(result);
+  });
 
   // Registered last (spec §4.2): a run that threw above registered nothing.
+  const movingById = new Map(moving.map((m) => [m.visitId, m]));
   for (const m of done.moved) {
-    const v = byId.get(m.visitId)!;
+    const v = movingById.get(m.visitId)?.v;
+    if (!v) continue;
     const updated = rows[updateIndex.get(m.visitId)!]?.[0];
     const toStatus = updated ? String(updated.status) : v.requestStatus;
     if (toStatus !== v.requestStatus) {
@@ -5507,12 +5730,12 @@ export async function commitMassReschedule(
 }
 ```
 
-Notes the implementer must keep: `body.preSkipped` ids are validated against the day's visits and their reasons by `massCommitSchema` (the route parses first), so a forged reason or a foreign visit id never reaches the audit row. The `extra` "starts on D" guard reads the request's columns (visit #1 = the request's window). `readDay`'s `ctx.now` is replaced by the caller's `now` everywhere it matters.
+Notes the implementer must keep: `preSkipped` reasons are validated by `massCommitSchema` (the route parses first) and its ids against the day's visits, so a forged reason or a foreign visit never reaches the audit row; `visits` ids are checked only as this org's visits, and the commit reclassifies every one (started, ended window, target technician already on it, time off, hours and overlap), never trusting the preview. The `extra` "starts on D" guard reads the request's columns (visit #1 = the request's window).
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npx vitest run src/lib/admin/mass-reschedule.test.ts`
-Expected: PASS. In the fresh-run test the runBatch result arrays line up as: index 0 lock, 1/5 the two updates, 2–4 and 6–8 the lead follow-ons, 9 the audit.
+Expected: PASS. In the fresh-run test the runBatch result arrays line up as: index 0 lock, 1/5 the two updates, 2–4 and 6–8 the lead follow-ons, 9 the audit; in the reclassification tests only v1's four statements remain (index 5 is the audit).
 
 - [ ] **Step 6: Gates and commit**
 
@@ -5544,6 +5767,8 @@ EOF
 **Interfaces:**
 - Consumes: Task 1 (`rowStarted`, `anyTimestampSql`), Task 2 types (`CrewMember`, `Movable`, optional `DashboardRequest` fields, `SchedulingCalendar.blocks`), Task 6 (`listShiftsInRange`). Existing: `displayVisitIdSql`, `visitEndedSql` (`current-visit.ts`), `readRows` (`invoice-field-writes.ts`).
 - Produces: `boardVisitsSql(org, requestIds)`, `BoardVisitRow`, `boardCardFields(row)`, `readBoardVisits(org, requestIds): Promise<ReadonlyMap<string, BoardCardFields>>`. `getSchedulingCalendar` (signature unchanged) gives every lane / unassigned / Unscheduled card `visitId`, `visitVersion`, `crew`, `started`, `movable`, `laneRole: "lead"`, `fieldpulse`, and adds `blocks` when it renders one day. The two new reads run after the existing five (spec §7.1); `queries.test.ts` keeps the visit feed at select index 4 (lead ruling 3).
+
+- [ ] **Step 0: Latency, before (spec §11 "not verified").** Before editing anything in this task (the tree is at the Task 6 commit): dev server running, `m2-walk.mts seed` a throwaway org, time `GET /api/admin/calendar?view=day&date=<day>` five times with its admin cookie (`curl -s -o /dev/null -w "%{time_total}\n"`), record the median, delete the org with `m2-walk.mts delete <org>`. No `git stash`: the tree is shared.
 
 - [ ] **Step 1: Write the failing tests** — `src/lib/admin/board-crew-queries.test.ts`:
 
@@ -5813,7 +6038,7 @@ with
 Run: `npx vitest run src/lib/admin/board-crew-queries.test.ts src/lib/admin/queries.test.ts`
 Expected: PASS (the existing `getSchedulingCalendar` cases still pass: the default mocks return an empty map and no shifts).
 
-- [ ] **Step 4: Latency check (spec §11 "not verified").** Dev server running; on a throwaway org from `m2-walk.mts seed`, time `GET /api/admin/calendar?view=day&date=<day>` five times before and after this task (`git stash` the two source files for "before"; restore). Record the medians in the task report. Delete the org.
+- [ ] **Step 4: Latency, after.** Same throwaway-org recipe as Step 0 on this task's code: five timed `GET /api/admin/calendar?view=day&date=<day>`; record the median beside Step 0's. Delete the org. (Never `git stash` in this tree: other agents share it.)
 
 - [ ] **Step 5: Gates and commit**
 
@@ -6038,6 +6263,12 @@ describe("mass reschedule routes", () => {
     }
     expect(withIdempotency).not.toHaveBeenCalled();
   });
+  it("commit: nothing to change (same day, same or no technician) → 400", async () => {
+    for (const b of [commitBody({ toDate: plus(1) }), commitBody({ toDate: plus(1), toTechnicianId: T.toUpperCase() })]) {
+      expect((await COMMIT(req("http://t/api/admin/dispatch/mass-reschedule", b, "k2"))).status).toBe(400);
+    }
+    expect(withIdempotency).not.toHaveBeenCalled();
+  });
   it("commit: keyed by (org, user, path, key); the audit id is derivedId(scope, 'audit')", async () => {
     const res = await COMMIT(req("http://t/api/admin/dispatch/mass-reschedule", commitBody(), "key-1"));
     expect(res.status).toBe(200);
@@ -6063,6 +6294,9 @@ const M2_FILES = [
   "src/app/api/admin/requests/[id]/move/route.ts", "src/app/api/admin/requests/[id]/unschedule/route.ts",
   "src/app/api/admin/requests/[id]/assign/route.ts", "src/app/api/admin/dispatch/mass-reschedule/route.ts",
   "src/app/api/admin/dispatch/mass-reschedule/preview/route.ts",
+  // Writers M2 modifies (regression cover, critic A m8).
+  "src/lib/admin/assignment-queries.ts", "src/lib/admin/scheduling-queries.ts", "src/lib/admin/queries.ts",
+  "src/lib/admin/appointment-queries.ts",
 ];
 
 describe("M2 makes no FieldPulse call", () => {
@@ -6240,6 +6474,7 @@ export async function POST(request: NextRequest) {
 import type { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
 import { commitMassReschedule, massCommitSchema, massDateInRange } from "@/lib/admin/mass-reschedule";
+import { massChanges } from "@/lib/admin/mass-reschedule-model";
 import { businessIsoDate } from "@/lib/admin/calendar-time";
 import { canonicalHash, parseIdempotencyKey, toResponse, withIdempotency } from "@/lib/http/idempotency";
 import { errorResponse, readJsonBody } from "@/lib/api-response";
@@ -6267,6 +6502,10 @@ export async function POST(request: NextRequest) {
     const parsed = raw.ok ? massCommitSchema.safeParse(raw.data) : null;
     const today = businessIsoDate(new Date());
     if (!parsed?.success || !massDateInRange(parsed.data.fromDate, today) || !massDateInRange(parsed.data.toDate, today)) {
+      return errorResponse("Couldn’t move the requests. Please try again.", "VALIDATION_ERROR", 400);
+    }
+    // Nothing to move (same day, no other technician): refused, never audited as a run of stale rows (critic A m3).
+    if (!massChanges({ ...parsed.data, toTechnicianId: parsed.data.toTechnicianId?.toLowerCase() ?? null, technicianId: parsed.data.technicianId.toLowerCase() })) {
       return errorResponse("Couldn’t move the requests. Please try again.", "VALIDATION_ERROR", 400);
     }
     const scope = { organizationId: session.organizationId, userId: session.userId, route: request.nextUrl.pathname, key };
@@ -6306,7 +6545,8 @@ try {
   const card = [...board.data.lanes.flatMap((l: { jobs: unknown[] }) => l.jobs)].find((j: { id: string }) => j.id === fx.requests.nineEleven) as { visitId: string; visitVersion: number; movable: string; crew: unknown[] };
   log("card", { movable: card.movable, crew: card.crew.length, blocks: board.data.blocks.length }); // {"movable":"yes","crew":1,"blocks":1}
   const move = (b: object) => fetch(`${BASE}/api/admin/requests/${fx.requests.nineEleven}/move`, { method: "POST", headers: admin, body: JSON.stringify(b) });
-  const b = { visitId: card.visitId, expectedVersion: card.visitVersion, day: fx.day, band: "afternoon", windowRule: "match", confirm: [] };
+  // Evening: Alex's afternoon holds Lee Afternoon (12–4) and Fran Pulse (1–3), an overlap → 409 (critic B B-1).
+  const b = { visitId: card.visitId, expectedVersion: card.visitVersion, day: fx.day, band: "evening", windowRule: "match", confirm: [] };
   const first = await move(b);
   const again = await move(b);
   log("move", [first.status, (await again.json()).error.code]); // [200,"STALE"]
@@ -6388,6 +6628,8 @@ describe("classifyMoveResponse", () => {
     expect(classifyMoveResponse(409, err("HAS_PROGRESS", details), names)).toEqual({ kind: "needs", code: "HAS_PROGRESS", details });
     expect(classifyMoveResponse(409, err("SCHEDULE_CONFLICT", { needs: ["conflict"], outsideAvailability: true }), names))
       .toEqual({ kind: "needs", code: "SCHEDULE_CONFLICT", details: { needs: ["conflict"], outsideAvailability: true } });
+    expect(classifyMoveResponse(409, err("HAS_PROGRESS", { needs: ["started"], started: [], othersStarted: true }), names))
+      .toMatchObject({ kind: "needs", details: { othersStarted: true } });
   });
   it("409 TIME_OFF → time_off; never `needs`", () => {
     const timeOff = [{ technicianId: "sam", startsAt: "2026-11-10T21:00:00.000Z", endsAt: "2026-11-11T01:00:00.000Z", kind: "time_off" }];
@@ -6576,6 +6818,7 @@ export function parseNeedsDetails(v: unknown): MoveNeedsDetails {
     ...(started ? { started } : {}),
     ...(conflicts ? { conflicts } : {}),
     ...(v.outsideAvailability === true ? { outsideAvailability: true } : {}),
+    ...(v.othersStarted === true ? { othersStarted: true } : {}),
   };
 }
 
@@ -7081,7 +7324,7 @@ import { CrewChips } from '@/components/admin/calendar/crew-chips';
 import { formatBusinessTimeRange, shortBusinessTime } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
-import { pillSize } from '@/lib/admin/board-move';
+import { chipLayout, pillSize, showCrewChips } from '@/lib/admin/board-move';
 import { FIELDPULSE_BOARD, STARTED_CUE_TITLE, firstName } from '@/lib/admin/dispatch-copy';
 import { cardAriaLabel, cardTitle } from '@/lib/admin/move-request-client';
 import type { DashboardRequest } from '@/lib/admin/types';
@@ -7131,6 +7374,8 @@ export function CalendarJobCard({
   const label = cardAriaLabel(job);
   const title = cardTitle(job);
   const fieldpulse = job.fieldpulse === true || job.syncedSource === 'fieldpulse';
+  // Narrow, short or Week cards show "people icon + count" in the TOP row (spec §7.2); full chips get their own row.
+  const countMode = showCrewChips(job.crew) && chipLayout(widthPx, heightPx, view) === 'count';
 
   return (
     <div className="relative h-full w-full">
@@ -7160,6 +7405,7 @@ export function CalendarJobCard({
               AH
             </span>
           )}
+          {countMode && <CrewChips crew={job.crew} widthPx={widthPx} heightPx={heightPx} view={view} />}
           {showStarted && (
             <span title={STARTED_CUE_TITLE} className="inline-flex shrink-0 text-info">
               <Activity className="size-3" aria-hidden />
@@ -7189,9 +7435,11 @@ export function CalendarJobCard({
             <span className="shrink-0 truncate text-[11px] font-medium leading-[14px] text-muted-foreground">{visitTag}</span>
           )
         )}
-        <span className="mt-0.5 flex shrink-0">
-          <CrewChips crew={job.crew} widthPx={widthPx} heightPx={heightPx} view={view} />
-        </span>
+        {!countMode && (
+          <span className="mt-0.5 flex shrink-0">
+            <CrewChips crew={job.crew} widthPx={widthPx} heightPx={heightPx} view={view} />
+          </span>
+        )}
         {!compact && (
           <>
             <span className="truncate text-[11px] leading-[14px] text-muted-foreground">
@@ -7456,7 +7704,6 @@ export function ConflictDialog({
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -7477,16 +7724,17 @@ export function TimeOffDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="sm:max-w-md" finalFocus={false}>
+      <DialogContent className="sm:max-w-md" finalFocus={false} aria-describedby="m2-time-off-lines">
         <DialogHeader>
           <DialogTitle>{TIME_OFF_TITLE}</DialogTitle>
-          <DialogDescription>{TIME_OFF_FOOTER}</DialogDescription>
         </DialogHeader>
-        <ul className="space-y-1 text-sm">
+        {/* Spec §7.5 order: title, one line per technician, then the footer sentence. */}
+        <ul id="m2-time-off-lines" className="space-y-1 text-sm">
           {lines.map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
+        <p className="text-sm text-muted-foreground">{TIME_OFF_FOOTER}</p>
         <DialogFooter>
           <Button size="sm" onClick={onClose}>OK</Button>
         </DialogFooter>
@@ -7496,7 +7744,7 @@ export function TimeOffDialog({
 }
 ```
 
-(Layout note: spec §7.5 orders title, the technician lines, then "Pick another time or technician."; Base UI wants a `DialogDescription`, so the footer sentence is the description and the lines sit in the body — visually the lines read first because the description renders small under the title. If the walk screenshot reads wrong, move `TIME_OFF_FOOTER` into a `<p>` after the list and use the first line as the description.)
+(The footer sentence follows the lines, as spec §7.5 orders them; `aria-describedby` points at the list.)
 
 `src/components/admin/calendar/window-prompt-dialog.tsx`:
 
@@ -7564,7 +7812,9 @@ export function WindowPromptDialog({
         className="sm:max-w-md"
         finalFocus={false}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !selectOpen) {
+          // Enter = Move, except while a Select is open or a button (Cancel, ×, Move) has focus:
+          // a focused button keeps its own action, so Enter on Cancel never sends (critic B M-3).
+          if (e.key === 'Enter' && !selectOpen && !(e.target as HTMLElement).closest('button:not([role="radio"])')) {
             e.preventDefault();
             submit();
           }
@@ -7843,6 +8093,63 @@ with
 
 (9b replaces this file whole; this bridge only keeps Task 9a's boundary green. `scheduling-calendar.tsx` keeps calling `CalendarJobCard` with `job`, `onSelect`, `compact` — all new props are optional.)
 
+- [ ] **Step 11b: Contrast (spec §9, `contrast.py`).** The new chip, pill and hatch styles are this task's. `contrast.py` takes hex pairs, and the tokens are oklch, so resolve them in the browser first. Dev server running; seed a throwaway org (`m2-walk.mts seed`), open `/admin/calendar` with its token, and run this throwaway `contrast-m2.mts` at the repo root (deleted after):
+
+```ts
+import { execFileSync } from "node:child_process";
+import { chromium } from "playwright";
+
+const env = { ...process.env, NODE_OPTIONS: "--conditions=react-server" };
+const fx = JSON.parse(execFileSync("npx", ["tsx", "scripts/agent/m2-walk.mts", "seed"], { encoding: "utf8", env }).trim().split("\n").pop()!);
+// [label, text classes, background classes]; the hatch backgrounds are the stripe colour over the canvas.
+const PAIRS: Array<[string, string, string]> = [
+  ["working chip", "text-primary-foreground", "bg-primary"],
+  ["open chip", "text-foreground", "bg-surface-raised"],
+  ["+N / count", "text-muted-foreground", "bg-surface-raised"],
+  ["pill sm/md", "text-muted-foreground", "bg-surface-raised"],
+  ["block label on 14% hatch", "text-muted-foreground", "[background:color-mix(in_oklch,var(--foreground)_14%,var(--canvas))]"],
+  ["band 8% hatch", "text-muted-foreground", "[background:color-mix(in_oklch,var(--foreground)_8%,var(--canvas))]"],
+  ["ended band", "text-muted-foreground", "bg-surface-sunken/70"],
+];
+const browser = await chromium.launch();
+try {
+  for (const scheme of ["light", "dark"] as const) {
+    const ctx = await browser.newContext({ colorScheme: scheme });
+    await ctx.addCookies([{ name: "hvac_admin_session", value: fx.tokens.admin, domain: "localhost", path: "/" }]);
+    const page = await ctx.newPage();
+    await page.goto("http://localhost:3000/admin/calendar", { waitUntil: "load" });
+    const hex = await page.evaluate((pairs) => {
+      // Any CSS colour → #rrggbb through a 1×1 canvas (handles oklch and color-mix).
+      const toHex = (css: string) => {
+        const c = document.createElement("canvas"); c.width = c.height = 1;
+        const g = c.getContext("2d")!; g.fillStyle = "#000"; g.fillStyle = css; g.fillRect(0, 0, 1, 1);
+        const [r, gg, b] = g.getImageData(0, 0, 1, 1).data;
+        return "#" + [r, gg, b].map((n) => n!.toString(16).padStart(2, "0")).join("");
+      };
+      return pairs.map(([label, fg, bg]) => {
+        const el = document.createElement("span");
+        el.className = `${fg} ${bg}`;
+        document.body.appendChild(el);
+        const cs = getComputedStyle(el);
+        const out = [label, toHex(cs.color), toHex(cs.backgroundColor)];
+        el.remove();
+        return out;
+      });
+    }, PAIRS);
+    for (const [label, fg, bg] of hex) {
+      const res = execFileSync("python3", [".claude/skills/replica-design/contrast.py", fg!, bg!], { encoding: "utf8" }).trim();
+      console.log(scheme, label, fg, bg, res);
+    }
+    await ctx.close();
+  }
+} finally {
+  await browser.close();
+  execFileSync("npx", ["tsx", "scripts/agent/m2-walk.mts", "delete", fx.org], { encoding: "utf8", env, stdio: "inherit" });
+}
+```
+
+Run `npx tsx contrast-m2.mts`. Expected: every pair passes AA (4.5:1 for the 9–11 px text; the hatch and ended-band rows read as text on that background). `contrast.py` exits 1 on a failing pair, which throws here: change the failing token pair in this task's components (e.g. `text-foreground` for `text-muted-foreground` on the 14% hatch) and re-run until clean. Record every ratio in the task report; delete the script. If a Tailwind arbitrary class above isn't in the compiled CSS (a background of `rgba(0, 0, 0, 0)` → `#000000`), set the background with an inline `style` in the evaluate instead.
+
 - [ ] **Step 12: Gates and commit**
 
 ```bash
@@ -7893,7 +8200,7 @@ with
 import { applyOptimisticUnschedule, UNASSIGNED_SCOPE } from "./calendar-optimistic";
 ```
 
-and delete the whole `describe("applyOptimisticReschedule", …)` block and the whole `describe("currentScopeOf", …)` block (the two blocks between the `board()` helper and `describe("applyOptimisticUnschedule", …)`; at `b9cfba1` lines 44–173). If `UNASSIGNED_SCOPE` is then unused in the test, add this case to the `applyOptimisticUnschedule` block so the constant stays pinned:
+and delete the whole `describe("applyOptimisticReschedule", …)` block and the whole `describe("currentScopeOf", …)` block (the two blocks between the `board()` helper and `describe("applyOptimisticUnschedule", …)`). If `UNASSIGNED_SCOPE` is then unused in the test, add this case to the `applyOptimisticUnschedule` block so the constant stays pinned:
 
 ```ts
   it("the unassigned lane id is the literal used by the board", () => {
@@ -7950,7 +8257,7 @@ Run `npx vitest run src/lib/admin/calendar-optimistic.test.ts` → PASS. (`npx t
 'use client';
 
 import { useDraggable, useDroppable } from '@dnd-kit/core';
-import { Inbox } from 'lucide-react';
+import { Inbox, Lock } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
@@ -8001,7 +8308,8 @@ function UnscheduledRow({
   readonly interactive: boolean;
   readonly onMove: (job: DashboardRequest) => void;
 }) {
-  const movable = job.movable !== 'no';
+  // One meaning everywhere: an absent `movable` is not movable (critic B M-7).
+  const movable = job.movable === 'yes';
   const data: DragJobData = {
     kind: 'job',
     requestId: job.id,
@@ -8024,6 +8332,9 @@ function UnscheduledRow({
         {...attributes}
         aria-roledescription={undefined}
         aria-describedby={undefined}
+        // The row opens the sheet even when it can't be dragged: dnd-kit's spread aria-disabled
+        // would announce it as unavailable (touch, FieldPulse). The drag is off via useDraggable's `disabled`.
+        aria-disabled={undefined}
         type="button"
         data-unscheduled-id={job.id}
         data-request-id={job.id}
@@ -8036,8 +8347,9 @@ function UnscheduledRow({
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-[13px] font-medium">{job.customerName ?? 'Unknown'}</span>
           {fieldpulse && (
-            <span title={FIELDPULSE_BOARD} className="flex shrink-0">
+            <span title={FIELDPULSE_BOARD} className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
               <SyncPill source="fieldpulse" size="sm" />
+              <Lock className="size-3" aria-hidden />
             </span>
           )}
           {job.isAfterHours && (
@@ -8839,9 +9151,11 @@ export function InteractiveSchedulingCalendar({
   async function handleConfirm(): Promise<void> {
     if (!confirm) return;
     const { pending, details } = confirm;
+    // Close first: send()'s focus runs on the next frame and must not land while the modal is still mounted
+    // (critic B minor 7). A new 409 with needs reopens the confirm through send().
+    setConfirm(null);
     const tokens = [...new Set<MoveConfirm>([...pending.body.confirm, ...details.needs])];
-    const kind = await send({ ...pending, body: { ...pending.body, confirm: tokens } });
-    if (kind !== 'needs') setConfirm(null);
+    await send({ ...pending, body: { ...pending.body, confirm: tokens } });
   }
 
   /** Move… (spec §7.5): the same flow as a drop. */
@@ -8942,6 +9256,7 @@ export function InteractiveSchedulingCalendar({
             native: !p.card.syncedSource && p.card.fieldpulse !== true,
             oldLeadId: p.currentLeadId,
             started: confirm.details.started ?? [],
+            othersStarted: confirm.details.othersStarted === true,
           }),
         };
       })()
@@ -9194,7 +9509,7 @@ Expected: tsc 0, eslint 0 errors, vitest at or above the Task 9a count minus the
 
 ```ts
 import { execFileSync } from "node:child_process";
-import { chromium, devices, type Page } from "playwright";
+import { chromium, devices, type Page, type Response } from "playwright";
 import { bandLocator, dragToBand, openBoard } from "./scripts/agent/m2-drag.mts";
 
 const env = { ...process.env, NODE_OPTIONS: "--conditions=react-server" };
@@ -9215,8 +9530,26 @@ const assert = (cond: boolean, what: string, detail?: unknown) => {
   console.log("ok", what);
 };
 const moveResponse = (page: Page) => page.waitForResponse((r) => r.url().includes("/move"), { timeout: 15_000 });
+/** Every move in this walk lands on a free band: a 409 fails loudly here, with its code, not as a state mismatch. */
+const landed = async (r: Response, what: string) => {
+  const body = r.status() === 200 ? null : await r.json().catch(() => null);
+  assert(r.status() === 200, `${what}: 200`, body?.error?.code ?? r.status());
+};
 const card = (page: Page, name: string) => page.locator(`[data-lane-role="lead"][aria-label^="${name} ·"]`);
+/** Counts /move requests sent while `fn` runs (read-only and refusal checks). */
+async function movesDuring(page: Page, fn: () => Promise<void>): Promise<number> {
+  let n = 0;
+  const on = (req: { url(): string }) => { if (req.url().includes("/move")) n += 1; };
+  page.on("request", on);
+  await fn();
+  await page.waitForTimeout(500);
+  page.off("request", on);
+  return n;
+}
 
+// Fixture (m2-walk.mts seed) on the walk day: Alex — Pat Nine 9–11, Robin Route 8–12 (en route),
+// Lee Afternoon 12–4, Fran Pulse 1–3 PM (FieldPulse); Sam — nothing, off 4–8 PM. Every move below
+// targets a band that is free for the technicians it checks (critic B B-1 / M-1).
 const browser = await chromium.launch();
 try {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -9225,23 +9558,30 @@ try {
   await openBoard(page, BASE, fx.day);
   await snap(page, "board");
 
-  // 1. 9–11 → Alex's own afternoon: prompt, default "Use the afternoon window" (same day and lead), Keep not offered.
-  await dragToBand(page, card(page, "Pat Nine"), bandLocator(page, fx.techs.alex, fx.day, "afternoon"));
-  const prompt = page.getByRole("dialog", { name: "Arrival window" });
+  // 1. 9–11 → Alex's own EVENING (his afternoon holds Lee and Fran): prompt, default "Use the evening window"
+  //    (same day and lead), Keep not offered. Enter on a focused Cancel closes and sends nothing (critic B M-3).
+  await dragToBand(page, card(page, "Pat Nine"), bandLocator(page, fx.techs.alex, fx.day, "evening"));
+  let prompt = page.getByRole("dialog", { name: "Arrival window" });
   await prompt.waitFor();
-  assert(await prompt.getByRole("radio", { name: /Use the afternoon window/ }).isChecked(), "prompt defaults to the afternoon window");
+  assert(await prompt.getByRole("radio", { name: /Use the evening window/ }).isChecked(), "prompt defaults to the evening window");
   assert((await prompt.getByRole("radio", { name: /^Keep/ }).count()) === 0, "Keep is not offered for the same day and lead");
   await snap(page, "prompt");
-  await prompt.getByRole("button", { name: "Cancel" }).click();
-  assert(state(fx.requests.nineEleven!).start !== fx.bands.afternoon.start, "Cancel sent nothing");
-  await dragToBand(page, card(page, "Pat Nine"), bandLocator(page, fx.techs.alex, fx.day, "afternoon"));
+  const sentOnEnter = await movesDuring(page, async () => {
+    await prompt.getByRole("button", { name: "Cancel" }).focus();
+    await page.keyboard.press("Enter");
+    await prompt.waitFor({ state: "hidden" });
+  });
+  assert(sentOnEnter === 0, "Enter on Cancel closes the prompt and sends nothing");
+  assert(state(fx.requests.nineEleven!).start !== fx.bands.evening.start, "nothing moved");
+  await dragToBand(page, card(page, "Pat Nine"), bandLocator(page, fx.techs.alex, fx.day, "evening"));
+  prompt = page.getByRole("dialog", { name: "Arrival window" });
   let wait = moveResponse(page);
-  await page.getByRole("dialog", { name: "Arrival window" }).getByRole("button", { name: "Move" }).click();
-  await wait;
-  assert(state(fx.requests.nineEleven!).start === fx.bands.afternoon.start, "moved to 12 PM–4 PM");
-  await snap(page, "moved-afternoon");
+  await prompt.getByRole("button", { name: "Move" }).click();
+  await landed(await wait, "prompt Move");
+  assert(state(fx.requests.nineEleven!).start === fx.bands.evening.start, "moved to 4 PM–8 PM");
+  await snap(page, "moved-evening");
 
-  // 2. The en-route morning request → Sam: "Move anyway?" → Cancel → again → Move anyway → banner.
+  // 2. The en-route morning request → Sam's morning (free): "Move anyway?" → Cancel → again → Move anyway → banner.
   await dragToBand(page, card(page, "Robin Route"), bandLocator(page, fx.techs.sam, fx.day, "morning"));
   let confirm = page.getByRole("dialog", { name: "Move anyway?" });
   await confirm.waitFor();
@@ -9251,32 +9591,36 @@ try {
   assert(state(fx.requests.enRoute!).assignedTo === fx.techs.alex, "Cancel kept Alex");
   await dragToBand(page, card(page, "Robin Route"), bandLocator(page, fx.techs.sam, fx.day, "morning"));
   confirm = page.getByRole("dialog", { name: "Move anyway?" });
+  await confirm.waitFor();
   wait = moveResponse(page);
   await confirm.getByRole("button", { name: "Move anyway" }).click();
-  await wait;
+  await landed(await wait, "Move anyway");
   const handed = state(fx.requests.enRoute!);
   assert(handed.assignedTo === fx.techs.sam && handed.status === "scheduled", "Move anyway handed over and reset to scheduled", handed);
   await page.getByRole("status").getByText("Sam is now the lead. Alex is off this visit.").waitFor();
   await snap(page, "move-anyway-banner");
 
-  // 3. Drag it back to Alex: an ordinary move, no confirm.
+  // 3. Drag it back to Alex's morning (Pat Nine is in his evening now): an ordinary move, no confirm.
   wait = moveResponse(page);
   await dragToBand(page, card(page, "Robin Route"), bandLocator(page, fx.techs.alex, fx.day, "morning"));
-  await wait;
+  await landed(await wait, "drag back");
   assert(state(fx.requests.enRoute!).assignedTo === fx.techs.alex, "dragged back without a confirm");
   assert((await page.getByRole("dialog", { name: "Move anyway?" }).count()) === 0, "no confirm on the way back");
 
-  // 4. The afternoon request → Sam's evening: Use the new window → Move → time-off dialog, nothing moved.
+  // 4. The afternoon request → Sam's evening: Use the new window → Move → time-off dialog, nothing sent.
   const beforeOff = state(fx.requests.afternoon!);
-  await dragToBand(page, card(page, "Lee Afternoon"), bandLocator(page, fx.techs.sam, fx.day, "evening"));
-  const p2 = page.getByRole("dialog", { name: "Arrival window" });
-  await p2.getByRole("radio", { name: /Use the evening window/ }).check();
-  await p2.getByRole("button", { name: "Move" }).click();
-  const off = page.getByRole("dialog", { name: "Can’t move this request" });
-  await off.waitFor();
-  assert((await off.textContent())?.includes("Sam is off 4 PM–8 PM on") === true, "time-off line names Sam");
-  await snap(page, "time-off");
-  await off.getByRole("button", { name: "OK" }).click();
+  const sentOnTimeOff = await movesDuring(page, async () => {
+    await dragToBand(page, card(page, "Lee Afternoon"), bandLocator(page, fx.techs.sam, fx.day, "evening"));
+    const p2 = page.getByRole("dialog", { name: "Arrival window" });
+    await p2.getByRole("radio", { name: /Use the evening window/ }).check();
+    await p2.getByRole("button", { name: "Move" }).click();
+    const off = page.getByRole("dialog", { name: "Can’t move this request" });
+    await off.waitFor();
+    assert((await off.textContent())?.includes("Sam is off 4 PM–8 PM on") === true, "time-off line names Sam");
+    await snap(page, "time-off");
+    await off.getByRole("button", { name: "OK" }).click();
+  });
+  assert(sentOnTimeOff === 0, "time off is checked before sending");
   assert(JSON.stringify(state(fx.requests.afternoon!)) === JSON.stringify(beforeOff), "nothing moved");
 
   // 5. The FieldPulse card: pill and lock, no grab cursor, no Move….
@@ -9286,60 +9630,91 @@ try {
   assert((await fp.evaluate((el) => getComputedStyle(el.parentElement!.parentElement!).cursor)) !== "grab", "no grab cursor");
   await snap(page, "fieldpulse-card");
 
-  // 6. Move… from the keyboard → dialog → move → focus returns to the card.
+  // 6. Move… from the keyboard: Pat Nine → Sam's morning (free since step 3) → focus returns to the card.
   await card(page, "Pat Nine").focus();
   await page.keyboard.press("Tab"); // card → its Move…
   assert(await page.getByRole("button", { name: /^Move Pat Nine ·/ }).evaluate((el) => el === document.activeElement), "Tab reaches Move…");
   await page.keyboard.press("Enter");
   const md = page.getByRole("dialog", { name: /^Move Pat Nine ·/ });
-  await md.getByRole("radio", { name: /^Evening/ }).check();
+  await md.locator("#move-tech").click();
+  await page.getByRole("option", { name: "Sam Lee" }).click();
+  await md.getByRole("radio", { name: /^Morning/ }).check();
   wait = moveResponse(page);
   await md.getByRole("button", { name: "Move" }).click();
-  await wait;
-  assert(state(fx.requests.nineEleven!).start === fx.bands.evening.start, "Move… moved it to the evening");
+  await landed(await wait, "Move… to Sam");
+  const six = state(fx.requests.nineEleven!);
+  assert(six.assignedTo === fx.techs.sam && six.start === fx.bands.morning.start, "Move… moved it to Sam's morning", six);
   await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label")?.startsWith("Pat Nine ·") === true, null, { timeout: 5_000 });
   console.log("ok focus returned to the card");
 
-  // 7. Week view, next day, same band → no prompt (covered keep).
+  // 7. Week view, next day, same band → no prompt (covered keep). The fixture never seeds a Saturday,
+  //    so the next day is always in the same Sunday-first week (critic B minor 9).
   await page.getByRole("tab", { name: "Week" }).click();
   const next = new Date(`${fx.day}T00:00:00.000Z`);
   next.setUTCDate(next.getUTCDate() + 1);
   const nextDay = next.toISOString().slice(0, 10);
   const weekBand = bandLocator(page, "unassigned", nextDay, "afternoon");
-  if ((await weekBand.count()) > 0) {
-    wait = moveResponse(page);
-    await dragToBand(page, card(page, "Lee Afternoon"), weekBand);
-    await wait;
-    assert((await page.getByRole("dialog", { name: "Arrival window" }).count()) === 0, "no prompt for a covered day change");
-    // Keep: same wall-clock afternoon one day later (fx.day is never a DST day in practice; if it is, compare hours instead).
-    const expected = new Date(Date.parse(fx.bands.afternoon.start) + 86_400_000).toISOString();
-    assert(state(fx.requests.afternoon!).start === expected, "kept the afternoon on the next day", state(fx.requests.afternoon!));
-  } else {
-    console.log("skip week step: the next day is in the following week");
-  }
+  await weekBand.waitFor({ timeout: 15_000 });
+  wait = moveResponse(page);
+  await dragToBand(page, card(page, "Lee Afternoon"), weekBand);
+  await landed(await wait, "week move");
+  assert((await page.getByRole("dialog", { name: "Arrival window" }).count()) === 0, "no prompt for a covered day change");
+  const expected = new Date(Date.parse(fx.bands.afternoon.start) + 86_400_000).toISOString();
+  assert(state(fx.requests.afternoon!).start === expected, "kept the afternoon on the next day", state(fx.requests.afternoon!));
   await snap(page, "week");
   await ctx.close();
 
-  // 8. Not interactive: 1023 px, then 390 px with touch.
-  for (const [opts, pick] of [
-    [{ viewport: { width: 1023, height: 800 } }, "Morning"],
-    [{ ...devices["iPhone 13"], viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }, "Afternoon"],
-  ] as const) {
+  // 8. Not interactive (spec §7.8). Pat Nine sits on Sam's morning after step 6.
+  //    1023 px: the notice; a pointer drag sends nothing (read-only); Move… → Afternoon (Sam 12–4 is free) → 200.
+  //    390 px, touch: the notice; no Move… on the FieldPulse card; Move… → Evening is refused locally (Sam is off
+  //    4–8 PM, nothing sent); then Morning → 200.
+  for (const width of [1023, 390] as const) {
+    const opts = width === 1023
+      ? { viewport: { width: 1023, height: 800 } }
+      : { ...devices["iPhone 13"], viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
     const c = await browser.newContext(opts);
     await c.addCookies([{ name: "hvac_admin_session", value: fx.tokens.admin, domain: "localhost", path: "/" }]);
     const p = await c.newPage();
     await openBoard(p, BASE, fx.day);
     await p.getByText("Dragging needs a computer. Use Move… on a request, or open it.").waitFor();
+    console.log("ok notice at", width);
     const mv = p.getByRole("button", { name: /^Move Pat Nine ·/ });
-    assert(await mv.isVisible(), `Move… visible at ${opts.viewport.width}`);
-    if (opts.viewport.width === 390) await mv.tap();
-    else await mv.click();
-    const d = p.getByRole("dialog", { name: /^Move Pat Nine ·/ });
-    await d.getByRole("radio", { name: new RegExp(`^${pick}`) }).check();
-    const w = p.waitForResponse((r) => r.url().includes("/move"), { timeout: 15_000 });
-    await d.getByRole("button", { name: "Move" }).click();
-    await w;
-    await p.screenshot({ path: `${OUT}/m2-9b-${String(++shot).padStart(2, "0")}-narrow-${opts.viewport.width}.png` });
+    assert(await mv.isVisible(), `Move… visible at ${width}`);
+    const openMove = async () => {
+      if (width === 390) await mv.tap();
+      else await mv.click();
+      return p.getByRole("dialog", { name: /^Move Pat Nine ·/ });
+    };
+    if (width === 1023) {
+      const dragged = await movesDuring(p, async () => {
+        await dragToBand(p, card(p, "Pat Nine"), bandLocator(p, fx.techs.sam, fx.day, "afternoon")).catch(() => undefined);
+      });
+      assert(dragged === 0 && state(fx.requests.nineEleven!).start === fx.bands.morning.start, "1023: a drag is read-only");
+      const d = await openMove();
+      await d.getByRole("radio", { name: /^Afternoon/ }).check();
+      const w = moveResponse(p);
+      await d.getByRole("button", { name: "Move" }).click();
+      await landed(await w, "1023 Move…");
+      assert(state(fx.requests.nineEleven!).start === fx.bands.afternoon.start, "1023: moved to the afternoon");
+    } else {
+      assert((await p.getByRole("button", { name: /^Move Fran Pulse ·/ }).count()) === 0, "390: no Move… on the FieldPulse card");
+      const refused = await movesDuring(p, async () => {
+        const d = await openMove();
+        await d.getByRole("radio", { name: /^Evening/ }).check();
+        await d.getByRole("button", { name: "Move" }).click();
+        const off = p.getByRole("dialog", { name: "Can’t move this request" });
+        await off.waitFor();
+        await off.getByRole("button", { name: "OK" }).click();
+      });
+      assert(refused === 0 && state(fx.requests.nineEleven!).start === fx.bands.afternoon.start, "390: time off refused locally, nothing sent");
+      const d = await openMove();
+      await d.getByRole("radio", { name: /^Morning/ }).check();
+      const w = moveResponse(p);
+      await d.getByRole("button", { name: "Move" }).click();
+      await landed(await w, "390 Move…");
+      assert(state(fx.requests.nineEleven!).start === fx.bands.morning.start, "390: moved back to the morning");
+    }
+    await p.screenshot({ path: `${OUT}/m2-9b-${String(++shot).padStart(2, "0")}-narrow-${width}.png` });
     await c.close();
   }
 } finally {
@@ -9349,7 +9724,7 @@ try {
 ```
 
 Run: `WALK_OUT=<session scratchpad> npx tsx walk-m2-9b.mts`
-Expected: every `ok` line, then `{"deleted":"<org>"}`. Look at every screenshot (prompt copy and defaults, the confirm's three lines, the banner bottom-right, the time-off dialog, the FieldPulse pill + lock, the 1023 and 390 notices; the banner sits top-centre at 390). If a selector doesn't match the real markup (e.g. Base UI renders the radio's accessible name differently), fix the walk, not the copy. Then delete the screenshots.
+Expected: every `ok` line, then `{"deleted":"<org>"}`. Look at every screenshot (prompt copy and defaults, the confirm's three lines, the banner bottom-right, the time-off dialog, the FieldPulse pill + lock, the 1023 and 390 notices; the banner sits top-centre at 390). If a selector doesn't match the real markup (e.g. Base UI renders the radio's accessible name differently), fix the walk, not the copy; never loosen a `landed` (200) or a state assertion. Then delete the screenshots.
 
 - [ ] **Step 8: Delete the walk, commit**
 
@@ -9383,7 +9758,7 @@ EOF
 - Temporary (never committed): `walk-m2-10.mts` at the repo root
 
 **Interfaces:**
-- Consumes: Task 1 `windowHasEndedAt`; Task 2 `massDefaultDay`, `massChanges`, `bandEnded`, `firstName`, `dayLabel`, `rangeLabel`, `massReasonLabel`, `massResultHeadline`, `massMoveButton`, `massDialogTitle`, `MASS_COPY`, `FIELDPULSE_SHEET_TECH`, `FIELDPULSE_SHEET_CREW`, `FIELDPULSE_SHEET_STARTED`, `SHEET_STARTED_NATIVE`; board types `MassCandidate`, `MassResult`, `MassPreSkipReason`; Task 4 `AppointmentAssignmentRecord.started` / `.hasProgress` (from `GET …/appointments`), the assignments routes' `NO_LEAD` / `VISIT_FULL`; Task 3 assign codes `MANAGED_EXTERNALLY`, `TECHNICIAN_DONE`, `HAS_PROGRESS`; Task 6 types `MassQuery`, `MassCommitBody` (type-only import from `@/lib/admin/mass-reschedule`); Task 8 routes `POST /api/admin/dispatch/mass-reschedule/preview` → `{ candidates }`, `POST /api/admin/dispatch/mass-reschedule` (`Idempotency-Key`) → `MassResult`; Task 9b's board prop `laneHeaderExtra?: (lane: CalendarTechnicianLane) => ReactNode`, the page's `refetch`, `todayBusiness()`, `calendar` and the `MoveBanner` block 9b added. Existing: `appointmentPatchSchema` body (`version`, `arrivalWindowStart`, `arrivalWindowEnd`, `technicianIds` lead first, `specialInstructions`), `selectLabel`, `WINDOW_LABELS` (`create-request.ts`), `arrivalWindowUtcForBusinessDate`, `businessIsoDate`, `windowRowOfInstant`.
+- Consumes: Task 1 `windowHasEndedAt`; Task 2 `massDefaultDay`, `massChanges`, `bandEnded`, `firstName`, `dayLabel`, `rangeLabel`, `massReasonLabel`, `massResultHeadline`, `massMoveButton`, `massDialogTitle`, `MASS_COPY`, `FIELDPULSE_SHEET_TECH`, `FIELDPULSE_SHEET_CREW`, `FIELDPULSE_SHEET_STARTED`, `SHEET_STARTED_NATIVE`; board types `MassCandidate`, `MassResult`, `MassPreSkipReason`; Task 4 `AppointmentAssignmentRecord.started` / `.hasProgress` (from `GET …/appointments`), the assignments routes' `NO_LEAD` / `VISIT_FULL`; Task 3 assign codes `MANAGED_EXTERNALLY`, `TECHNICIAN_DONE`, `HAS_PROGRESS`; Task 6 types `MassQuery`, `MassCommitBody` (type-only import from `@/lib/admin/mass-reschedule`); Task 8 routes `POST /api/admin/dispatch/mass-reschedule/preview` → `{ candidates }`, `POST /api/admin/dispatch/mass-reschedule` (`Idempotency-Key`) → `MassResult`; Task 9b's board prop `laneHeaderExtra?: (lane: CalendarTechnicianLane) => ReactNode`, the page's `refetch`, `todayBusiness()`, `calendar` and the `MoveBanner` block 9b added. Existing: `appointmentPatchSchema` body (`version`, `arrivalWindowStart`, `arrivalWindowEnd`, `technicianIds` lead first, `specialInstructions`), `selectLabel`, `windowOptionLabel` (Task 9a, `move-request-client.ts`), `arrivalWindowUtcForBusinessDate`, `businessIsoDate`, `windowRowOfInstant`.
 - Produces:
   - `sheet-visit-copy.ts`: `CREW_CAP_LINE`, `CREW_NO_LEAD_LINE`, `CREW_HCP_LINE`, `CREW_GENERIC`, `CREW_ADD_LABEL`, `VISIT_ERROR_COPY`, `VISIT_GENERIC_ERROR`, `visitErrorCopy(code, technicianNames)`, `sheetCrewError(code, name, kind)`, `sheetAssignError(code, name, fieldpulse)`, `RequestKind`, `requestKindOf(syncedSource)`, `CrewControlModel`, `crewControlModel(visit, technicians, kind)`, `CHANGE_TIME_WINDOWS`, `changeTimeDefaults(visit, today)`, `changeTimeBlocked(visit)`, `changeTimeBody(visit, day, window)`.
   - `mass-dialog-state.ts`: `MassForm`, `massInitialForm`, `massPickTechnician`, `massPickDay`, `massQuery`, `MassRow`, `massRows`, `massMoveCount`, `massHasConflict`, `massCanCommit`, `massCommitBody`, `massResultLines`, `massDateBounds`, `nextCommitKey`.
@@ -10445,7 +10820,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { selectLabel } from '@/lib/admin/select-label';
-import { WINDOW_LABELS } from '@/lib/admin/create-request';
+import { windowOptionLabel } from '@/lib/admin/move-request-client';
 import { businessIsoDate } from '@/lib/admin/calendar-time';
 import { bandEnded } from '@/lib/admin/board-move';
 import {
@@ -10453,8 +10828,6 @@ import {
 } from '@/lib/admin/sheet-visit-copy';
 import type { ArrivalWindow } from '@/lib/admin/arrival-window';
 import type { AppointmentRecord } from '@/lib/admin/appointment-types';
-
-const LABEL: Record<ArrivalWindow, string> = { ...WINDOW_LABELS, anytime: 'Anytime (8am–8pm)' };
 
 /** "Change visit #<n>" (spec §7.7): PATCH …/appointments/[aid] through updateAppointment, unchanged. */
 export function VisitChangeTimeDialog({
@@ -10475,7 +10848,8 @@ export function VisitChangeTimeDialog({
   const body = changeTimeBody(visit, form.day, form.window, now);
   const options = CHANGE_TIME_WINDOWS.map((w) => ({
     value: w,
-    label: bandEnded(form.day, w, now) ? `${LABEL[w]} · Already ended` : LABEL[w],
+    // Canon time format, as the board's dialogs: "Morning · 8 AM–12 PM" (critic B minor 8).
+    label: bandEnded(form.day, w, now) ? `${windowOptionLabel(form.day, w)} · Already ended` : windowOptionLabel(form.day, w),
   }));
   const names = visit.assignments.filter((a) => a.status !== 'cancelled').map((a) => a.technicianName);
 
@@ -10832,6 +11206,9 @@ try {
   await page.screenshot({ path: `${OUT}/walk10-1-sheet-crew.png` });
   await page.keyboard.press("Escape");
   await helperCopy.waitFor({ timeout: 20_000 });
+  // Done-when (spec §9 (h)): two chips on the lead card, not only a screenshot.
+  const chips = await leadCard.locator('[role="listitem"]').count();
+  if (chips !== 2) fail(`expected two crew chips, got ${chips}`);
   await page.screenshot({ path: `${OUT}/walk10-2-both-lanes.png` });
 
   // 2. Remove Sam → the copy is gone.
@@ -10855,6 +11232,7 @@ try {
   await dialog.getByText(/^Moved 2 of Alex’s requests to Sam\.$/).waitFor({ timeout: 20_000 });
   await page.screenshot({ path: `${OUT}/walk10-4-result.png` });
   if (state(fx.requests.afternoon!).assignedTo !== fx.techs.sam) fail("afternoon request did not move to Sam");
+  if (state(fx.requests.nineEleven!).assignedTo !== fx.techs.sam) fail("the 9–11 request did not move to Sam");
   if (state(fx.requests.enRoute!).assignedTo !== fx.techs.alex) fail("the started request moved");
   if (state(fx.requests.fieldpulse!).assignedTo !== fx.techs.alex) fail("the FieldPulse request moved");
   console.log("walk 10 ok");
@@ -10895,7 +11273,7 @@ EOF
 - Modify: `vitest.config.ts` (append one line to `INTEGRATION_SUITES`; re-read the file right before the edit)
 
 **Interfaces:**
-- Consumes (exact, from the contract and Tasks 1–8): `moveVisit(org, actorUserId, requestId, body, opts?: { now?, hooks?: { afterPreRead? } })` → `MoveResult`; `unscheduleRequest(org, rid, { visitId, expectedVersion })`; `addVisitTechnician` / `removeVisitTechnician` (`@/lib/admin/assignment-queries`); `updateAppointment` (`@/lib/admin/appointment-queries`); `assignTechnician`, `reassignTechnician`, `scheduleRequest`, `getSchedulingCalendar` (`@/lib/admin/queries`); `visitOneRefusalResponse(reason, opts)` (`@/lib/admin/visit-one-guard`); `previewMassReschedule`, `commitMassReschedule` (`@/lib/admin/mass-reschedule`); `registerRequestPushes(org, ids, schedule)` (`@/lib/admin/move-pushes`); `withIdempotency`, `canonicalHash` (`@/lib/http/idempotency`); `findReadableJob` (`@/lib/tech/ownership`); `saveFormDraft` (`@/lib/tech/form-writes`), `createForm` (`@/lib/admin/form-queries`); pure `laneCards` (`@/lib/admin/board-move`), `SHEET_STARTED_NATIVE`, `FIELDPULSE_SHEET_STARTED` (`@/lib/admin/dispatch-copy`); `MoveBody`, `MassResult` (`@/lib/admin/board-types`).
+- Consumes (exact, from the contract and Tasks 1–8): `moveVisit(org, actorUserId, requestId, body, opts?: { now?, hooks?: { afterPreRead? } })` → `MoveResult`; `unscheduleRequest(org, rid, { visitId, expectedVersion })`; `addVisitTechnician` / `removeVisitTechnician` (`@/lib/admin/assignment-queries`); `updateAppointment` (`@/lib/admin/appointment-queries`); `assignTechnician`, `reassignTechnician`, `scheduleRequest`, `getSchedulingCalendar` (`@/lib/admin/queries`); the assign and request PATCH route handlers (driven with a stubbed session); `previewMassReschedule`, `commitMassReschedule` (`@/lib/admin/mass-reschedule`); `registerRequestPushes(org, ids, schedule)` (`@/lib/admin/move-pushes`); `withIdempotency`, `canonicalHash` (`@/lib/http/idempotency`); `findReadableJob` (`@/lib/tech/ownership`); `saveFormDraft` (`@/lib/tech/form-writes`), `createForm` (`@/lib/admin/form-queries`); pure `laneCards` (`@/lib/admin/board-move`), `SHEET_STARTED_NATIVE`, `FIELDPULSE_SHEET_STARTED` (`@/lib/admin/dispatch-copy`); `MoveBody`, `MassResult` (`@/lib/admin/board-types`).
 - Produces: the suite. No production code changes.
 
 Design notes (binding for this file):
@@ -10912,7 +11290,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { arrivalWindowUtcForBusinessDate, businessIsoDate, businessWallClockToUtc } from "@/lib/admin/calendar-time";
 import { laneCards } from "@/lib/admin/board-move";
-import { FIELDPULSE_SHEET_STARTED, SHEET_STARTED_NATIVE } from "@/lib/admin/dispatch-copy";
+import { FIELDPULSE_SHEET_STARTED, FIELDPULSE_SHEET_TECH, SHEET_STARTED_NATIVE } from "@/lib/admin/dispatch-copy";
 import type { MassResult, MoveBody } from "@/lib/admin/board-types";
 
 vi.mock("server-only", () => ({}));
@@ -10961,6 +11339,8 @@ vi.mock("@/lib/integrations/google-calendar/sync", async (orig) => ({
     h.cal.push([org, rid]);
   },
 }));
+// The sheet routes are driven for real in (e)/(f) (critic A m6): only the session is stubbed.
+vi.mock("@/lib/auth/session", () => ({ getAdminSession: vi.fn() }));
 vi.mock("@/lib/integrations/fieldpulse/client", async (orig) => h.fpSpies("client", await orig()));
 vi.mock("@/lib/integrations/fieldpulse/config", async (orig) => h.fpSpies("config", await orig()));
 vi.mock("@/lib/integrations/fieldpulse/job-sync", async (orig) => h.fpSpies("job-sync", await orig()));
@@ -10987,7 +11367,6 @@ let sq: typeof import("@/lib/admin/scheduling-queries");
 let aq: typeof import("@/lib/admin/assignment-queries");
 let apq: typeof import("@/lib/admin/appointment-queries");
 let q: typeof import("@/lib/admin/queries");
-let guard: typeof import("@/lib/admin/visit-one-guard");
 let mass: typeof import("@/lib/admin/mass-reschedule");
 let pushesMod: typeof import("@/lib/admin/move-pushes");
 let idem: typeof import("@/lib/http/idempotency");
@@ -11144,6 +11523,27 @@ async function timeOff(tech: string, start: string, end: string, kind = "time_of
     VALUES (${org}, ${tech}, ${kind}::shift_kind, NULL, ${start}::timestamptz, ${end}::timestamptz, ${removes})`);
 }
 
+/** Drive a real sheet route as the org's admin (the session is the only stub). */
+async function asAdmin(): Promise<void> {
+  const { getAdminSession } = await import("@/lib/auth/session");
+  vi.mocked(getAdminSession).mockResolvedValue({ userId: admin, organizationId: org, role: "super_admin", email: "probe@throwaway.example", name: "Probe Owner" } as never);
+}
+async function sheetReassign(rid: string, technicianId: string): Promise<{ status: number; code: string; message: string }> {
+  await asAdmin();
+  const { PATCH } = await import("@/app/api/admin/requests/[id]/assign/route");
+  const res = await PATCH(new Request("http://t/api", { method: "PATCH", body: JSON.stringify({ technicianId }) }) as never, { params: Promise.resolve({ id: rid }) } as never);
+  const json = await res.json();
+  return { status: res.status, code: json.error?.code, message: json.error?.message };
+}
+async function sheetSchedule(rid: string, day: string, window: "morning" | "afternoon" | "evening"): Promise<{ status: number; code: string; message: string }> {
+  await asAdmin();
+  const { PATCH } = await import("@/app/api/admin/requests/[id]/route");
+  const body = { scheduledDate: `${day}T00:00:00.000Z`, arrivalWindow: window };
+  const res = await PATCH(new Request("http://t/api", { method: "PATCH", body: JSON.stringify(body) }) as never, { params: Promise.resolve({ id: rid }) } as never);
+  const json = await res.json();
+  return { status: res.status, code: json.error?.code, message: json.error?.message };
+}
+
 /** POST …/move as the route calls it: the card's visit #1 id and version, plus the drop. */
 async function move(
   rid: string,
@@ -11224,7 +11624,6 @@ beforeAll(async () => {
   aq = await import("@/lib/admin/assignment-queries");
   apq = await import("@/lib/admin/appointment-queries");
   q = await import("@/lib/admin/queries");
-  guard = await import("@/lib/admin/visit-one-guard");
   mass = await import("@/lib/admin/mass-reschedule");
   pushesMod = await import("@/lib/admin/move-pushes");
   idem = await import("@/lib/http/idempotency");
@@ -11422,9 +11821,12 @@ describe("field dispatch (dev DB)", () => {
     expect(codeOf(await move(r1, { day: d, windowRule: "keep", technicianId: sam }))).toBe("HAS_PROGRESS");
     const sheet = await q.reassignTechnician(org, r1, sam, admin);
     expect(sheet).toMatchObject({ ok: false, reason: "has_progress" });
-    const res = guard.visitOneRefusalResponse("has_progress", { surface: "sheet" });
-    expect(res.status).toBe(409);
-    expect((await res.json()).error.message).toBe(SHEET_STARTED_NATIVE);
+    // The sheet's own route answers with the Move… copy.
+    expect(await sheetReassign(r1, sam)).toEqual({ status: 409, code: "HAS_PROGRESS", message: SHEET_STARTED_NATIVE });
+    // Spec §9 (e): the schedule edit on THIS request behaves as today (timestamp rule): a status-only
+    // in_progress row has no stamp, so the edit is still allowed while move and reassign refuse.
+    const wE = arrivalWindowUtcForBusinessDate(d, "afternoon");
+    expect(await q.scheduleRequest(org, r1, wE.start, wE)).toMatchObject({ ok: true });
 
     // A turned back (timestamp, status scheduled): not started, so the sheet may swap; the schedule edit refuses (timestamp rule, unchanged).
     const r2 = await newJob({ day: d, start: at(d, 13), end: at(d, 15) });
@@ -11458,8 +11860,14 @@ describe("field dispatch (dev DB)", () => {
     // A FieldPulse in_progress row with no timestamp: sheet refusals name FieldPulse.
     await run(sql`UPDATE service_requests SET status = 'in_progress'::request_status WHERE id = ${rid} AND organization_id = ${org}`);
     expect(await q.reassignTechnician(org, rid, sam, admin)).toMatchObject({ ok: false, reason: "managed_externally" });
-    const res = guard.visitOneRefusalResponse("has_progress", { fieldpulse: true, surface: "sheet" });
-    expect((await res.json()).error.message).toBe(FIELDPULSE_SHEET_STARTED);
+    // Through the real routes (critic A m6): the reassign names FieldPulse; a stamped FieldPulse visit makes the
+    // schedule edit (timestamp rule, writer unchanged) refuse, and its copy names FieldPulse too. Nothing is pushed:
+    // the refusal returns before the route's after().
+    expect(await sheetReassign(rid, sam)).toEqual({ status: 409, code: "MANAGED_EXTERNALLY", message: FIELDPULSE_SHEET_TECH });
+    await run(sql`UPDATE appointment_assignments SET started_at = now()
+      WHERE appointment_id = ${before.v!.id} AND technician_id = ${alex} AND organization_id = ${org}`);
+    expect(await sheetSchedule(rid, d, "evening")).toEqual({ status: 409, code: "HAS_PROGRESS", message: FIELDPULSE_SHEET_STARTED });
+    expect(h.fp).toEqual([]);
 
     const card = (await board(d)).lanes.flatMap((l) => l.jobs).find((j) => j.id === rid);
     expect(card).toMatchObject({ movable: "no", fieldpulse: true });
@@ -11492,10 +11900,10 @@ describe("field dispatch (dev DB)", () => {
   it("(g) races: one version, two moves → one STALE; a lead tap → STALE; a helper tap → HAS_PROGRESS; a helper add → STALE", async () => {
     const d = nextDay();
     const r1 = await newJob({ day: d });
-    const both = await Promise.all([
-      move(r1, { day: d, band: "afternoon", windowRule: "match" }),
-      move(r1, { day: d, band: "evening", windowRule: "match" }),
-    ]);
+    // One read of the card, two sends of it (critic A m4): both carry the same visit and version.
+    const v0 = (await v1(r1))!;
+    const from = (b: "afternoon" | "evening"): MoveBody => ({ visitId: v0.id, expectedVersion: v0.version, day: d, band: b, windowRule: "match", confirm: [] });
+    const both = await Promise.all([mv.moveVisit(org, admin, r1, from("afternoon")), mv.moveVisit(org, admin, r1, from("evening"))]);
     expect(both.map(codeOf).sort()).toEqual(["STALE", "ok"]);
 
     const stale = async (rid: string, between: () => Promise<void>, over: Partial<MoveBody> = {}) => {
@@ -11752,6 +12160,40 @@ describe("field dispatch (dev DB)", () => {
       h.hcpConfigured = false;
     }
   }, 180_000);
+
+  it("(m') mass, the commit reclassifies: shared-band visits both move; started after the preview → started; moved away → stale", async () => {
+    const d = nextDay();
+    const d2 = nextDay();
+    const a1 = await newJob({ day: d, start: at(d, 8), end: at(d, 12) });
+    const a2 = await newJob({ day: d, start: at(d, 8), end: at(d, 12) }); // the same band as a1
+    const s1 = await newJob({ day: d, start: at(d, 13), end: at(d, 14) });
+    const gone = await newJob({ day: d, start: at(d, 15), end: at(d, 16) });
+    const candidates = await mass.previewMassReschedule(org, { technicianId: alex, fromDate: d, toDate: d2 });
+    const byReq = new Map(candidates.map((c) => [c.requestId, c]));
+    for (const rid of [a1, a2, s1, gone]) expect(byReq.get(rid)).toMatchObject({ outcome: "moves", conflict: false });
+
+    // Between the preview and the commit: s1's lead taps en route; `gone` is moved to a far day by someone else.
+    await tap(s1, alex, "en_route");
+    expect(codeOf(await move(gone, { day: addDays(d, 60), band: "morning", windowRule: "keep" }))).toBe("ok");
+
+    const body = {
+      technicianId: alex, fromDate: d, toDate: d2,
+      visits: candidates.map((c) => ({ visitId: c.visitId, expectedVersion: c.expectedVersion })),
+      preSkipped: [], confirmConflict: false,
+    };
+    const scope = { organizationId: org, userId: admin, route: "/api/admin/dispatch/mass-reschedule", key: randomUUID() };
+    const out = await idem.withIdempotency(scope, idem.canonicalHash(body), (k) => mass.commitMassReschedule(org, admin, body, k.id("audit"), () => {}));
+    expect(out.status).toBe(200); // a changed visit is never a 400 for the whole commit
+    if (!out.envelope.success) throw new Error("commit failed");
+    const result = out.envelope.data as unknown as MassResult;
+    expect(result.moved.map((m) => m.requestId).sort()).toEqual([a1, a2].sort());
+    expect(result.skipped).toContainEqual({ visitId: byReq.get(s1)!.visitId, reason: "started" });
+    expect(result.skipped).toContainEqual({ visitId: byReq.get(gone)!.visitId, reason: "stale" });
+    expect(await reqOf(a1)).toMatchObject({ start: at(d2, 8), end: at(d2, 12) });
+    expect(await reqOf(a2)).toMatchObject({ start: at(d2, 8), end: at(d2, 12) });
+    expect(await reqOf(s1)).toMatchObject({ start: at(d, 13) }); // not moved
+    expect((await rowOf((await v1(s1))!.id, alex))?.status).toBe("en_route"); // never confirmed in bulk
+  }, 120_000);
 
   it("(n) a visit #1 holding a form submission survives a drop on Unscheduled", async () => {
     const d = nextDay();
@@ -12370,7 +12812,9 @@ If `drizzle-kit generate` wrote a file, M2 changed the schema by mistake: stop, 
 
 **4. Review Focus:** the five lines at the top each have a test in the owning task (Tasks 1, 3, 5, 6, 8).
 
-**Compilation and test run (scratch worktree of `b9cfba1`, removed afterwards):** Tasks 1–10's blocks were applied in order by script; `npx tsc --noEmit` → 0; `npx eslint` on every created or changed source → 0 errors (warnings: only the repo's existing `set-state-in-effect` ones); `npx vitest run` → **549 files, 7 008 passed, 1 skipped** (baseline 533 / 6 760 / 1; two reschedule test files deleted in Task 8). Fixes the pass forced, already folded into the tasks above: `[...readonly].sort()` in two tests; a non-null assertion in one; the shared move SQL constants became builder functions (`fieldpulseFreeSql()`, `resetFromSql()`) because `tests/e2e/smoke.test.ts` mocks `drizzle-orm` without `sql.raw` and imports the guard module at load; the PATCH route test needed an `isFieldpulseMapped` mock; the lock-first assign/reassign test now expects the revive statement; two unused imports dropped; the integration helper's `changes` type narrowed to `true | null`. Not run: the integration suite against the dev DB, the drag spike, the walks and the probes.
+**Compilation and test run (v2; one scratch worktree of `b9cfba1`, removed afterwards):** every code block of Tasks 0–11 was re-applied in order by script (the Task 11 suite and Task 0's `.mts` scripts included; `tsconfig.json` covers `**/*.mts`); `npx tsc --noEmit` → 0; `npx eslint` → 0 errors (warnings: the repo's existing `set-state-in-effect` ones, `invoice-queries.ts`'s existing unused `count`, and `UNASSIGNED_SCOPE` in `calendar-optimistic.test.ts`, which Task 9b Step 1 already tells the implementer to pin with one case); `npx vitest run` → **549 unit files, 7 021 passed** (the integration suite is excluded by Task 11's `vitest.config.ts` line, which the scratch run didn't add, so it was type-checked only). v1's compile-pass fixes stay folded in. Not run: the integration suite against the dev DB, the drag spike, the walks, the contrast script and the probes (they need a dev server or the DB).
+
+**Round 1 (v1 → v2):** critic A 0 blocker / 3 major / 9 minor; critic B 2 blocker / 7 major / 11 minor. Every finding was applied (lead rulings 1–8); none refuted. Spec §9 gained one line naming the integration file (the only spec edit).
 
 **Spec findings (unbuildable as written, or contradictory), with the plan's choice:**
 - `listShiftsInRange` (§7.1) does not exist → Task 6 creates it (lead ruling 2).

@@ -552,6 +552,7 @@ mass `NOT EXISTS` predicate and the SQL-computed audit details.
 foreign visit id refused; `/reschedule` → 404; tech cookie → 401; no M2 route imports a FieldPulse
 client or push function.
 
+_Plan note (2026-11-08): the suite is built as `tests/integration/field-dispatch.test.ts` (owner's instruction); the cases below are unchanged._
 **Integration (`tests/integration/dispatch-board.test.ts`, `VITEST_INTEGRATION=1`, dev DB, throwaway orgs
 by SQL via `createOrgCore`, never the default org; pushes mocked):**
 (a) window: 9–11 on Alex → Sam's morning → 9–11; afternoon match → 12–4; pick; keep to another day; match
