@@ -28,7 +28,9 @@ const [u] = await sql`
   SELECT id, email, name, role, organization_id
   FROM users
   WHERE role = 'technician' AND is_active
+    AND lower(email) NOT LIKE '%@demo-hvac.com'
     AND (${orgId}::uuid IS NULL OR organization_id = ${orgId}::uuid)
+  ORDER BY created_at, id
   LIMIT 1`;
 if (!u) {
   console.error(

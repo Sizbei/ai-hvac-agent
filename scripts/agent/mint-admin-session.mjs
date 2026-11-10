@@ -22,11 +22,21 @@ const sql = neon(process.env.DATABASE_URL);
 // Optional: scope the pick to one tenant (e.g. the fictional demo org) instead
 // of "whichever super_admin comes first". Unset = unchanged behavior.
 const orgId = process.env.MINT_ORG_ID || null;
+// Optional: pick this exact active admin-tier user. Demo users are always
+// skipped (sessions for retired demo emails are refused).
+const email = process.env.MINT_EMAIL || null;
 const [u] = await sql`
   SELECT id, email, name, role, organization_id
   FROM users
-  WHERE role = 'super_admin' AND is_active
+  WHERE is_active
+    AND (
+      (${email}::text IS NOT NULL AND lower(email) = lower(${email}::text)
+        AND role IN ('super_admin', 'admin'))
+      OR (${email}::text IS NULL AND role = 'super_admin')
+    )
+    AND lower(email) NOT LIKE '%@demo-hvac.com'
     AND (${orgId}::uuid IS NULL OR organization_id = ${orgId}::uuid)
+  ORDER BY created_at, id
   LIMIT 1`;
 if (!u) {
   console.error("no active super_admin in the dev DB");

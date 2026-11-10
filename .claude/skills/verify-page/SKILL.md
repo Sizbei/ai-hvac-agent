@@ -20,4 +20,4 @@ Run these in order for the page under change (route like `/admin/map`):
    the same commit, then `node scripts/agent/verify-skills.mjs` (0 missing).
 4. **Post-deploy:** `vercel deploy --prod --yes` then
    `bash scripts/agent/prod-smoke.sh`; for visual pages, screenshot prod via
-   the demo login (admin@demo-hvac.com / admin123) and look at it.
+   View as (platform owner) — see docs/spears-handover.md — and look at it.

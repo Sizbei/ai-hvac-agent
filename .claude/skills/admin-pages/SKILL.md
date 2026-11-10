@@ -28,7 +28,7 @@ description: Use when working on ANY admin page — shared recipes (session mint
    show realistic pins. NEW unseeded test requests without a cached location
    are live-geocoded and fake addresses land in Manhattan — seed a
    customer_locations row (reuse the request's own address ciphertext) if
-   that happens. Prod visuals: demo login (admin@demo-hvac.com / admin123).
+   that happens. Prod visuals: View as (platform owner) — see docs/spears-handover.md.
 
 ## Gates (run before any commit)
 
@@ -138,7 +138,7 @@ error copy ("Couldn't save X. Please try again."), never err.message or
   (a failed statement's params can hold names, check numbers and portal
   links). Prefer `logger.error({ code: errorCode(error), invoiceId }, "…")`
   with `errorCode` from the same module.
-- Demo account (admin@demo-hvac.com): blocked from GDPR erase
+- Retired demo accounts (@demo-hvac.com): blocked from GDPR erase
   (super_admin gate) and outbound SMS (`isDemoAccount` in
   `src/lib/auth/authz.ts`) — deliberate, do not "fix".
 - Request status lists (open / in-flight / on-site / terminal …) are

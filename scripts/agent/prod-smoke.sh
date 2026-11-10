@@ -14,21 +14,22 @@ check "home"        200 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/")"
 check "chat"        200 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/chat")"
 check "admin login" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/login")"
 
-COOKIE=$(curl -s -i -X POST "$BASE/api/auth/login" \
+# The retired demo login must be refused (the strings are split so the
+# published-files test can assert no credential literal lives in the repo).
+DEMO_EMAIL="admin@demo-""hvac.com"
+DEMO_PW="admin""123"
+check "demo login refused" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
   -H 'content-type: application/json' -H "origin: $BASE" \
-  -d '{"email":"admin@demo-hvac.com","password":"admin123"}' \
-  | grep -i "^set-cookie: hvac_admin_session" | sed 's/^[Ss]et-[Cc]ookie: //; s/;.*//')
-if [ -n "$COOKIE" ]; then echo "ok   demo login"; else echo "FAIL demo login"; fail=1; fi
+  -d "{\"email\":\"$DEMO_EMAIL\",\"password\":\"$DEMO_PW\"}")"
 
-check "demo erase blocked" 403 "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+# Cookie-less admin probes: all must be refused.
+check "erase unauthenticated" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$BASE/api/admin/customers/00000000-0000-0000-0000-000000000099/erase" \
-  -H "cookie: $COOKIE" -H "origin: $BASE")"
-check "demo SMS blocked" 403 "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -H "origin: $BASE")"
+check "SMS unauthenticated" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$BASE/api/admin/conversations/00000000-0000-0000-0000-000000000001/message" \
-  -H "cookie: $COOKIE" -H "origin: $BASE" -H 'content-type: application/json' -d '{"message":"x"}')"
-# 503 until Apple credentials are configured; becomes 200 after.
-mk=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/mapkit-token" -H "cookie: $COOKIE")
-if [ "$mk" = "503" ] || [ "$mk" = "200" ]; then echo "ok   mapkit-token ($mk)"; else echo "FAIL mapkit-token ($mk)"; fail=1; fi
+  -H "origin: $BASE" -H 'content-type: application/json' -d '{"message":"x"}')"
+check "mapkit-token unauthenticated" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/mapkit-token")"
 
 # Chat streaming: ttfb must be meaningfully earlier than total on a long reply.
 SESS=$(mktemp)

@@ -175,9 +175,7 @@ number's Voice webhook at `https://<your-deployment>/api/voice/incoming` (HTTP P
 
 **1. Login** — `http://localhost:3000/admin/login`
 
-Default credentials (change after first login):
-- Email: `admin@demo-hvac.com`
-- Password: `admin123`
+Sign in with the staff account you were issued (see DEPLOY.md for creating the first admin).
 
 **2. Service Requests Dashboard** — `http://localhost:3000/admin/requests`
 

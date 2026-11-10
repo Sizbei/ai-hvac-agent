@@ -5,7 +5,7 @@ one lists exactly what to type, what the audience will see, and a one-line engin
 talking point.
 
 > **Live demo:** https://ai-hvac-agent-lovat.vercel.app
-> &nbsp;·&nbsp; chat → `/chat` &nbsp;·&nbsp; admin → `/admin` (`admin@demo-hvac.com` / `admin123`)
+> &nbsp;·&nbsp; chat → `/chat` &nbsp;·&nbsp; admin → `/admin` (staff sign in)
 > &nbsp;·&nbsp; docs → `/docs.html`
 > &nbsp;·&nbsp; **call the voice agent → (231) 559-9669**
 > The admin dashboard is pre-seeded with realistic conversations, so it looks alive.
@@ -44,7 +44,7 @@ Secrets: generate `ENCRYPTION_KEY` / `AUTH_SECRET` with `openssl rand -hex 32`.
 | Customer chat | `http://localhost:3000/chat` (or `https://ai-hvac-agent-lovat.vercel.app/chat`) |
 | Admin dashboard | `http://localhost:3000/admin` (or `https://ai-hvac-agent-lovat.vercel.app/admin`) |
 | Interactive docs | `http://localhost:3000/docs.html` |
-| Admin login | `admin@demo-hvac.com` / `admin123` |
+| Admin login | Staff sign in at `/admin/login` (credentials are issued privately) |
 
 > Tip: open two browser tabs before you start — one on `/chat`, one ready for `/admin`.
 > For Scene 5 you'll want a **fresh** chat session (new incognito window or clear the
@@ -152,7 +152,7 @@ messages accepted).
 
 ### Scene 6 — Admin dashboard
 
-Open `https://ai-hvac-agent-lovat.vercel.app/admin` and log in with `admin@demo-hvac.com` / `admin123`.
+Open `https://ai-hvac-agent-lovat.vercel.app/admin` and sign in with the staff account you were issued.
 
 1. **Service Requests queue** — the request from Scene 4 appears with its reference #,
    issue, color-coded urgency, and status. Open the detail sheet on the right and

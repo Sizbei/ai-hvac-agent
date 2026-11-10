@@ -62,7 +62,7 @@ migration script is located at `src/lib/db/migrate.ts`.
 
 You have two paths to create the first admin of a fresh instance. **Do not run
 `npm run db:seed` against a real production database** — that seeder is
-DEV-ONLY and creates the weak `admin@demo-hvac.com` / `admin123` demo
+DEV-ONLY and creates weak, well-known demo
 credentials.
 
 ### Path A — Super-admin seed (recommended for a real tenant)
@@ -189,7 +189,7 @@ Run through this checklist after each production deployment:
 ### Admin Dashboard
 
 - [ ] Visit `https://your-app.vercel.app/admin/login` — login page loads
-- [ ] Log in as your owner account — "Sign in with Google" for the super-admin seed (Path A), or `admin@demo-hvac.com` / `admin123` only if you seeded the portfolio demo — dashboard loads
+- [ ] Log in as your owner account — "Sign in with Google" for the super-admin seed (Path A) — dashboard loads
 - [ ] Dashboard displays stats cards (total requests, pending, in-progress, completed)
 - [ ] Request queue shows any submitted service requests
 - [ ] Assign a technician to a request — status updates correctly
@@ -206,7 +206,7 @@ Run through this checklist after each production deployment:
 
 Complete before handling real customer data:
 
-- [ ] If you seeded the dev/demo data, change the default admin password (`admin123`) immediately — not applicable to the Google-only super-admin owner (Path A), which has no password
+- [ ] If you seeded the dev/demo data, change the seeded default admin password immediately — not applicable to the Google-only super-admin owner (Path A), which has no password
 - [ ] Verify `ENCRYPTION_KEY` is unique per environment (not shared with dev/staging)
 - [ ] Verify all environment variables are set in Vercel (missing vars cause runtime errors)
 - [ ] Execute a Data Processing Agreement with your LLM provider (DashScope/Alibaba Cloud, or whichever OpenAI-compatible provider you use) — see [PRIVACY.md](./PRIVACY.md)

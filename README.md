@@ -12,7 +12,7 @@ Built with **Next.js 16**, **Qwen** (via Alibaba DashScope, OpenAI-compatible),
 
 > **🔵 Live demo — [ai-hvac-agent-lovat.vercel.app](https://ai-hvac-agent-lovat.vercel.app)**
 > · [Customer chat](https://ai-hvac-agent-lovat.vercel.app/chat)
-> · [Admin console](https://ai-hvac-agent-lovat.vercel.app/admin) — sign in with `admin@demo-hvac.com` / `admin123` (demo only)
+> · [Admin console](https://ai-hvac-agent-lovat.vercel.app/admin) — staff sign in
 > · Or call the voice agent at **(231) 559-9669**
 
 ![Landing page](public/screenshots/landing.png)
@@ -59,7 +59,7 @@ npm run dev                  # → http://localhost:3000
 ```
 
 Then open **http://localhost:3000/chat** (customer) and **/admin** (staff, sign in with
-the seeded `admin@demo-hvac.com` / `admin123` — dev/demo only).
+the dev account you create with the seed script).
 
 See [`.env.example`](.env.example) and the [User Guide](GUIDE.md#environment-variables-envlocal)
 for the full environment-variable list. The phone agent is optional — set the `TWILIO_*`

@@ -4,7 +4,8 @@
  *
  * Prerequisites:
  *   - The Next.js dev server must already be running at http://localhost:3000.
- *   - The database must be seeded (admin user admin@demo-hvac.com / admin123).
+ *   - The database must be seeded, and SCREENSHOT_EMAIL / SCREENSHOT_PASSWORD set
+ *     to a dev admin's credentials.
  *   - Playwright + chromium installed (`npm i -D playwright`, `npx playwright install chromium`).
  *
  * Usage: node scripts/screenshots.mjs
@@ -16,8 +17,12 @@ import { dirname, join } from 'node:path';
 import { mkdirSync, statSync } from 'node:fs';
 
 const BASE_URL = 'http://localhost:3000';
-const ADMIN_EMAIL = 'admin@demo-hvac.com';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_EMAIL = process.env.SCREENSHOT_EMAIL;
+const ADMIN_PASSWORD = process.env.SCREENSHOT_PASSWORD;
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+  console.error('Set SCREENSHOT_EMAIL and SCREENSHOT_PASSWORD to a dev admin login.');
+  process.exit(1);
+}
 const ACTION_TIMEOUT = 15_000;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
