@@ -31,6 +31,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/field-forms.test.ts",
   // Go-live: hidden_from_org un-hide triggers (migration 0059) against the dev DB (throwaway org).
   "tests/integration/golive-unhide.test.ts",
+  // Go-live marking builders + script: both modes, timezone boundary, refusals (one throwaway org).
+  "tests/integration/golive-marking.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the
