@@ -122,7 +122,8 @@ async function run(label, ctx, list) {
     const label2 = `${label}${path}`;
     let findings;
     try {
-      findings = await auditPage(ctx, path);
+      // A cold dev compile can time out once; retry before calling it a failure.
+      findings = await auditPage(ctx, path).catch(() => auditPage(ctx, path));
     } catch (e) {
       findings = [{ kind: "overflow", detail: `page failed to load (${e.name})` }];
     }
