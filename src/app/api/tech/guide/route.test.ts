@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: vi.fn() }));
 vi.mock("@/lib/tech/guide-queries", () => ({ getGuide: vi.fn(), hideGuide: vi.fn() }));
+vi.mock("@/lib/tenancy/features", () => ({ getFeatures: vi.fn() }));
 vi.mock("@/lib/rate-limit", async (orig) => ({ ...(await orig<typeof import("@/lib/rate-limit")>()), slidingWindow: () => ({ allowed: true }) }));
 
 import { GET, PATCH } from "./route";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { getFeatures } from "@/lib/tenancy/features";
 import { getGuide, hideGuide } from "@/lib/tech/guide-queries";
 import { NextRequest } from "next/server";
 
@@ -17,6 +19,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getTechSession as unknown as Mock).mockResolvedValue(session);
   (getGuide as unknown as Mock).mockResolvedValue({ steps: [], progress: { requiredDone: 0, requiredTotal: 2, optionalDone: 0, optionalTotal: 7 }, upNext: "start_job", finished: false, hasOpenJob: false, hiddenAt: null, cardHidden: false });
+  (getFeatures as unknown as Mock).mockResolvedValue({ payLinks: true });
   (hideGuide as unknown as Mock).mockResolvedValue({ hiddenAt: "2026-11-05T00:00:00.000Z" });
 });
 
@@ -29,7 +32,13 @@ describe("GET /api/tech/guide", () => {
   it("returns the payload for the session's org and user", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(getGuide).toHaveBeenCalledWith("o", "u");
+    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: true } });
+  });
+  it("falls back to pay links off when the feature read throws", async () => {
+    (getFeatures as unknown as Mock).mockRejectedValue(new Error("db"));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: false } });
     expect((await res.json()).data.upNext).toBe("start_job");
   });
   it("500 with human copy when the query throws", async () => {

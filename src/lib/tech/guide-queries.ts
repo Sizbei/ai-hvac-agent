@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { logger, errorCode } from "@/lib/logger";
 import { cardHiddenFor, parseGuideState } from "./guide-state";
 import { guideHideSql, guideSelectSql, guideStampSql } from "./guide-sql";
+import type { Features } from "@/lib/tenancy/feature-flags";
 import { deriveGuide, type GuidePayload, type Signals } from "./guide-steps";
 
 type Row = Record<string, unknown>;
@@ -21,10 +22,14 @@ function signalsFromRow(row: Row): Signals {
 }
 
 /** GET: one SELECT, then the stamp statement only when something new completed. */
-export async function getGuide(organizationId: string, userId: string, now: Date = new Date()): Promise<GuidePayload> {
+export async function getGuide(
+  organizationId: string,
+  userId: string,
+  { features, now = new Date() }: { features: Pick<Features, "payLinks">; now?: Date },
+): Promise<GuidePayload> {
   const res = await db.execute(guideSelectSql(organizationId, userId));
   const signals = signalsFromRow((res.rows[0] ?? {}) as Row);
-  const d = deriveGuide(signals, now);
+  const d = deriveGuide(signals, now, features);
   if (Object.keys(d.newStamps).length > 0) {
     try {
       await db.execute(guideStampSql({ organizationId, userId, newStamps: d.newStamps }));
