@@ -33,9 +33,10 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 // db is only touched by GET; POST goes through the mocked provisionOrganization.
+let listRows: unknown[] = [];
 vi.mock('@/lib/db', () => ({
   db: {
-    select: () => ({ from: () => ({ orderBy: () => Promise.resolve([]) }) }),
+    select: () => ({ from: () => ({ orderBy: () => Promise.resolve(listRows) }) }),
   },
 }));
 vi.mock('@/lib/db/schema', () => ({
@@ -44,6 +45,7 @@ vi.mock('@/lib/db/schema', () => ({
     name: 'o.name',
     status: 'o.status',
     createdAt: 'o.createdAt',
+    ownerEmail: 'o.ownerEmail',
   },
 }));
 vi.mock('drizzle-orm', () => ({ desc: (c: unknown) => c }));
@@ -68,6 +70,7 @@ function postReq(body: unknown) {
 }
 
 beforeEach(() => {
+  listRows = [];
   getAdminSession.mockReset();
   isPlatformAdmin.mockReset();
   provisionOrganization.mockReset();
@@ -201,5 +204,24 @@ describe('GET /api/platform/organizations — gate', () => {
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(Array.isArray(json.data.organizations)).toBe(true);
+  });
+});
+
+describe('GET /api/platform/organizations — owner email flag', () => {
+  it('reports hasOwnerEmail without ever returning the address', async () => {
+    getAdminSession.mockResolvedValue(PLATFORM_SESSION);
+    isPlatformAdmin.mockReturnValue(true);
+    const createdAt = new Date('2026-11-01T00:00:00.000Z');
+    listRows = [
+      { id: 'a', name: 'Spears', status: 'active', createdAt, featureFlags: {}, ownerEmail: 'chick@spears.com' },
+      { id: 'b', name: 'Other', status: 'active', createdAt, featureFlags: {}, ownerEmail: null },
+    ];
+    const res = await GET();
+    const json = await res.json();
+    expect(json.data.organizations.map((o: { hasOwnerEmail: boolean }) => o.hasOwnerEmail)).toEqual([
+      true,
+      false,
+    ]);
+    expect(JSON.stringify(json)).not.toContain('chick@spears.com');
   });
 });

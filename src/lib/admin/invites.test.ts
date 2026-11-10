@@ -39,7 +39,7 @@ vi.mock('@/lib/db/schema', () => ({
     role: 'u.role',
     isActive: 'u.isActive',
   },
-  organizations: { id: 'o.id', ownerEmail: 'o.ownerEmail' },
+  organizations: { id: 'o.id', name: 'o.name', ownerEmail: 'o.ownerEmail' },
 }));
 
 // staff-queries: real normalizeEmail behavior (trim+lowercase); createStaff and
@@ -106,6 +106,9 @@ import {
   revokeInvite,
   resolveInviteByToken,
   acceptInvite,
+  isOwnerPromotion,
+  inviteEmailsLast24h,
+  getOwnerInviteTarget,
 } from './invites';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
@@ -503,7 +506,10 @@ describe('acceptInvite', () => {
 
   it('promotes the provisioned owner to super_admin and clears ownerEmail (FIX 2a)', async () => {
     selectQueue.push([liveRow('admin')]); // resolve: admin invite to new@x.com
-    selectQueue.push([inviterRow()]); // loadInviter
+    // loadInviter: the PLATFORM admin (the only inviter whose invite promotes)
+    selectQueue.push([
+      inviterRow({ id: PLATFORM_ACTOR.userId, email: PLATFORM_EMAIL, organizationId: PORG }),
+    ]);
     selectQueue.push([{ ownerEmail: 'NEW@x.com' }]); // org owner matches (case-insensitive)
     mockCreateStaff.mockResolvedValue({
       ok: true,
@@ -795,5 +801,158 @@ describe('platform-admin protection and the inviter as actor', () => {
     mockClaimPasswordlessStaff.mockResolvedValue({ ok: false, reason: 'platform_protected' });
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res).toEqual({ ok: false, reason: 'invalid' });
+  });
+});
+
+describe('isOwnerPromotion', () => {
+  const ok = {
+    ownerEmail: 'c@s.com',
+    inviteEmail: 'C@s.com',
+    inviteRole: 'admin' as const,
+    inviter: PLATFORM_ACTOR as MutationActor | null,
+  };
+
+  it('is true for an admin invite to the owner email from a platform admin', () => {
+    expect(isOwnerPromotion(ok)).toBe(true);
+    expect(isOwnerPromotion({ ...ok, ownerEmail: ' c@S.com ' })).toBe(true);
+  });
+
+  it('is false for a technician invite', () => {
+    expect(isOwnerPromotion({ ...ok, inviteRole: 'technician' })).toBe(false);
+  });
+
+  it('is false when the inviter is an org super_admin, not a platform admin', () => {
+    expect(isOwnerPromotion({ ...ok, inviter: SUPER_ACTOR })).toBe(false);
+  });
+
+  it('is false for a platform-allowlisted email outside the platform org', () => {
+    expect(
+      isOwnerPromotion({ ...ok, inviter: { ...PLATFORM_ACTOR, organizationId: ORG } }),
+    ).toBe(false);
+  });
+
+  it('is false without an inviter', () => {
+    expect(isOwnerPromotion({ ...ok, inviter: null })).toBe(false);
+  });
+
+  it('is false without an owner email, or for a different email', () => {
+    expect(isOwnerPromotion({ ...ok, ownerEmail: null })).toBe(false);
+    expect(isOwnerPromotion({ ...ok, ownerEmail: '' })).toBe(false);
+    expect(isOwnerPromotion({ ...ok, inviteEmail: 'other@s.com' })).toBe(false);
+  });
+
+  it('is false when platform admin is not configured (fail closed)', () => {
+    delete process.env.PLATFORM_ORG_ID;
+    expect(isOwnerPromotion(ok)).toBe(false);
+  });
+});
+
+describe('acceptInvite — owner promotion is tightened (spec P2)', () => {
+  function ownerInviteRow(role: 'admin' | 'technician', invitedByUserId: string) {
+    return {
+      id: 'inv1',
+      organizationId: ORG,
+      email: 'owner@x.com',
+      role,
+      invitedByUserId,
+      expiresAt: new Date(Date.now() + 60_000),
+      acceptedAt: null,
+      revokedAt: null,
+    };
+  }
+  const platformInviterRow = () =>
+    inviterRow({ id: PLATFORM_ACTOR.userId, email: PLATFORM_EMAIL, organizationId: PORG });
+
+  function staff(role: 'admin' | 'technician') {
+    return {
+      ok: true,
+      staff: { id: 'owner-user', name: 'O', email: 'owner@x.com', role, isActive: true },
+    };
+  }
+
+  it('does NOT promote an admin invite to the owner email from an org super_admin', async () => {
+    selectQueue.push([ownerInviteRow('admin', ACTOR)]);
+    selectQueue.push([inviterRow()]); // org super_admin, not platform
+    selectQueue.push([{ ownerEmail: 'owner@x.com' }]);
+    mockCreateStaff.mockResolvedValue(staff('admin'));
+    updateQueue.push([{ id: 'inv1' }]); // claim only
+
+    const res = await acceptInvite('t', { name: 'O', password: 'password1' });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.role).toBe('admin');
+      expect(res.accepted.session).toMatchObject({ role: 'admin' });
+    }
+    expect(updateQueue.length).toBe(0); // no extra updates were consumed
+  });
+
+  it('does NOT promote a technician invite to the owner email, even from a platform admin', async () => {
+    selectQueue.push([ownerInviteRow('technician', PLATFORM_ACTOR.userId)]);
+    selectQueue.push([platformInviterRow()]);
+    selectQueue.push([{ ownerEmail: 'owner@x.com' }]);
+    mockCreateStaff.mockResolvedValue(staff('technician'));
+    updateQueue.push([{ id: 'inv1' }]);
+
+    const res = await acceptInvite('t', { name: 'O', password: 'password1' });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.role).toBe('technician');
+      expect(res.accepted.session).toBeNull();
+    }
+  });
+
+  it('promotes the credential-setup owner (existing password-less admin) from a platform invite', async () => {
+    selectQueue.push([ownerInviteRow('admin', PLATFORM_ACTOR.userId)]);
+    selectQueue.push([platformInviterRow()]);
+    selectQueue.push([{ ownerEmail: 'OWNER@x.com' }]);
+    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
+    mockClaimPasswordlessStaff.mockResolvedValue({
+      ok: true,
+      staff: { id: 'chick', name: 'Chick', email: 'owner@x.com' },
+    });
+    updateQueue.push([{ id: 'inv1' }]); // claim
+    updateQueue.push([]); // promote
+    updateQueue.push([]); // clear ownerEmail
+
+    const res = await acceptInvite('t', { name: 'ignored', password: 'password1' });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.accepted.role).toBe('super_admin');
+      expect(res.accepted.session).toMatchObject({ userId: 'chick', role: 'super_admin' });
+    }
+    expect(mockClaimPasswordlessStaff).toHaveBeenCalledWith(
+      ORG,
+      { email: 'owner@x.com', role: 'admin', password: 'password1' },
+      PLATFORM_ACTOR,
+    );
+  });
+});
+
+describe('inviteEmailsLast24h', () => {
+  it('returns the count of invites created in the org in the last 24 h', async () => {
+    selectQueue.push([{ value: 7 }]);
+    expect(await inviteEmailsLast24h(ORG)).toBe(7);
+  });
+
+  it('returns 0 when there are none', async () => {
+    selectQueue.push([]);
+    expect(await inviteEmailsLast24h(ORG)).toBe(0);
+  });
+});
+
+describe('getOwnerInviteTarget', () => {
+  it('returns the org name and owner email', async () => {
+    selectQueue.push([{ name: 'Spears', ownerEmail: 'c@s.com' }]);
+    expect(await getOwnerInviteTarget(ORG)).toEqual({ name: 'Spears', ownerEmail: 'c@s.com' });
+  });
+
+  it('returns null for an unknown org', async () => {
+    selectQueue.push([]);
+    expect(await getOwnerInviteTarget(ORG)).toBeNull();
+  });
+
+  it('keeps a NULL owner email as null', async () => {
+    selectQueue.push([{ name: 'Spears', ownerEmail: null }]);
+    expect(await getOwnerInviteTarget(ORG)).toEqual({ name: 'Spears', ownerEmail: null });
   });
 });

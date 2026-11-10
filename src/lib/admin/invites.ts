@@ -1,13 +1,14 @@
 import "server-only";
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, asc, gt, isNull, desc } from "drizzle-orm";
+import { and, eq, asc, gt, isNull, desc, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import {
   canAssignRole,
   assertMayMutateUser,
+  isPlatformAdmin,
   type MutationActor,
 } from "@/lib/auth/authz";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
@@ -17,7 +18,8 @@ import { getSeatUsage } from "./seats";
 import { seatsFull } from "./seat-usage";
 
 /**
- * Team invitations — tokenized, copyable signup links (no email dependency).
+ * Team invitations — tokenized signup links, emailed when Resend is configured
+ * (invite-email.ts) and otherwise shown once to copy.
  *
  * An admin creates an invite for an email + role. We generate a 256-bit random
  * token, return its PLAINTEXT exactly once (embedded in the accept link), and
@@ -204,6 +206,35 @@ export async function createInvite(
   return { ok: true, invite: toInviteRecord(created), token };
 }
 
+/** Rolling window for the per-org invite email cap (plan ruling 4). */
+const INVITE_EMAIL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How many invites this org created in the last 24 hours. Callers read it
+ * BEFORE creating the new invite, so the count excludes it (plan ruling 4).
+ */
+export async function inviteEmailsLast24h(organizationId: string): Promise<number> {
+  const since = new Date(Date.now() - INVITE_EMAIL_WINDOW_MS);
+  const [row] = await db
+    .select({ value: count() })
+    .from(staffInvites)
+    .where(withTenant(staffInvites, organizationId, gt(staffInvites.createdAt, since)));
+  return Number(row?.value ?? 0);
+}
+
+/** The org's name and pending owner email, for the platform owner invite.
+ * Null when the org doesn't exist. */
+export async function getOwnerInviteTarget(
+  organizationId: string,
+): Promise<{ name: string; ownerEmail: string | null } | null> {
+  const [row] = await db
+    .select({ name: organizations.name, ownerEmail: organizations.ownerEmail })
+    .from(organizations)
+    .where(eq(organizations.id, organizationId))
+    .limit(1);
+  return row ? { name: row.name, ownerEmail: row.ownerEmail ?? null } : null;
+}
+
 /** List PENDING invites for an org: not accepted, not revoked, not expired. */
 export async function listInvites(
   organizationId: string,
@@ -363,15 +394,35 @@ export async function loadInviter(
   };
 }
 
+/**
+ * Whether accepting this invite promotes its acceptor to the org's super_admin
+ * (spec P2). All three must hold: the invite email matches the org's stored
+ * owner email (normalized), the invite grants `admin`, and the inviter is a
+ * PLATFORM admin. An org admin inviting the owner's address — as a technician
+ * or an admin — never mints a super_admin.
+ */
+export function isOwnerPromotion(p: {
+  ownerEmail: string | null;
+  inviteEmail: string;
+  inviteRole: InvitableRole;
+  inviter: MutationActor | null;
+}): boolean {
+  if (p.ownerEmail === null) return false;
+  const owner = normalizeEmail(p.ownerEmail);
+  if (owner === "" || owner !== normalizeEmail(p.inviteEmail)) return false;
+  if (p.inviteRole !== "admin") return false;
+  return p.inviter !== null && isPlatformAdmin(p.inviter);
+}
+
 export interface AcceptedInvite {
   readonly userId: string;
   readonly organizationId: string;
   readonly email: string;
   readonly name: string;
   /** The EFFECTIVE role the new user holds. Normally the invite's role
-   * (admin/technician). For the org's provisioned owner (invite.email matches
-   * the org's stored ownerEmail) this is promoted to `super_admin` — see the
-   * owner special-case in acceptInvite. */
+   * (admin/technician). For the org's owner (isOwnerPromotion: a platform
+   * admin's admin invite to the org's stored ownerEmail) this is promoted to
+   * `super_admin` — see the owner special-case in acceptInvite. */
   readonly role: AdminRole | "technician";
   /** A ready-to-mint admin session, present ONLY for an admin-tier invite (admin
    * or the promoted owner's super_admin). A technician holds no admin session
@@ -491,14 +542,13 @@ export async function acceptInvite(
       and(eq(staffInvites.id, invite.id), isNull(staffInvites.acceptedAt)),
     );
 
-  // --- Owner promotion (provisioned-org owner only) ---
+  // --- Owner promotion (the org's recorded owner only) ---
   // The staff_invites enum can never store `super_admin`, so a normal invite can
   // NEVER grant it (createInvite/canAssignRole are untouched). The ONE safe
-  // exception: a freshly-provisioned org records its intended owner in
-  // organizations.ownerEmail. If THIS invite's email matches that stored
-  // ownerEmail (case-insensitive), the acceptor is that owner and is promoted to
-  // super_admin so the org has a top-tier operator. A non-owner invite (email !=
-  // ownerEmail) is NEVER promoted. The promotion is a single org-scoped UPDATE
+  // exception: an org records its intended owner in organizations.ownerEmail,
+  // and the platform admin issues that owner an `admin` invite. Only then
+  // (isOwnerPromotion: email match + admin role + platform-admin inviter) is the
+  // acceptor promoted to super_admin. The promotion is a single org-scoped UPDATE
   // (never cross-org), and ownerEmail is then consumed (set NULL) so the stored
   // PII is removed and the promotion can't re-fire.
   let effectiveRole: AdminRole | "technician" = invite.role;
@@ -511,10 +561,12 @@ export async function acceptInvite(
     .where(eq(organizations.id, invite.organizationId))
     .limit(1);
 
-  const ownerEmail = org?.ownerEmail ?? null;
-  const isProvisionedOwner =
-    ownerEmail !== null &&
-    normalizeEmail(ownerEmail) === normalizeEmail(invite.email);
+  const isProvisionedOwner = isOwnerPromotion({
+    ownerEmail: org?.ownerEmail ?? null,
+    inviteEmail: invite.email,
+    inviteRole: invite.role,
+    inviter,
+  });
 
   if (isProvisionedOwner) {
     // Targeted, org-scoped promotion: only this user, only in this org.

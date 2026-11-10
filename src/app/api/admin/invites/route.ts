@@ -2,7 +2,10 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
-import { createInvite, listInvites } from "@/lib/admin/invites";
+import { createInvite, listInvites, inviteEmailsLast24h } from "@/lib/admin/invites";
+import { deliverInvite, inviteLink } from "@/lib/admin/invite-email";
+import { isPlatformAdmin } from "@/lib/auth/authz";
+import { loadOrgRow } from "@/lib/tenancy/org-row";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -65,6 +68,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Read BEFORE creating, so the cap counts only earlier invites (ruling 4).
+    const priorCount = await inviteEmailsLast24h(session.organizationId);
+
     const result = await createInvite(
       session.organizationId,
       parsed.data,
@@ -106,13 +112,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Build the one-time accept link from the request origin so it works across
-    // environments without an env var. The plaintext token is returned exactly
-    // once here (never stored) — the client shows it for the admin to copy.
-    const url = new URL(
-      `/admin/invite/${result.token}`,
-      request.nextUrl.origin,
-    ).toString();
+    const org = await loadOrgRow(session.organizationId);
+    const { emailed } = deliverInvite({
+      organizationId: session.organizationId,
+      email: result.invite.email,
+      orgName: org?.name ?? "your team",
+      token: result.token,
+      role: result.invite.role,
+      expiresAt: new Date(result.invite.expiresAt),
+      priorCount,
+    });
+
+    // Not emailed: the one-time link (from NEXT_PUBLIC_APP_URL only, never the
+    // request origin) is shown once — to a super_admin or platform admin only.
+    const mayShowLink = session.role === "super_admin" || isPlatformAdmin(session);
+    const url = !emailed && mayShowLink ? inviteLink(result.token) : null;
 
     const ipAddress = clientIp(request);
     await logAudit({
@@ -121,12 +135,15 @@ export async function POST(request: NextRequest) {
       action: "create_invite",
       entity: "staff_invite",
       entityId: result.invite.id,
-      // Enum/id only — never the email or the token.
-      details: JSON.stringify({ role: result.invite.role }),
+      // Enum/boolean only — never the email, token or link.
+      details: JSON.stringify({ role: result.invite.role, emailed }),
       ipAddress,
     });
 
-    return successResponse({ invite: result.invite, url }, 201);
+    return successResponse(
+      { invite: result.invite, emailed, ...(url ? { url } : {}) },
+      201,
+    );
   } catch (error: unknown) {
     logger.error({ error }, "Failed to create invite");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

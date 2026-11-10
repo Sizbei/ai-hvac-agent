@@ -58,6 +58,17 @@ written by the tech app (`/api/tech/time`, status taps), never here.
   attempt to enforce this in application code alone (the app-level check in
   `staff-queries.ts` is a fast-path only; the trigger is authoritative).
 
+**Invite email (go-live P2):** `POST /api/admin/invites` returns
+`{ invite, emailed, url? }`. `deliverInvite` (`src/lib/admin/invite-email.ts`)
+sends via Resend in `after()` when `RESEND_API_KEY` is set, the link (built
+from `NEXT_PUBLIC_APP_URL` only, never the request origin) exists, and the
+org's invites in the last 24 h, read BEFORE the insert, are ≤ 19 (cap 20).
+`url` is returned only when not emailed and the actor is super_admin or a
+platform admin. The dialog renders `inviteResultView`
+(`src/lib/admin/invite-result-view.ts`, client-safe). Owner promotion to
+super_admin on accept is `isOwnerPromotion` in `invites.ts`: owner-email match
++ `admin` invite + platform-admin inviter.
+
 **Seat limit:** one rule for both ways in. `getSeatUsage(orgId)`
 (`src/lib/admin/seats.ts`: active users vs the plan's `maxStaff`) gates
 `createInvite` AND `POST /api/admin/staff` (403 `SEAT_LIMIT_REACHED`), and

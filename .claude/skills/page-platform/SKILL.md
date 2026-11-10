@@ -17,6 +17,15 @@ access-gated) · console component
 `src/app/api/platform/organizations/[id]/route.ts` (purge) · tables
 `organizations`, `platform_audit_log`
 
+**Send owner invite:** rows whose org has an owner email on file
+(`hasOwnerEmail` from the list API; the address never reaches the client) show
+"Send owner invite" → `POST /api/platform/organizations/[id]/owner-invite`
+(`src/app/api/platform/organizations/[id]/owner-invite/route.ts`): platform
+gate → same-origin → rate limit → `createInvite(id, { email: owner_email,
+role: "admin" }, session)` → `deliverInvite`. Returns `{ emailed, url? }`;
+404 `NO_OWNER_EMAIL`, 409 when an invite is already pending (revoke first to
+re-send). Only a platform admin's invite promotes the owner to super_admin.
+
 **Data flow:** `PlatformConsole` fetches the org list on mount and after any
 mutation (create / purge). All API calls are client-side from the console component.
 Create returns a one-time invite URL to display in a copy dialog — this URL is

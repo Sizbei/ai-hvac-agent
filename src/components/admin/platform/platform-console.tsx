@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Loader2, Plus, Download, Trash2, RefreshCw } from 'lucide-react';
+import { Check, Copy, Loader2, Plus, Download, Trash2, RefreshCw, Mail } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -40,6 +40,7 @@ import {
   type SwitchRowState,
 } from '@/lib/admin/platform-switch-state';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
+import { inviteResultView, type InviteResultView } from '@/lib/admin/invite-result-view';
 
 interface OrgRow {
   readonly id: string;
@@ -47,6 +48,8 @@ interface OrgRow {
   readonly status: 'active' | 'suspended' | 'trial' | 'past_due';
   readonly createdAt: string;
   readonly features: Features;
+  /** True when the org has an owner email on file (the address never reaches the client). */
+  readonly hasOwnerEmail: boolean;
 }
 
 /** Token-based status badge for org status — no raw palette classes. */
@@ -133,6 +136,112 @@ function OrgSwitches({ org }: { readonly org: OrgRow }) {
           );
         })}
       </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Codes whose server message is already human copy for the operator. */
+const OWNER_INVITE_SHOWN_CODES = new Set([
+  'NO_OWNER_EMAIL',
+  'INVITE_EXISTS',
+  'EMAIL_CONFLICT',
+  'SEAT_LIMIT_REACHED',
+  'PLATFORM_PROTECTED',
+]);
+
+/** "Send owner invite": an admin invite to the org's owner email, which promotes
+ * the owner to super_admin on accept. Shows "Invite emailed." or the copy link once. */
+function OwnerInvite({ org }: { readonly org: OrgRow }) {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<InviteResultView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function send() {
+    if (sending) return;
+    setSending(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/platform/organizations/${org.id}/owner-invite`, {
+        method: 'POST',
+      });
+      const json = await res.json().catch(() => ({ success: false }));
+      if (res.ok && json.success) {
+        setResult(
+          inviteResultView({
+            emailed: json.data.emailed === true,
+            url: typeof json.data.url === 'string' ? json.data.url : undefined,
+          }),
+        );
+      } else {
+        const code = json.error?.code;
+        setError(
+          typeof code === 'string' && OWNER_INVITE_SHOWN_CODES.has(code)
+            ? String(json.error.message)
+            : 'Couldn’t send the owner invite. Please try again.',
+        );
+      }
+    } catch {
+      setError('Couldn’t send the owner invite. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function copy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard may be unavailable; the URL is still visible to copy manually.
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm" variant="outline" onClick={() => void send()} disabled={sending}>
+          {sending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+          Send owner invite
+        </Button>
+        {result && result.kind !== 'link' && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {result.line}
+          </p>
+        )}
+      </div>
+      {result?.kind === 'link' && (
+        <div className="max-w-xl space-y-1">
+          <div className="flex items-center gap-2">
+            <Input
+              readOnly
+              value={result.url}
+              aria-label="Owner invite link"
+              onFocus={(e) => e.currentTarget.select()}
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => void copy(result.url)}
+              aria-label="Copy invite link"
+            >
+              {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Not emailed. This link is shown only once. It expires in 72 hours.
+          </p>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -252,7 +361,10 @@ export function PlatformConsole() {
                 </TableRow>
                 <TableRow>
                   <TableCell colSpan={4} className="bg-surface-sunken/40 py-2.5">
-                    <OrgSwitches org={o} />
+                    <div className="space-y-2.5">
+                      <OrgSwitches org={o} />
+                      {o.hasOwnerEmail && <OwnerInvite org={o} />}
+                    </div>
                   </TableCell>
                 </TableRow>
                 </Fragment>

@@ -1,6 +1,7 @@
 'use client';
 
 import { staffErrorMessage } from '@/lib/admin/staff-errors';
+import { inviteResultView, type InviteResultView } from '@/lib/admin/invite-result-view';
 import { useState, useEffect, useRef } from 'react';
 import { Copy, Check } from 'lucide-react';
 import {
@@ -44,8 +45,10 @@ export function InviteDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
-  // The one-time accept link, shown after a successful create.
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  // What to show after a successful create: "emailed", the one-time copy link,
+  // or "not emailed".
+  const [result, setResult] = useState<InviteResultView | null>(null);
+  const inviteUrl = result?.kind === 'link' ? result.url : null;
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -53,7 +56,7 @@ export function InviteDialog({
       setEmail('');
       setRole('technician');
       setError(null);
-      setInviteUrl(null);
+      setResult(null);
       setCopied(false);
     }
   }, [open]);
@@ -79,7 +82,13 @@ export function InviteDialog({
         setError(staffErrorMessage(body, "Couldn't create the invite. Please try again."));
         return;
       }
-      setInviteUrl(body.data.url as string);
+      setResult(
+        inviteResultView({
+          emailed: body.data.emailed === true,
+          url: typeof body.data.url === 'string' ? body.data.url : undefined,
+          email: String(body.data.invite?.email ?? email.trim()),
+        }),
+      );
       onSuccess(role);
     } catch {
       setError('Could not connect to server. Please try again.');
@@ -107,13 +116,21 @@ export function InviteDialog({
         <DialogHeader>
           <DialogTitle>Invite a teammate</DialogTitle>
           <DialogDescription>
-            {inviteUrl
-              ? 'Copy this one-time link and send it to your teammate. It will not be shown again.'
-              : 'Generate a signup link for a new admin or technician.'}
+            {result === null
+              ? 'Invite a new admin or technician by email.'
+              : result.kind === 'link'
+                ? 'Copy this one-time link and send it to your teammate. It will not be shown again.'
+                : result.line}
           </DialogDescription>
         </DialogHeader>
 
-        {inviteUrl ? (
+        {result !== null && result.kind !== 'link' ? (
+          <DialogFooter>
+            <Button type="button" onClick={onClose}>
+              Done
+            </Button>
+          </DialogFooter>
+        ) : inviteUrl ? (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="invite-url">Invite link</Label>

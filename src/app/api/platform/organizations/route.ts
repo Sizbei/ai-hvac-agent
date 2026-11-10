@@ -53,6 +53,7 @@ export async function GET(): Promise<Response> {
         status: organizations.status,
         createdAt: organizations.createdAt,
         featureFlags: organizations.featureFlags,
+        ownerEmail: organizations.ownerEmail,
       })
       .from(organizations)
       .orderBy(desc(organizations.createdAt));
@@ -64,6 +65,8 @@ export async function GET(): Promise<Response> {
         status: o.status,
         createdAt: o.createdAt.toISOString(),
         features: parseFeatures(o.featureFlags),
+        // A flag only — the address itself never leaves the server.
+        hasOwnerEmail: o.ownerEmail !== null,
       })),
     });
   } catch (error: unknown) {
