@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, asc, gt, isNull, desc, count } from "drizzle-orm";
+import { and, eq, asc, gt, lte, isNull, desc, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -177,6 +177,23 @@ export async function createInvite(
       return { ok: false, reason: "seat_limit" };
     }
   }
+
+  // An EXPIRED pending invite for this email still holds the
+  // staff_invites_live_unique slot (its predicate ignores expiry), so the insert
+  // below would throw. Revoke it first; a live one already returned above.
+  await db
+    .update(staffInvites)
+    .set({ revokedAt: now })
+    .where(
+      withTenant(
+        staffInvites,
+        organizationId,
+        eq(staffInvites.email, email),
+        isNull(staffInvites.acceptedAt),
+        isNull(staffInvites.revokedAt),
+        lte(staffInvites.expiresAt, now),
+      ),
+    );
 
   const { token, tokenHash } = generateInviteToken();
   const expiresAt = new Date(now.getTime() + INVITE_TTL_MS);

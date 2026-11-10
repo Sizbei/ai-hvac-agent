@@ -79,7 +79,7 @@ export function InviteDialog({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.success) {
-        setError(staffErrorMessage(body, "Couldn't create the invite. Please try again."));
+        setError(staffErrorMessage(body, "Couldn’t create the invite. Please try again."));
         return;
       }
       setResult(

@@ -40,7 +40,7 @@ import {
   type SwitchRowState,
 } from '@/lib/admin/platform-switch-state';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
-import { inviteResultView, type InviteResultView } from '@/lib/admin/invite-result-view';
+import { ownerInviteView } from '@/lib/admin/invite-result-view';
 
 interface OrgRow {
   readonly id: string;
@@ -155,10 +155,11 @@ const OWNER_INVITE_SHOWN_CODES = new Set([
 ]);
 
 /** "Send owner invite": an admin invite to the org's owner email, which promotes
- * the owner to super_admin on accept. Shows "Invite emailed." or the copy link once. */
+ * the owner to super_admin on accept. Shows "Invite emailed." when emailed, and
+ * the one-time copy link whenever the server returns one. */
 function OwnerInvite({ org }: { readonly org: OrgRow }) {
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<InviteResultView | null>(null);
+  const [result, setResult] = useState<ReturnType<typeof ownerInviteView> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -166,15 +167,15 @@ function OwnerInvite({ org }: { readonly org: OrgRow }) {
     if (sending) return;
     setSending(true);
     setError(null);
-    setResult(null);
     try {
       const res = await fetch(`/api/platform/organizations/${org.id}/owner-invite`, {
         method: 'POST',
       });
       const json = await res.json().catch(() => ({ success: false }));
       if (res.ok && json.success) {
+        setCopied(false);
         setResult(
-          inviteResultView({
+          ownerInviteView({
             emailed: json.data.emailed === true,
             url: typeof json.data.url === 'string' ? json.data.url : undefined,
           }),
@@ -211,18 +212,18 @@ function OwnerInvite({ org }: { readonly org: OrgRow }) {
           {sending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
           Send owner invite
         </Button>
-        {result && result.kind !== 'link' && (
+        {result?.line && (
           <p role="status" className="text-sm text-muted-foreground">
             {result.line}
           </p>
         )}
       </div>
-      {result?.kind === 'link' && (
+      {result?.url && (
         <div className="max-w-xl space-y-1">
           <div className="flex items-center gap-2">
             <Input
               readOnly
-              value={result.url}
+              value={result.url ?? ''}
               aria-label="Owner invite link"
               onFocus={(e) => e.currentTarget.select()}
               className="font-mono text-xs"
@@ -231,14 +232,14 @@ function OwnerInvite({ org }: { readonly org: OrgRow }) {
               type="button"
               variant="outline"
               size="icon"
-              onClick={() => void copy(result.url)}
+              onClick={() => result.url && void copy(result.url)}
               aria-label="Copy invite link"
             >
               {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Not emailed. This link is shown only once. It expires in 72 hours.
+            This link is shown only once. It expires in 72 hours.
           </p>
         </div>
       )}

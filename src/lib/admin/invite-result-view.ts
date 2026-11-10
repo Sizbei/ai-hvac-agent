@@ -20,3 +20,14 @@ export function inviteResultView(r: {
   if (r.url) return { kind: "link", url: r.url };
   return { kind: "not_sent", line: "Invite created but not emailed." };
 }
+
+/** The platform console's owner invite: the platform admin always gets the copy
+ * link when one exists, alongside "Invite emailed." when it was emailed. */
+export function ownerInviteView(r: {
+  emailed: boolean;
+  url?: string;
+}): { line: string | null; url: string | null } {
+  const url = r.url ? r.url : null;
+  if (r.emailed) return { line: "Invite emailed.", url };
+  return { line: url ? null : "Invite created but not emailed.", url };
+}

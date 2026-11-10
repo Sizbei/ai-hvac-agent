@@ -4,11 +4,13 @@
  * Platform admins only. Issues an `admin` invite to the org's stored
  * owner_email through createInvite, with the platform admin as the actor —
  * which is what lets acceptInvite promote the acceptor to super_admin
- * (isOwnerPromotion). Also the re-send path: revoke the pending invite first,
- * or createInvite answers 409 INVITE_EXISTS.
+ * (isOwnerPromotion). Also the re-send path: once the previous invite has
+ * expired, createInvite revokes it and issues a new one; a still-live pending
+ * invite answers 409 INVITE_EXISTS.
  *
- * 201 { emailed, url? } — `url` is the one-time copy link, present only when
- * the invite wasn't emailed and NEXT_PUBLIC_APP_URL is set.
+ * 201 { emailed, url? } — `url` is the one-time copy link. The platform admin
+ * always gets it (controller ruling), present whenever NEXT_PUBLIC_APP_URL is
+ * set, because email delivery may be unconfigured or unverified.
  */
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
@@ -117,7 +119,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       expiresAt: new Date(result.invite.expiresAt),
       priorCount,
     });
-    const url = emailed ? null : inviteLink(result.token);
+    const url = inviteLink(result.token);
 
     await logAudit({
       organizationId: id,

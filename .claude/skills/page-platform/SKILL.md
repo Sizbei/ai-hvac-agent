@@ -22,9 +22,11 @@ access-gated) · console component
 "Send owner invite" → `POST /api/platform/organizations/[id]/owner-invite`
 (`src/app/api/platform/organizations/[id]/owner-invite/route.ts`): platform
 gate → same-origin → rate limit → `createInvite(id, { email: owner_email,
-role: "admin" }, session)` → `deliverInvite`. Returns `{ emailed, url? }`;
-404 `NO_OWNER_EMAIL`, 409 when an invite is already pending (revoke first to
-re-send). Only a platform admin's invite promotes the owner to super_admin.
+role: "admin" }, session)` → `deliverInvite`. Returns `{ emailed, url? }` —
+the platform admin always gets `url` (when `NEXT_PUBLIC_APP_URL` is set);
+404 `NO_OWNER_EMAIL`, 409 while an invite is still live. After expiry,
+`createInvite` revokes the stale invite, so re-sending works. Only a platform
+admin's invite promotes the owner to super_admin.
 
 **Data flow:** `PlatformConsole` fetches the org list on mount and after any
 mutation (create / purge). All API calls are client-side from the console component.

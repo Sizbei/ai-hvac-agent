@@ -43,11 +43,13 @@ const createInviteSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  let organizationId: string | null = null;
   try {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    organizationId = session.organizationId;
 
     const rateCheck = slidingWindow(
       `admin:invites-create:${session.userId}`,
@@ -144,8 +146,9 @@ export async function POST(request: NextRequest) {
       { invite: result.invite, emailed, ...(url ? { url } : {}) },
       201,
     );
-  } catch (error: unknown) {
-    logger.error({ error }, "Failed to create invite");
+  } catch {
+    // Never the error: a pg unique-violation detail echoes the invitee's email.
+    logger.error({ code: "INVITE_CREATE_FAILED", organizationId }, "Failed to create invite");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
   }
 }

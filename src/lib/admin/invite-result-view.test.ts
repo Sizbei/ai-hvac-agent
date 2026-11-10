@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inviteResultView } from "./invite-result-view";
+import { inviteResultView, ownerInviteView } from "./invite-result-view";
 
 describe("inviteResultView", () => {
   it("emailed → a confirmation line naming the address", () => {
@@ -31,5 +31,24 @@ describe("inviteResultView", () => {
       line: "Invite created but not emailed.",
     });
     expect(inviteResultView({ emailed: false, url: "", email: "c@s.com" }).kind).toBe("not_sent");
+  });
+});
+
+describe("ownerInviteView (platform console)", () => {
+  const url = "https://x/admin/invite/t";
+  it("emailed with a url → the line AND the copy link", () => {
+    expect(ownerInviteView({ emailed: true, url })).toEqual({ line: "Invite emailed.", url });
+  });
+  it("not emailed with a url → the copy link only", () => {
+    expect(ownerInviteView({ emailed: false, url })).toEqual({ line: null, url });
+  });
+  it("emailed without a url → the line only", () => {
+    expect(ownerInviteView({ emailed: true })).toEqual({ line: "Invite emailed.", url: null });
+  });
+  it("neither → says it was not emailed", () => {
+    expect(ownerInviteView({ emailed: false })).toEqual({
+      line: "Invite created but not emailed.",
+      url: null,
+    });
   });
 });

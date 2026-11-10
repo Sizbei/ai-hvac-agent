@@ -161,18 +161,27 @@ describe("POST /api/platform/organizations/[id]/owner-invite", () => {
       priorCount: 3,
     });
     const json = await res.json();
-    expect(json.data).toEqual({ emailed: true });
-    expect(JSON.stringify(json)).not.toContain(TOKEN);
+    // Controller ruling: the platform admin ALWAYS gets the copy link.
+    expect(json.data).toEqual({ emailed: true, url: LINK });
   });
 
-  it("returns the copy link once when not emailed", async () => {
+  it("re-sends after the previous owner invite expired (createInvite clears the stale slot)", async () => {
+    // createInvite revokes an expired pending invite itself; the route just
+    // succeeds instead of 409/500.
+    createInvite.mockResolvedValue({ ok: true, invite: { ...INVITE, id: "inv-2" }, token: TOKEN });
+    const res = await POST(req(), ctx());
+    expect(res.status).toBe(201);
+    expect(logAudit.mock.calls[0][0].entityId).toBe("inv-2");
+  });
+
+  it("returns the copy link when not emailed", async () => {
     deliverInvite.mockReturnValue({ emailed: false });
     const json = await (await POST(req(), ctx())).json();
     expect(json.data).toEqual({ emailed: false, url: LINK });
     expect(inviteLink).toHaveBeenCalledWith(TOKEN);
   });
 
-  it("omits url when not emailed and no app URL is configured", async () => {
+  it("omits url when no app URL is configured", async () => {
     deliverInvite.mockReturnValue({ emailed: false });
     inviteLink.mockReturnValue(null);
     const json = await (await POST(req(), ctx())).json();

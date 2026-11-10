@@ -52,8 +52,9 @@ vi.mock("@/lib/rate-limit", () => ({
   },
 }));
 
+const logError = vi.fn();
 vi.mock("@/lib/logger", () => ({
-  logger: { error: vi.fn(), info: vi.fn() },
+  logger: { error: (...a: unknown[]) => logError(...a), info: vi.fn() },
 }));
 
 import { NextRequest } from "next/server";
@@ -287,6 +288,18 @@ describe("POST /api/admin/invites", () => {
     expect(inviteEmailsLast24h.mock.invocationCallOrder[0]).toBeLessThan(
       createInvite.mock.invocationCallOrder[0],
     );
+  });
+
+  it("a failed create logs a code and the org id, never the error (it can echo the email)", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    createInvite.mockRejectedValue(new Error('duplicate key (email)=(secret@x.com)'));
+    logError.mockClear();
+    const res = await POST(postReq({ email: "secret@x.com", role: "technician" }));
+    expect(res.status).toBe(500);
+    expect(logError).toHaveBeenCalledTimes(1);
+    const logged = JSON.stringify(logError.mock.calls[0]);
+    expect(logged).toContain(SESSION.organizationId);
+    expect(logged).not.toContain("secret@x.com");
   });
 
   it("emails the 20th invite of 24h and not the 21st", async () => {

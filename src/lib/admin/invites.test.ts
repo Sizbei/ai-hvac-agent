@@ -15,6 +15,7 @@ vi.mock('drizzle-orm', () => ({
   asc: (c: unknown) => c,
   desc: (c: unknown) => c,
   gt: (...a: unknown[]) => ['gt', ...a],
+  lte: (...a: unknown[]) => ['lte', ...a],
   isNull: (c: unknown) => ['isNull', c],
   count: () => ['count'],
 }));
@@ -70,8 +71,10 @@ vi.mock('@/lib/billing/entitlements', () => ({
 const selectQueue: unknown[] = [];
 const insertQueue: unknown[] = [];
 const updateQueue: unknown[] = [];
+/** Chained calls (.set/.where/…) on every db.update, for shape assertions. */
+const updateLog: unknown[][] = [];
 
-function chain(resolved: unknown): unknown {
+function chain(resolved: unknown, log?: unknown[][]): unknown {
   const p: unknown = new Proxy(() => {}, {
     get(_t, prop) {
       if (prop === 'then') {
@@ -83,7 +86,10 @@ function chain(resolved: unknown): unknown {
           else resolve(resolved);
         };
       }
-      return () => p;
+      return (...args: unknown[]) => {
+        log?.push([prop, ...args]);
+        return p;
+      };
     },
     apply: () => p,
   });
@@ -94,7 +100,7 @@ vi.mock('@/lib/db', () => ({
   db: {
     select: () => chain(selectQueue.shift() ?? []),
     insert: () => chain(insertQueue.shift() ?? []),
-    update: () => chain(updateQueue.shift() ?? []),
+    update: () => chain(updateQueue.shift() ?? [], updateLog),
   },
 }));
 
@@ -155,6 +161,7 @@ beforeEach(() => {
   selectQueue.length = 0;
   insertQueue.length = 0;
   updateQueue.length = 0;
+  updateLog.length = 0;
   mockMaxStaff = 1000;
   process.env.PLATFORM_ADMIN_EMAILS = PLATFORM_EMAIL;
   process.env.PLATFORM_ORG_ID = PORG;
@@ -954,5 +961,58 @@ describe('getOwnerInviteTarget', () => {
   it('keeps a NULL owner email as null', async () => {
     selectQueue.push([{ name: 'Spears', ownerEmail: null }]);
     expect(await getOwnerInviteTarget(ORG)).toEqual({ name: 'Spears', ownerEmail: null });
+  });
+});
+
+describe('createInvite — re-invite after expiry', () => {
+  it('revokes the expired, unaccepted invite for the same email right before inserting', async () => {
+    selectQueue.push([]); // no existing user
+    selectQueue.push([]); // no LIVE invite (the old one has expired)
+    selectQueue.push([{ value: 0 }]); // seat count
+    insertQueue.push([
+      {
+        id: 'inv2',
+        email: 'owner@x.com',
+        role: 'admin',
+        expiresAt: new Date('2026-11-14T00:00:00Z'),
+        createdAt: new Date('2026-11-11T00:00:00Z'),
+      },
+    ]);
+    const res = await createInvite(
+      ORG,
+      { email: ' Owner@X.com ', role: 'admin' },
+      PLATFORM_ACTOR,
+    );
+    expect(res.ok).toBe(true);
+
+    const set = updateLog.find((c) => c[0] === 'set');
+    expect(set?.[1]).toEqual({ revokedAt: expect.any(Date) });
+    const where = updateLog.find((c) => c[0] === 'where')?.[1] as unknown[];
+    // Scoped to the org (withTenant mock echoes the conditions), this email,
+    // still pending, and already expired — a live invite is never touched.
+    expect(where).toEqual([
+      ['eq', 'i.email', 'owner@x.com'],
+      ['isNull', 'i.acceptedAt'],
+      ['isNull', 'i.revokedAt'],
+      ['lte', 'i.expiresAt', expect.any(Date)],
+    ]);
+  });
+
+  it('keeps invite_exists for a still-live pending invite, revoking nothing', async () => {
+    selectQueue.push([]); // no existing user
+    selectQueue.push([{ id: 'live' }]); // live invite
+    const res = await createInvite(ORG, { email: 'owner@x.com', role: 'admin' }, PLATFORM_ACTOR);
+    expect(res).toEqual({ ok: false, reason: 'invite_exists' });
+    expect(updateLog).toEqual([]);
+  });
+
+  it('revokes nothing when the invite is refused for seats', async () => {
+    mockMaxStaff = 1;
+    selectQueue.push([]); // no existing user
+    selectQueue.push([]); // no live invite
+    selectQueue.push([{ value: 1 }]); // at cap
+    const res = await createInvite(ORG, { email: 'n@x.com', role: 'technician' }, SUPER_ACTOR);
+    expect(res).toEqual({ ok: false, reason: 'seat_limit' });
+    expect(updateLog).toEqual([]);
   });
 });

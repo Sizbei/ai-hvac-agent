@@ -50,6 +50,12 @@ describe("buildInviteEmail", () => {
     expect(buildInviteEmail(ARGS).subject).toBe("You’re invited to Spears Services");
   });
 
+  it("strips control characters from the subject", () => {
+    expect(buildInviteEmail({ ...ARGS, orgName: "Acme\r\nBcc: x@y.com" }).subject).toBe(
+      "You’re invited to Acme Bcc: x@y.com",
+    );
+  });
+
   it("escapes the org name in the html", () => {
     const { html } = buildInviteEmail({ ...ARGS, orgName: "<b>X</b>" });
     expect(html).toContain("&lt;b&gt;X&lt;/b&gt;");

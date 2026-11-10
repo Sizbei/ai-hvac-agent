@@ -45,7 +45,8 @@ export function buildInviteEmail(p: {
   const org = escapeHtml(p.orgName);
   const url = escapeHtml(p.url);
 
-  const subject = `You’re invited to ${p.orgName}`;
+  // Control characters never reach a header (defence-in-depth; Resend is JSON).
+  const subject = `You’re invited to ${p.orgName.replace(/[\u0000-\u001f\u007f]+/g, " ")}`;
   const text = [
     `You’ve been invited to join ${p.orgName} as ${roleLabel}.`,
     "",
