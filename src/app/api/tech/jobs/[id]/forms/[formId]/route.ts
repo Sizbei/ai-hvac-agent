@@ -6,6 +6,7 @@
  */
 import type { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { isUuid } from "@/lib/validation/uuid";
 import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { errorResponse, successResponse } from "@/lib/api-response";
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { id, formId } = await params;
     const visit = request.nextUrl.searchParams.get("visit");
     if (!isUuid(id) || !isUuid(formId) || !isUuid(visit)) return errorResponse("Invalid request ID format", "INVALID_ID", 400);
-    const rate = slidingWindow(`tech:form:read:${session.userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
+    const rate = slidingWindow(`tech:form:read:${rateKeyFor(session)}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
     if (!rate.allowed) return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
     const r = await getJobForm(session.organizationId, session.userId, id, formId, visit);
     if (r.kind === "job_not_found") return errorResponse(FORM_REASON.job_not_found.message, "NOT_FOUND", 404);

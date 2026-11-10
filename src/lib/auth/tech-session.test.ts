@@ -146,14 +146,15 @@ describe("getTechSession preview fallback (View as a technician)", () => {
   });
 
   it("falls back to the previewed technician", async () => {
-    jar({ [PREVIEW_COOKIE]: await cookie() });
+    const exp = nowS() + 600;
+    jar({ [PREVIEW_COOKIE]: await cookie({ exp }) });
     expect(await getTechSession()).toEqual({
       userId: TECH,
       organizationId: PLATFORM_ORG,
       email: "tess@example.com",
       name: "Tess Tech",
       role: "technician",
-      preview: true,
+      preview: { adminUserId: ADMIN.userId, exp },
     });
     // The target lookup is scoped to the admin's org, the target id and active users.
     const q = new PgDialect().sqlToQuery(execute.mock.calls[0][0] as SQL);

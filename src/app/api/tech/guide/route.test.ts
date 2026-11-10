@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: vi.fn() }));
 vi.mock("@/lib/tech/guide-queries", () => ({ getGuide: vi.fn(), hideGuide: vi.fn() }));
 vi.mock("@/lib/tenancy/features", () => ({ getFeatures: vi.fn() }));
-vi.mock("@/lib/rate-limit", async (orig) => ({ ...(await orig<typeof import("@/lib/rate-limit")>()), slidingWindow: () => ({ allowed: true }) }));
+const slidingWindow = vi.fn((..._a: unknown[]) => ({ allowed: true }));
+vi.mock("@/lib/rate-limit", async (orig) => ({ ...(await orig<typeof import("@/lib/rate-limit")>()), slidingWindow: (...a: unknown[]) => slidingWindow(...a) }));
 
 import { GET, PATCH } from "./route";
 import { getTechSession } from "@/lib/auth/tech-session";
@@ -34,11 +35,16 @@ describe("GET /api/tech/guide", () => {
     expect(res.status).toBe(200);
     expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: true }, write: true });
   });
-  it("a preview session reads without writing stamps", async () => {
-    (getTechSession as unknown as Mock).mockResolvedValue({ ...session, preview: true });
+  it("a preview session reads without writing stamps, limited as the admin", async () => {
+    (getTechSession as unknown as Mock).mockResolvedValue({ ...session, preview: { adminUserId: "admin-1", exp: 1 } });
     const res = await GET();
     expect(res.status).toBe(200);
     expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: true }, write: false });
+    expect(slidingWindow.mock.calls[0][0]).toBe("tech:guide-get:admin-1");
+  });
+  it("a real technician is limited by their own id", async () => {
+    await GET();
+    expect(slidingWindow.mock.calls[0][0]).toBe("tech:guide-get:u");
   });
   it("falls back to pay links off when the feature read throws", async () => {
     (getFeatures as unknown as Mock).mockRejectedValue(new Error("db"));

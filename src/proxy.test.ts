@@ -129,6 +129,9 @@ describe("proxy on /tech (Task 19)", () => {
       expect(res.status).toBe(200);
       expect(res.headers.get("set-cookie")).toBeNull();
       expect(res.headers.get("location")).toBeNull();
+      // The proxy adds no page policy on /tech (the camera/geolocation pages keep theirs).
+      expect(res.headers.get("Content-Security-Policy")).toBeNull();
+      expect(res.headers.get("Permissions-Policy")).toBeNull();
     }
     expect(decisionSpy).not.toHaveBeenCalled();
   });

@@ -9,6 +9,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import {
   closeGeneralEntry,
   getOpenGeneralEntry,
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const rate = slidingWindow(
-      `tech:time:${session.userId}`,
+      `tech:time:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );

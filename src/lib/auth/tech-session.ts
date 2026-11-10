@@ -14,8 +14,14 @@ import { isPlatformAdmin } from "./authz";
 import { PREVIEW_COOKIE, verifyPreviewCookie } from "./preview-cookie";
 import type { TechSessionPayload } from "./tech-config";
 
-/** A technician session; `preview` marks the platform owner's read-only "View as". */
-export type TechSession = TechSessionPayload & { readonly preview?: true };
+/**
+ * A technician session. `preview` is set only for the platform owner's
+ * read-only "View as": the real admin (rate limits stay theirs) and the
+ * cookie's expiry (the banner reloads then).
+ */
+export type TechSession = TechSessionPayload & {
+  readonly preview?: { readonly adminUserId: string; readonly exp: number };
+};
 
 // A DISTINCT cookie from the admin session (hvac_admin_session) so the two
 // sessions never alias: getTechSession reads only this cookie, getAdminSession
@@ -92,7 +98,7 @@ export async function getTechSession(): Promise<TechSession | null> {
  * platform admin's session, a preview cookie that verifies and is bound to that
  * session, and a target that is an active technician of the session's org. The
  * proxy refuses every non-GET while such a cookie is valid and bound, and
- * `preview: true` tells GET handlers not to write. Anything else → null.
+ * `preview` tells GET handlers not to write. Anything else → null.
  */
 async function previewTechSession(previewCookie: string | undefined): Promise<TechSession | null> {
   if (!previewCookie) return null;
@@ -112,7 +118,7 @@ async function previewTechSession(previewCookie: string | undefined): Promise<Te
       email: String(row.email),
       name: String(row.name),
       role: "technician",
-      preview: true,
+      preview: { adminUserId: admin.userId, exp: claims.exp },
     };
   } catch (error) {
     logger.error(

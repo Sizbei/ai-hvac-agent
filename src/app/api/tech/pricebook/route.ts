@@ -11,6 +11,7 @@
  */
 import type { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { listPricebookItemsForAdmin } from "@/lib/admin/pricebook-queries";
 import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -21,8 +22,8 @@ const INVOICE_SEARCH_MIN_CHARS = 2;
 /** Longer queries return nothing: no item name is that long, and each is three ILIKE scans. */
 const INVOICE_SEARCH_MAX_CHARS = 100;
 
-async function invoiceSearch(organizationId: string, userId: string, q: string) {
-  const rate = slidingWindow(`tech:pricebook:${userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
+async function invoiceSearch(organizationId: string, rateKey: string, q: string) {
+  const rate = slidingWindow(`tech:pricebook:${rateKey}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
   if (!rate.allowed) {
     return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
   }
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     }
     const params = new URL(request.url).searchParams;
     if (params.get("scope") === "invoice") {
-      return await invoiceSearch(session.organizationId, session.userId, params.get("q") ?? "");
+      return await invoiceSearch(session.organizationId, rateKeyFor(session), params.get("q") ?? "");
     }
     // Fetch all physical goods by type — no pagination needed here since this
     // is a small picker and we filter server-side before returning.

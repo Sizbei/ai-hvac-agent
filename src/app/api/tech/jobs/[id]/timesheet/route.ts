@@ -12,6 +12,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { isJobOwnedByTech } from "@/lib/tech/field-queries";
 import {
   clockIn,
@@ -89,7 +90,7 @@ export async function POST(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const rate = slidingWindow(
-      `tech:timesheet:${session.userId}`,
+      `tech:timesheet:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );

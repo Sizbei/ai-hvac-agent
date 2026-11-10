@@ -14,6 +14,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import {
   addJobMaterial,
   listJobMaterials,
@@ -84,7 +85,7 @@ export async function POST(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const rate = slidingWindow(
-      `tech:materials:${session.userId}`,
+      `tech:materials:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );
@@ -146,7 +147,7 @@ export async function DELETE(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const rate = slidingWindow(
-      `tech:materials:${session.userId}`,
+      `tech:materials:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );

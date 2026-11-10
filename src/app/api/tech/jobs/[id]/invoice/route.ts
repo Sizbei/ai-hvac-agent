@@ -10,6 +10,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { isUuid } from "@/lib/validation/uuid";
 import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { getTechInvoiceView } from "@/lib/tech/invoice-queries";
@@ -33,7 +34,7 @@ export async function GET(
     const { id } = await params;
     if (!isUuid(id)) return errorResponse("Invalid request ID format", "INVALID_ID", 400);
     const rate = slidingWindow(
-      `tech:invoice:read:${session.userId}`,
+      `tech:invoice:read:${rateKeyFor(session)}`,
       RATE_LIMITS.adminRead.maxRequests,
       RATE_LIMITS.adminRead.windowMs,
     );

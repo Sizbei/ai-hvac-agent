@@ -13,6 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { listJobPhotos, isJobOwnedByTech } from "@/lib/tech/field-queries";
 import { addJobPhoto } from "@/lib/tech/photo-writes";
 import { FILE_TOO_LARGE_COPY, TECH_UPLOAD_LIMIT_BYTES } from "@/lib/tech/upload-limits";
@@ -42,7 +43,7 @@ export async function POST(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const rate = slidingWindow(
-      `tech:photo:${session.userId}`,
+      `tech:photo:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );

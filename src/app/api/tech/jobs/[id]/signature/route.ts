@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { isSameOriginRequest } from "@/lib/session-csrf";
 import { isUuid } from "@/lib/validation/uuid";
 import { recordSignature } from "@/lib/tech/field-queries";
@@ -62,7 +63,7 @@ export async function POST(
       return errorResponse("Invalid request ID format", "INVALID_ID", 400);
     }
     const rate = slidingWindow(
-      `tech:signature:${session.userId}`,
+      `tech:signature:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );
