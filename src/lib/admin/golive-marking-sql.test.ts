@@ -86,7 +86,13 @@ describe("golive marking SQL", () => {
 
   it("a cancelled request with a future scheduled_date is not a visit", () => {
     const { flat } = render(visitFromTodaySql(ORG));
-    expect(flat).toMatch(/^\(\(sr\.status <> 'cancelled'::request_status AND sr\.scheduled_date >= /);
+    expect(flat).toMatch(/^COALESCE\(\(\(sr\.status <> 'cancelled'::request_status AND sr\.scheduled_date >= /);
+  });
+
+  it("the visit predicate is two-valued, so a NULL scheduled_date is simply not a visit", () => {
+    const { flat } = render(visitFromTodaySql(ORG));
+    expect(flat).toMatch(/^COALESCE\(.*, false\)$/);
+    expect(render(dryRunSql(ORG)).flat).toContain("AND NOT COALESCE(((sr.status <> 'cancelled'");
   });
 
   it("today starts at local midnight in the org timezone with the business fallback", () => {

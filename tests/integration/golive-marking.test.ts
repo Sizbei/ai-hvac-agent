@@ -138,6 +138,9 @@ async function seed() {
   // a cancelled future appointment
   await chain("cancelledVisit", "completed");
   await appointment(f.cancelledVisitR!, sql`now() + interval '3 days'`, true);
+  // an old open request that was never scheduled
+  await chain("stale", "pending");
+  await db.execute(sql`UPDATE service_requests SET created_at = now() - interval '90 days' WHERE id = ${f.staleR}`);
   // a cancelled request still carrying a future scheduled_date
   await chain("cancelledReq", "cancelled", sql`now() + interval '3 days'`);
   // the local-midnight boundary in America/Chicago
@@ -211,6 +214,12 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("the dry run counts an old open request with no scheduled date", async () => {
+    const dry = (await run(m.dryRunSql(org)))[0]!;
+    // staleR is the only open request created over 60 days ago
+    expect(dry.old_open_requests_kept).toBe(1);
+  });
+
   it("history hides completed request without future visit, paid invoice, FieldPulse draft, sold estimate, abandoned orphan session", async () => {
     await apply("history");
     await expectHidden(true, [
@@ -273,6 +282,9 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     expect(out.stderr).toMatch(/^Refused: .* already has \d+ hidden rows; pass --reapply to mark again\n$/);
     expect(await hiddenTotal()).toBe(before);
     expect(await batch(m.markStatements(org, "history"))).toEqual([0, 0, 0, 0, 0]);
+    const again = spawnScript(["--org", org, "--apply", "--reapply"]);
+    expect(again.status).toBe(0);
+    expect(again.stdout).toContain("Hid rows for");
   });
 
   it("unhide restores every row", async () => {

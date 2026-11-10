@@ -15,7 +15,9 @@
  *   empty    keeps only visits from today, resumable conversations and their customers
  *
  * Safety (plan ruling 5): --apply refuses when the org already has hidden rows
- * unless --reapply is passed. Any run against the production host
+ * unless --reapply is passed. --reapply only hides more (it never un-hides,
+ * and re-hides post-go-live rows the mode does not keep); to switch modes run
+ * --unhide first, then --apply. Any run against the production host
  * (ep-withered-hill) needs --prod; only the user passes it, never an agent.
  * DATABASE_URL comes from the environment, else from .env.local.
  */

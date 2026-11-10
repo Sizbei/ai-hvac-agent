@@ -20,8 +20,6 @@ import { BUSINESS_TIME_ZONE } from "./calendar-time";
 
 export type MarkingMode = "history" | "empty";
 
-export const MARKING_MODES: readonly MarkingMode[] = ["history", "empty"];
-
 /** The five tables 0059 gave `hidden_from_org`, children first. */
 export const MARKED_TABLES = [
   "invoices",
@@ -57,10 +55,11 @@ export function todayStartSql(org: string): SQL {
 /**
  * The request (correlated alias `sr`) has a visit from today on: its own
  * scheduled_date (unless the request is cancelled; its mirrored visit is), or a
- * live (not cancelled) appointment.
+ * live (not cancelled) appointment. Two-valued: a NULL scheduled_date is false,
+ * not NULL, so `NOT <visit>` counts never-scheduled requests.
  */
 export function visitFromTodaySql(org: string): SQL {
-  return sql`((sr.status <> 'cancelled'::request_status AND sr.scheduled_date >= ${todayStartSql(org)}) OR EXISTS (SELECT 1 FROM appointments a WHERE a.organization_id = ${org}::uuid AND a.service_request_id = sr.id AND a.cancelled_at IS NULL AND COALESCE(a.starts_at, a.scheduled_date) >= ${todayStartSql(org)}))`;
+  return sql`COALESCE(((sr.status <> 'cancelled'::request_status AND sr.scheduled_date >= ${todayStartSql(org)}) OR EXISTS (SELECT 1 FROM appointments a WHERE a.organization_id = ${org}::uuid AND a.service_request_id = sr.id AND a.cancelled_at IS NULL AND COALESCE(a.starts_at, a.scheduled_date) >= ${todayStartSql(org)})), false)`;
 }
 
 export function keptRequestIdsSql(org: string, mode: MarkingMode): SQL {
