@@ -18,6 +18,7 @@ import {
 import { cn } from '@/lib/utils';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { BackToTourStrip } from '@/components/admin/setup/back-to-tour-strip';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -325,6 +326,7 @@ export default function InvoicesPage() {
 
   return (
     <PageShell>
+      <BackToTourStrip />
       <PageHeader
         title="Invoices"
         subtitle="Collections — who owes you, how overdue, and one tap to chase it."

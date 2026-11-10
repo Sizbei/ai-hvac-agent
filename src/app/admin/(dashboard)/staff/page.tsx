@@ -17,6 +17,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { StaffRecord } from '@/lib/admin/types';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { BackToTourStrip } from '@/components/admin/setup/back-to-tour-strip';
 import { SectionDivider } from '@/components/admin/ui/section-divider';
 import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
 import { useOpenFromParam } from '@/hooks/use-open-from-param';
@@ -112,6 +113,7 @@ export default function StaffPage() {
 
   return (
     <PageShell>
+      <BackToTourStrip />
       <PageHeader
         title="Staff"
         subtitle="Manage admins and technicians, roles, and passwords."

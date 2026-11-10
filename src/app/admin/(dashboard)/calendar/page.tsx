@@ -17,6 +17,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { BackToTourStrip } from '@/components/admin/setup/back-to-tour-strip';
 import { TabGroup } from '@/components/admin/ui/tab-group';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
 import { businessWeekDates } from '@/lib/admin/calendar-time';
@@ -208,6 +209,7 @@ export default function CalendarPage() {
 
   return (
     <PageShell>
+      <BackToTourStrip />
       <PageHeader
         title="Calendar"
         subtitle="Scheduled requests by technician, in Eastern time."

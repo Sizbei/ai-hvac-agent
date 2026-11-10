@@ -20,6 +20,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { BackToTourStrip } from '@/components/admin/setup/back-to-tour-strip';
 import { Pager } from '@/components/admin/ui/pager';
 import type { RequestSortKey } from '@/lib/admin/types';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
@@ -106,6 +107,7 @@ export default function AdminRequestsPage() {
 
   return (
     <PageShell>
+      <BackToTourStrip />
       <PageHeader
         title="Service requests"
         actions={
