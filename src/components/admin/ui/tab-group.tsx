@@ -111,7 +111,7 @@ export function TabGroup({
             onClick={() => onTabChange(tab.id)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={cn(
-              "relative inline-flex min-h-9 items-center gap-1.5 px-3 text-[13px] font-medium transition-colors max-sm:min-h-[44px]",
+              "relative inline-flex min-h-9 items-center gap-1.5 px-3 text-[13px] font-medium transition-colors max-sm:min-h-[44px] max-sm:min-w-11 max-sm:justify-center",
               "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
               isActive
                 ? "text-foreground after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-marker"
