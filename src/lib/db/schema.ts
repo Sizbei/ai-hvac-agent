@@ -254,6 +254,9 @@ export const organizations = pgTable("organizations", {
   // active subscription. Used to show "renews/ends on" and to reason about
   // grace; enforcement keys off `status`, not this timestamp.
   currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+  // Go-live: per-org feature switches (e.g. reviewRequests, payLinks). A
+  // missing key means the feature's default; never NULL.
+  featureFlags: jsonb("feature_flags").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -454,6 +457,10 @@ export const customerSessions = pgTable(
     // "Needs action" in the inbox). A customer message after this time makes
     // it need action again. NULL = never handled. Who did it is in audit_log.
     handledAt: timestamp("handled_at", { withTimezone: true }),
+    // Go-live: imported history hidden from the org's own view (platform admins
+    // still see it). New rows default visible; the unhide_parents() trigger
+    // (migration 0059) clears it when a visible child attaches.
+    hiddenFromOrg: boolean("hidden_from_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -642,6 +649,10 @@ export const serviceRequests = pgTable(
     // fieldpulse_data: spillover jsonb for FP job fields not promoted to typed columns.
     // Only non-PII safe fields (tags, is_multiday_job). NULL on native rows.
     fieldpulseData: jsonb("fieldpulse_data"),
+    // Go-live: imported history hidden from the org's own view (platform admins
+    // still see it). New rows default visible; the unhide_parents() trigger
+    // (migration 0059) clears it when a visible child attaches.
+    hiddenFromOrg: boolean("hidden_from_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -867,6 +878,10 @@ export const customers = pgTable(
     fieldpulseCustomFields: jsonb("fieldpulse_custom_fields").$type<
       { name: string; value: string }[]
     >(),
+    // Go-live: imported history hidden from the org's own view (platform admins
+    // still see it). New rows default visible; the unhide_parents() trigger
+    // (migration 0059) clears it when a visible child attaches.
+    hiddenFromOrg: boolean("hidden_from_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -2910,6 +2925,10 @@ export const estimates = pgTable(
     title: text("title"),
     // fieldpulse_data: spillover jsonb for FP fields not promoted to typed columns.
     fieldpulseData: jsonb("fieldpulse_data"),
+    // Go-live: imported history hidden from the org's own view (platform admins
+    // still see it). New rows default visible; the unhide_parents() trigger
+    // (migration 0059) clears it when a visible child attaches.
+    hiddenFromOrg: boolean("hidden_from_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -3017,6 +3036,10 @@ export const invoices = pgTable(
     dueDate: timestamp("due_date", { withTimezone: true }),
     // fieldpulse_data: spillover jsonb for FP invoice fields not promoted to typed columns.
     fieldpulseData: jsonb("fieldpulse_data"),
+    // Go-live: imported history hidden from the org's own view (platform admins
+    // still see it). New rows default visible; the unhide_parents() trigger
+    // (migration 0059) clears it when a visible child attaches.
+    hiddenFromOrg: boolean("hidden_from_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

@@ -29,6 +29,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/field-estimate.test.ts",
   // M3d forms + site view: writers, trigger, erase and site reads against the dev DB (throwaway orgs).
   "tests/integration/field-forms.test.ts",
+  // Go-live: hidden_from_org un-hide triggers (migration 0059) against the dev DB (throwaway org).
+  "tests/integration/golive-unhide.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

@@ -35,12 +35,13 @@ async function seed(): Promise<void> {
     .insert(schema.organizations)
     .values({
       id: DEMO_ORG_ID,
-      name: "Demo HVAC Company",
+      name: "Spears Services",
       slug: "demo-hvac",
+      featureFlags: { reviewRequests: false, payLinks: false },
     })
     .onConflictDoNothing();
 
-  console.log("  Created demo organization: Demo HVAC Company");
+  console.log("  Created demo organization: Spears Services");
 
   // 2. Admin user
   await db
