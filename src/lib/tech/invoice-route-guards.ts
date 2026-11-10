@@ -8,6 +8,7 @@ import type { NextRequest, NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import type { TechSessionPayload } from "@/lib/auth/tech-config";
 import { isSameOriginRequest } from "@/lib/session-csrf";
 import { isUuid } from "@/lib/validation/uuid";
@@ -64,7 +65,7 @@ export async function frontGates(
   if (!session) return fail("Unauthorized", "UNAUTHORIZED", 401);
   if (!isSameOriginRequest(request)) return fail("Forbidden", "FORBIDDEN", 403);
   if (!isUuid(id)) return fail("Invalid request ID format", "INVALID_ID", 400);
-  const rate = slidingWindow(`tech:${bucket}:write:${session.userId}`, limit.maxRequests, limit.windowMs);
+  const rate = slidingWindow(`tech:${bucket}:write:${rateKeyFor(session)}`, limit.maxRequests, limit.windowMs);
   if (!rate.allowed) return fail("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
   return { ok: true, session };
 }

@@ -11,6 +11,7 @@
 import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import {
   findAllAssignments, findReadableJob, findTechAssignments, hasOtherOpenRows, hasProgress, isOpen,
   pickActiveVisit, type TechAssignmentRow,
@@ -50,7 +51,7 @@ export async function POST(
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
     const rate = slidingWindow(
-      `tech:status:${session.userId}`,
+      `tech:status:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
       RATE_LIMITS.adminMutation.windowMs,
     );

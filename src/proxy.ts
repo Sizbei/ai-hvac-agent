@@ -184,5 +184,5 @@ async function routeRequest(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*", "/admin/:path*", "/embed/:path*", "/embed"],
+  matcher: ["/api/:path*", "/admin/:path*", "/embed/:path*", "/embed", "/tech/:path*"],
 };

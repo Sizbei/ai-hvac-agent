@@ -6,6 +6,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { getGuide, hideGuide } from "@/lib/tech/guide-queries";
 import { isSameOriginRequest } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -21,14 +22,15 @@ export async function GET() {
   try {
     const session = await getTechSession();
     if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
-    const rate = slidingWindow(`tech:guide-get:${session.userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
+    const rate = slidingWindow(`tech:guide-get:${rateKeyFor(session)}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
     if (!rate.allowed) return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     // Copy only: a failed flag read must not break the guide, and "off" is the safe wording.
     const features = await getFeatures(session.organizationId).catch((error) => {
       logger.warn({ code: errorCode(error) }, "Feature read failed for the technician guide; using pay links off");
       return { payLinks: false };
     });
-    return successResponse(await getGuide(session.organizationId, session.userId, { features }));
+    // "View as" a technician is read-only: derive the steps, never stamp them.
+    return successResponse(await getGuide(session.organizationId, session.userId, { features, write: !session.preview }));
   } catch (error) {
     logger.error({ code: errorCode(error) }, "Failed to load the technician guide");
     return errorResponse("Couldn't load the guide.", "INTERNAL_ERROR", 500);
@@ -40,7 +42,7 @@ export async function PATCH(request: NextRequest) {
     const session = await getTechSession();
     if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     if (!isSameOriginRequest(request)) return errorResponse("Forbidden", "FORBIDDEN", 403);
-    const rate = slidingWindow(`tech:guide-patch:${session.userId}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
+    const rate = slidingWindow(`tech:guide-patch:${rateKeyFor(session)}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
     if (!rate.allowed) return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     const body = await readJsonBody(request);
     const parsed = body.ok ? patchSchema.safeParse(body.data) : null;
