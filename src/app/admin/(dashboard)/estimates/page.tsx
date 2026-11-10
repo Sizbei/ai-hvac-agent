@@ -17,6 +17,8 @@ import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { EmptyStateAction } from '@/components/admin/ui/empty-state-action';
+import { emptyActionFor } from '@/lib/admin/empty-state-actions';
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { estimateAgeDays, estimateTotalLabel } from '@/lib/admin/estimate-list-display';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -316,6 +318,14 @@ export default function EstimatesPage() {
             icon={FileText}
             title="No estimates"
             description={emptyMessage(activeBucket)}
+            action={
+              <EmptyStateAction
+                action={emptyActionFor('estimates', {
+                  hasActiveFilters: Boolean(debouncedSearch) || activeBucket !== 'open',
+                })}
+                onCallback={() => setCreateOpen(true)}
+              />
+            }
           />
         </Card>
       ) : (

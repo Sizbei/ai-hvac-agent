@@ -19,6 +19,8 @@ import { cn } from '@/lib/utils';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { EmptyStateAction } from '@/components/admin/ui/empty-state-action';
+import { emptyActionFor } from '@/lib/admin/empty-state-actions';
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Pager } from '@/components/admin/ui/pager';
@@ -483,6 +485,15 @@ export default function InvoicesPage() {
                 : filter === 'overdue' && !debouncedSearch
                   ? 'No overdue invoices right now.'
                   : 'No invoices match this filter. Try a different one.'
+            }
+            action={
+              <EmptyStateAction
+                action={emptyActionFor('invoices', {
+                  // Overdue is the default tab, so it still counts as the day-one view.
+                  hasActiveFilters:
+                    (filter !== 'all' && filter !== 'overdue') || Boolean(debouncedSearch),
+                })}
+              />
             }
           />
         </Card>

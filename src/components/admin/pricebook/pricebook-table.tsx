@@ -12,10 +12,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Package } from 'lucide-react';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import { computeMargin } from '@/lib/admin/margin';
 import type { PricebookItem } from '@/hooks/use-pricebook';
+import { EmptyStateAction } from '@/components/admin/ui/empty-state-action';
+import { emptyActionFor } from '@/lib/admin/empty-state-actions';
+import { EmptyState } from '@/components/admin/ui/empty-state';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 
@@ -29,6 +32,8 @@ interface PricebookTableProps {
   /** True when any search or filter is narrowing the list. */
   readonly isFiltered?: boolean;
   readonly onClearFilters?: () => void;
+  /** Day-one "Add item" action (the page's existing add handler). */
+  readonly onCreate?: () => void;
 }
 
 function TypeBadge({ type }: { type: string }) {
@@ -66,25 +71,41 @@ export function PricebookTable({
   searchTerm = '',
   isFiltered = false,
   onClearFilters,
+  onCreate,
 }: PricebookTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (!isLoading && items.length === 0) {
     return (
-      <div className="space-y-3 py-12 text-center text-muted-foreground">
-        <p>
-          {isFiltered
+      <EmptyState
+        icon={Package}
+        title={
+          isFiltered
             ? searchTerm.trim()
               ? `No items match “${searchTerm.trim()}”.`
               : 'No items match these filters.'
-            : 'No pricebook items yet.'}
-        </p>
-        {isFiltered && onClearFilters && (
-          <Button type="button" variant="outline" size="sm" onClick={onClearFilters}>
-            Clear search and filters
-          </Button>
-        )}
-      </div>
+            : 'No pricebook items yet'
+        }
+        description={
+          isFiltered
+            ? 'Try a different search or clear the filters.'
+            : 'Add the services, materials and equipment you price jobs with.'
+        }
+        action={
+          isFiltered ? (
+            onClearFilters ? (
+              <Button type="button" variant="outline" size="sm" onClick={onClearFilters}>
+                Clear search and filters
+              </Button>
+            ) : undefined
+          ) : (
+            <EmptyStateAction
+              action={emptyActionFor('pricebook', { hasActiveFilters: isFiltered })}
+              onCallback={onCreate}
+            />
+          )
+        }
+      />
     );
   }
 

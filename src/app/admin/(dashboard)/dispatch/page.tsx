@@ -15,6 +15,8 @@ import { PageHeader } from '@/components/admin/ui/page-header';
 import { SectionHeading } from '@/components/admin/ui/section-heading';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { EmptyStateAction } from '@/components/admin/ui/empty-state-action';
+import { emptyActionFor } from '@/lib/admin/empty-state-actions';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
 import { businessIsoDate } from '@/lib/admin/calendar-time';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
@@ -210,6 +212,11 @@ export default function DispatchPage() {
               title="No active technicians"
               description="Add technicians under Staff to start dispatching jobs."
               className="mx-auto"
+              action={
+                <EmptyStateAction
+                  action={emptyActionFor('dispatch', { hasActiveFilters: false })}
+                />
+              }
             />
           )}
         </div>

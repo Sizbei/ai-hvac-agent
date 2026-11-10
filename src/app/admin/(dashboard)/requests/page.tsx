@@ -168,6 +168,7 @@ export default function AdminRequestsPage() {
         requests={requests}
         isLoading={isLoading}
         onRowClick={(req) => setSelectedRequestId(req.id)}
+        onCreate={() => setCreateOpen(true)}
         hasActiveFilters={
           !!statusFilter || !!urgencyFilter || !!assignedToFilter || !!debouncedSearch || isAfterHoursFilter
         }
