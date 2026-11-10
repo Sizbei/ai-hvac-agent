@@ -360,7 +360,7 @@ export default function EstimatesPage() {
                           <Link
                             href={`/admin/estimates/${est.id}`}
                             onClick={(e) => e.stopPropagation()}
-                            className="font-semibold hover:underline focus-visible:underline focus-visible:outline-none"
+                            className="inline-flex font-semibold hover:underline focus-visible:underline focus-visible:outline-none max-sm:min-h-11 max-sm:min-w-11 max-sm:items-center"
                           >
                             {est.customerName ?? (est.customerId ? 'Customer' : 'No customer')}
                           </Link>
@@ -401,7 +401,7 @@ export default function EstimatesPage() {
                           aria-expanded={isExpanded}
                           aria-label={isExpanded ? 'Collapse row' : 'Expand row'}
                           onClick={toggle}
-                          className="ml-auto flex items-center justify-center rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="ml-auto flex items-center justify-center rounded text-muted-foreground max-sm:min-h-11 max-sm:min-w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           {isExpanded
                             ? <ChevronDown className="size-4" />

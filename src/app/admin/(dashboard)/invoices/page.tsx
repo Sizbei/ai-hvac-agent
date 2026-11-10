@@ -436,7 +436,7 @@ export default function InvoicesPage() {
           {/* Balance range — one fused field: a single $ marker labels the pair
               and an internal hairline splits it, so two empty boxes stop
               reading as loose clutter. Dollars in UI, converted to cents. */}
-          <div className="ml-auto flex h-[34px] items-center rounded-md border border-border-input bg-surface-raised shadow-[inset_0_1px_2px_oklch(0.245_0.010_95/0.05)] transition-[border-color] duration-[var(--dur-hover)] focus-within:border-primary focus-within:outline-2 focus-within:-outline-offset-1 focus-within:outline-ring">
+          <div className="ml-auto flex h-[34px] items-center max-sm:min-h-11 rounded-md border border-border-input bg-surface-raised shadow-[inset_0_1px_2px_oklch(0.245_0.010_95/0.05)] transition-[border-color] duration-[var(--dur-hover)] focus-within:border-primary focus-within:outline-2 focus-within:-outline-offset-1 focus-within:outline-ring">
             <span aria-hidden="true" className="pl-2.5 pr-1 font-mono text-[13px] text-muted-foreground">$</span>
             <input
               type="number"
@@ -445,7 +445,7 @@ export default function InvoicesPage() {
               placeholder="Min"
               value={minDollars}
               onChange={(e) => setMinDollars(e.target.value)}
-              className="w-[62px] bg-transparent font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
+              className="w-[62px] max-sm:min-h-11 bg-transparent font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
               aria-label="Minimum balance in dollars"
             />
             <span aria-hidden="true" className="h-[18px] w-px shrink-0 bg-border" />
@@ -456,7 +456,7 @@ export default function InvoicesPage() {
               placeholder="Max"
               value={maxDollars}
               onChange={(e) => setMaxDollars(e.target.value)}
-              className="w-[62px] bg-transparent pl-2.5 pr-2.5 font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
+              className="w-[62px] max-sm:min-h-11 bg-transparent pl-2.5 pr-2.5 font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
               aria-label="Maximum balance in dollars"
             />
           </div>
