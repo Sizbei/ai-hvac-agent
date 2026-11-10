@@ -1,0 +1,62 @@
+[
+  {
+    "id": "src/lib/admin/queries.ts#getRequests",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#getRequestById",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#buildDashboardStatsQuery",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#buildDashboardOverdueInvoicesQuery",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#getDashboardOverview",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#placedByRequestQuery",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#placedByVisitQuery",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#getSchedulingCalendar",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#getAgenda",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#getCustomerBookings",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#countUnscheduledRequests",
+    "reason": "Task 10 sweep A: request/dashboard/calendar display read."
+  },
+  {
+    "id": "src/lib/admin/conversation-queries.ts#buildNeedsActionCountQuery",
+    "reason": "Task 10 sweep A: dashboard needs-action count (ruling 11)."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#listUnscheduledRequests",
+    "reason": "Task 10 sweep A: unscheduled-requests list."
+  },
+  {
+    "id": "src/lib/admin/dispatch-exceptions-queries.ts#getDispatchExceptions",
+    "reason": "Task 10 sweep A: dispatch exceptions rail."
+  },
+  {
+    "id": "src/app/api/admin/dispatch/map/route.ts#GET",
+    "reason": "Task 10 sweep A: dispatch map pins."
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "src/lib/admin/invoice-queries.ts#collectedThisMonthCents",
+    "reason": "Task 12 sweep C: invoice list/detail/money tiles."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#getInvoiceSummaryStats",
+    "reason": "Task 12 sweep C: invoice list/detail/money tiles."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#listInvoices",
+    "reason": "Task 12 sweep C: invoice list/detail/money tiles."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#getInvoiceDetailById",
+    "reason": "Task 12 sweep C: invoice list/detail/money tiles."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#getEstimatePipelineStats",
+    "reason": "Task 12 sweep C: estimates pipeline list/detail."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#listEstimates",
+    "reason": "Task 12 sweep C: estimates pipeline list/detail."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#getEstimateDetailById",
+    "reason": "Task 12 sweep C: estimates pipeline list/detail."
+  },
+  {
+    "id": "src/lib/admin/financing-queries.ts#listFinancingApplications",
+    "reason": "Task 12 sweep C: financing applications list."
+  }
+]

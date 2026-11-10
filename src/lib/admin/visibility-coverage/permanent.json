@@ -1,0 +1,442 @@
+[
+  {
+    "id": "src/lib/admin/conversation-queries.ts#needsActionSql",
+    "reason": "Module-level SQL fragment interpolated into a caller's query; the caller applies the filter."
+  },
+  {
+    "id": "src/lib/admin/conversation-queries.ts#lastActivitySql",
+    "reason": "Module-level SQL fragment interpolated into a caller's query; the caller applies the filter."
+  },
+  {
+    "id": "src/lib/admin/conversation-queries.ts#hasContentSql",
+    "reason": "Module-level SQL fragment interpolated into a caller's query; the caller applies the filter."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#dashboardRequestSelect",
+    "reason": "Module-level SQL fragment interpolated into a caller's query; the caller applies the filter."
+  },
+  {
+    "id": "src/lib/tech/",
+    "reason": "Technician field app: id-keyed reads of the technician's own assigned work; no admin display reads through it."
+  },
+  {
+    "id": "src/lib/portal/",
+    "reason": "Customer portal / public token pages: the customer sees their own records; no admin display reads through it."
+  },
+  {
+    "id": "src/lib/integrations/",
+    "reason": "Sync/import writers must see every row (hidden or not) to dedupe and upsert; no admin display reads through it."
+  },
+  {
+    "id": "src/app/api/admin/integrations/",
+    "reason": "Integration connect/sync routes drive writers that must see every row; no admin display reads through them."
+  },
+  {
+    "id": "src/lib/communication/booking-recovery.ts#recoverAbandonedBookings",
+    "reason": "Cron/background send or recovery job: acts on every row, hidden or not (SHOW_ALL)."
+  },
+  {
+    "id": "src/lib/communication/booking-recovery.ts#recoverAbandonedWebSessions",
+    "reason": "Cron/background send or recovery job: acts on every row, hidden or not (SHOW_ALL)."
+  },
+  {
+    "id": "src/lib/communication/job-queue.ts#processPendingJobs",
+    "reason": "Communication queue processor and id-keyed status lookup; operational, not a history display."
+  },
+  {
+    "id": "src/lib/communication/job-queue.ts#retryFailedJobs",
+    "reason": "Communication queue processor and id-keyed status lookup; operational, not a history display."
+  },
+  {
+    "id": "src/lib/communication/job-queue.ts#getCommunicationJobStatus",
+    "reason": "Communication queue processor and id-keyed status lookup; operational, not a history display."
+  },
+  {
+    "id": "src/lib/communication/money-triggers.ts#getCustomerContact",
+    "reason": "Id-keyed send path / cron for invoice reminders and pay links; acts on the row it is given."
+  },
+  {
+    "id": "src/lib/communication/money-triggers.ts#sendInvoiceReminder",
+    "reason": "Id-keyed send path / cron for invoice reminders and pay links; acts on the row it is given."
+  },
+  {
+    "id": "src/lib/communication/money-triggers.ts#sendInvoicePayLink",
+    "reason": "Id-keyed send path / cron for invoice reminders and pay links; acts on the row it is given."
+  },
+  {
+    "id": "src/lib/communication/money-triggers.ts#sendOverdueInvoiceReminders",
+    "reason": "Id-keyed send path / cron for invoice reminders and pay links; acts on the row it is given."
+  },
+  {
+    "id": "src/lib/communication/observability.ts#getCommsOutcomeSummary",
+    "reason": "Send-outcome counts over a recent window; operational, not customer history (ruling 12)."
+  },
+  {
+    "id": "src/lib/ai/account-tools.ts#getOpenBalance",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/account-tools.ts#getUpcomingAppointment",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/account-tools.ts#requestReschedule",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/account-zips.ts#loadOnFileZips",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/compact-session.ts#compactSessionIfNeeded",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/customer-context.ts#loadCustomerContextById",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/dispatch/signals.ts#loadDispatchSignals",
+    "reason": "Dispatch scoring signals: travel/chain/recency need every job, hidden or not; not a display."
+  },
+  {
+    "id": "src/lib/ai/dispatch/signals.ts#loadJobCoords",
+    "reason": "Dispatch scoring signals: travel/chain/recency need every job, hidden or not; not a display."
+  },
+  {
+    "id": "src/lib/ai/dispatch/signals.ts#loadChainOrigins",
+    "reason": "Dispatch scoring signals: travel/chain/recency need every job, hidden or not; not a display."
+  },
+  {
+    "id": "src/lib/ai/session-outcome.ts#summarizeAndClassifySession",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/ai/voice-turn.ts#voiceReply",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/context/customer-profile.ts#loadCustomerProfile",
+    "reason": "AI/intake path: the bot must see the caller's full history to answer accurately (SHOW_ALL); not an admin display."
+  },
+  {
+    "id": "src/lib/requests/submit-session-request.ts#submitSessionServiceRequest",
+    "reason": "Intake writer: submits the caller's own session; must see it whatever its flag."
+  },
+  {
+    "id": "src/lib/forecasting/rollups.ts#refreshDemandDaily",
+    "reason": "Forecasting rollup cron: aggregates every row; not a history display."
+  },
+  {
+    "id": "src/lib/forecasting/rollups.ts#refreshRevenueDaily",
+    "reason": "Forecasting rollup cron: aggregates every row; not a history display."
+  },
+  {
+    "id": "src/lib/dispatch/delay-detection.ts#findLateJobsForOrg",
+    "reason": "Late-job detection cron over today's live jobs; acts on every row."
+  },
+  {
+    "id": "src/lib/forms/form-gates.ts#visitGateSql",
+    "reason": "Form gate fragments keyed to one visit/request; the caller has already chosen the row."
+  },
+  {
+    "id": "src/lib/forms/form-gates.ts#requestGateSql",
+    "reason": "Form gate fragments keyed to one visit/request; the caller has already chosen the row."
+  },
+  {
+    "id": "src/lib/forms/form-gates.ts#readFormGatesSql",
+    "reason": "Form gate fragments keyed to one visit/request; the caller has already chosen the row."
+  },
+  {
+    "id": "src/lib/db/backfill-customer-hashes.ts#backfill",
+    "reason": "One-off maintenance script; must touch every row."
+  },
+  {
+    "id": "src/lib/db/cleanup-conversations.ts#main",
+    "reason": "One-off maintenance script; must touch every row."
+  },
+  {
+    "id": "src/lib/db/tenant.ts#(top)",
+    "reason": "Tenancy helper module (comment/docs match); not a display read."
+  },
+  {
+    "id": "src/lib/admin/invoice-field-writes.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/invoice-payment-writes.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/estimate-billing-sql.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/visit-move-sql.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/visit-one-guard.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/current-visit.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/appointment-queries.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/assignment-queries.ts#*",
+    "reason": "Writer: state changes must find the row whether or not it is hidden."
+  },
+  {
+    "id": "src/lib/admin/erasure-queries.ts#*",
+    "reason": "GDPR erasure must reach every row, hidden or not."
+  },
+  {
+    "id": "src/lib/admin/erasure-sql.ts#*",
+    "reason": "GDPR erasure must reach every row, hidden or not."
+  },
+  {
+    "id": "src/lib/admin/export-queries.ts#*",
+    "reason": "Export: a complete export includes history (ruling 12 for accounting)."
+  },
+  {
+    "id": "src/lib/admin/accounting-export.ts#*",
+    "reason": "Export: a complete export includes history (ruling 12 for accounting)."
+  },
+  {
+    "id": "src/lib/admin/form-queries.ts#*",
+    "reason": "Id-keyed lookups behind an already-visible parent; no list surface."
+  },
+  {
+    "id": "src/lib/admin/attachment-queries.ts#*",
+    "reason": "Id-keyed lookups behind an already-visible parent; no list surface."
+  },
+  {
+    "id": "src/lib/admin/tag-entity-lookup.ts#*",
+    "reason": "Id-keyed lookups behind an already-visible parent; no list surface."
+  },
+  {
+    "id": "src/lib/admin/crm-equipment-queries.ts#*",
+    "reason": "Writer / send / cron / intake path: acts on the row it is given."
+  },
+  {
+    "id": "src/lib/admin/notify-assignment.ts#*",
+    "reason": "Writer / send / cron / intake path: acts on the row it is given."
+  },
+  {
+    "id": "src/lib/admin/membership-visit-queries.ts#*",
+    "reason": "Writer / send / cron / intake path: acts on the row it is given."
+  },
+  {
+    "id": "src/lib/admin/create-request-queries.ts#*",
+    "reason": "Writer / send / cron / intake path: acts on the row it is given."
+  },
+  {
+    "id": "src/lib/admin/timesheet-admin-queries.ts#*",
+    "reason": "Technician time, not customer history (ruling 12)."
+  },
+  {
+    "id": "src/lib/admin/golive-marking-sql.ts#*",
+    "reason": "The go-live marking writer must see all rows to mark and unhide them."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#assignTechnician",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#reassignTechnician",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#updateRequestStatus",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#scheduleRequest",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/queries.ts#addRequestNote",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#findCustomerMatchCandidates",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#findLegacyCustomerMatch",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#deleteCustomer",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#archiveCustomer",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#findNativeContactClash",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#unarchiveCustomer",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/crm-queries.ts#updateCustomerContact",
+    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#createInvoiceFromSoldEstimate",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#createRequestEstimateInvoice",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#takePayment",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#refundPayment",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#listStuckPayments",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#reconcilePayment",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#unclaimInvoiceSql",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#getInvoiceCustomerId",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#voidInvoice",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/invoice-queries.ts#listInvoiceReminders",
+    "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#approveEstimate",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#regenerateApprovalToken",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#markEstimateSold",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#getEstimateForApproval",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/estimate-queries.ts#customerInOrg",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#checkScheduleConflict",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#rescheduleRequest",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#placeAndAssignRequest",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#unscheduleRequest",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#assessBookingQualityForRequest",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#ensureEstimatedDuration",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#loadJobClassification",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#suggestTechnicians",
+    "reason": "Scheduling writers/conflict checks: a hidden job still occupies its technician's time."
+  },
+  {
+    "id": "src/lib/admin/scheduling-queries.ts#getScheduledJobsForRange",
+    "reason": "Feeds availability via scheduling-source.ts; a hidden job still blocks the slot (ruling 12)."
+  },
+  {
+    "id": "src/lib/admin/conversation-queries.ts#deleteConversation",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/admin/warranty-queries.ts#getCustomerContact",
+    "reason": "Id-keyed contact lookup for a reminder send."
+  },
+  {
+    "id": "src/lib/admin/financing-queries.ts#createFinancingApplication",
+    "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
+  },
+  {
+    "id": "src/lib/reviews/review-queries.ts#getCustomerContact",
+    "reason": "Id/token-keyed review send and public response path."
+  },
+  {
+    "id": "src/lib/reviews/review-queries.ts#recordReviewResponse",
+    "reason": "Id/token-keyed review send and public response path."
+  },
+  {
+    "id": "src/lib/reviews/review-queries.ts#getReviewByToken",
+    "reason": "Id/token-keyed review send and public response path."
+  },
+  {
+    "id": "src/app/api/admin/conversations/[id]/message/route.ts#POST",
+    "reason": "Id-keyed reply send on a conversation the admin already opened."
+  },
+  {
+    "id": "src/app/api/admin/customers/[id]/contacts/route.ts#customerExists",
+    "reason": "Id-keyed existence guard."
+  },
+  {
+    "id": "src/app/api/admin/customers/[id]/locations/route.ts#GET",
+    "reason": "Id-keyed locations for a customer the admin already opened."
+  },
+  {
+    "id": "src/app/api/admin/invoices/[id]/finalize/route.ts#POST",
+    "reason": "Id-keyed invoice writer."
+  },
+  {
+    "id": "src/app/api/admin/invoices/[id]/payments/route.ts#invoiceCustomerId",
+    "reason": "Id-keyed lookup for a payment writer."
+  },
+  {
+    "id": "src/app/api/admin/communications/templates/[id]/route.ts#DELETE",
+    "reason": "Template delete checks whether any send job used the template; operational, not a history display."
+  },
+  {
+    "id": "src/app/api/admin/customers/[id]/bookings/route.ts#(top)",
+    "reason": "Comment match only; the read itself lives in queries.ts#getCustomerBookings (pending-requests)."
+  }
+]

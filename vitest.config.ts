@@ -33,6 +33,11 @@ const INTEGRATION_SUITES = [
   "tests/integration/golive-unhide.test.ts",
   // Go-live marking builders + script: both modes, timezone boundary, refusals (one throwaway org).
   "tests/integration/golive-marking.test.ts",
+  // Go-live hidden history: each sweep's reads against visibility-fixture.ts (one throwaway org each).
+  "tests/integration/visibility-requests.test.ts",
+  "tests/integration/visibility-customers.test.ts",
+  "tests/integration/visibility-money.test.ts",
+  "tests/integration/visibility-insights.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the
