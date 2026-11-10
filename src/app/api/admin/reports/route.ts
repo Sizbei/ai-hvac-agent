@@ -58,9 +58,9 @@ export async function GET(request: NextRequest) {
       technicianScorecards,
     ] = await Promise.all([
       getSalesReport(session.organizationId, period, viewer),
-      getLeadSourceBreakdown(session.organizationId, period),
-      getLocationBreakdown(session.organizationId, period),
-      getTechnicianScorecards(session.organizationId, period),
+      getLeadSourceBreakdown(session.organizationId, period, viewer),
+      getLocationBreakdown(session.organizationId, period, viewer),
+      getTechnicianScorecards(session.organizationId, period, viewer),
     ]);
     return successResponse({
       report,

@@ -349,11 +349,14 @@ const UNKNOWN_SOURCE = "unknown";
  * Per-lead-source revenue + close-rate for a period. Defaults to the last 30
  * days. Returns ONE row per known leadSourceEnum value PLUS 'unknown', always —
  * a source with zero leads still appears (sorted left from the enum domain, not
- * inner-joined away). All money in integer cents.
+ * inner-joined away). All money in integer cents. Only visible requests are
+ * leads; their money counts only through visible invoices (payments and refunds
+ * follow their invoice).
  */
 export async function getLeadSourceBreakdown(
   organizationId: string,
-  period: SalesReportPeriod = {},
+  period: SalesReportPeriod,
+  vis: Visibility,
 ): Promise<LeadSourceRow[]> {
   const now = new Date();
   const toDate = period.toDate ?? now;
@@ -380,6 +383,7 @@ export async function getLeadSourceBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(sourceKey),
@@ -395,7 +399,7 @@ export async function getLeadSourceBreakdown(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void')`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void') AND ${visibleRows(invoices, vis)}`,
       )
       .where(
         withTenant(
@@ -403,6 +407,7 @@ export async function getLeadSourceBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(sourceKey),
@@ -415,7 +420,7 @@ export async function getLeadSourceBreakdown(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${visibleRows(invoices, vis)}`,
       )
       .innerJoin(
         payments,
@@ -427,6 +432,7 @@ export async function getLeadSourceBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(sourceKey),
@@ -442,7 +448,7 @@ export async function getLeadSourceBreakdown(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId}`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${visibleRows(invoices, vis)}`,
       )
       .innerJoin(
         payments,
@@ -458,6 +464,7 @@ export async function getLeadSourceBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(sourceKey),
@@ -524,10 +531,12 @@ const UNASSIGNED_LOCATION = "unassigned";
  * Per-location jobs + revenue (+ avg rating) for a period. Defaults to the last
  * 30 days. Returns one row per location that had jobs in the period PLUS an
  * "unassigned" bucket whenever any request had a NULL locationId. Money in cents.
+ * Only visible requests are jobs, and only their visible invoices are revenue.
  */
 export async function getLocationBreakdown(
   organizationId: string,
-  period: SalesReportPeriod = {},
+  period: SalesReportPeriod,
+  vis: Visibility,
 ): Promise<LocationBreakdownRow[]> {
   const now = new Date();
   const toDate = period.toDate ?? now;
@@ -548,6 +557,7 @@ export async function getLocationBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(locationKey),
@@ -564,7 +574,7 @@ export async function getLocationBreakdown(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void')`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void') AND ${visibleRows(invoices, vis)}`,
       )
       .where(
         withTenant(
@@ -572,6 +582,7 @@ export async function getLocationBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(locationKey),
@@ -591,6 +602,7 @@ export async function getLocationBreakdown(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(locationKey),
@@ -693,11 +705,14 @@ export interface TechnicianScorecardRow {
  * Per-technician scorecards for a period. Defaults to the last 30 days. Returns
  * one row per technician with at least one assigned job in the period. Metrics
  * that aren't computable from captured data are returned as null (the UI renders
- * "—"), never a misleading 0. Money in integer cents.
+ * "—"), never a misleading 0. Money in integer cents. Only visible requests
+ * are jobs (labor and ratings follow them), and only their visible invoices are
+ * revenue.
  */
 export async function getTechnicianScorecards(
   organizationId: string,
-  period: SalesReportPeriod = {},
+  period: SalesReportPeriod,
+  vis: Visibility,
 ): Promise<TechnicianScorecardRow[]> {
   const now = new Date();
   const toDate = period.toDate ?? now;
@@ -727,6 +742,7 @@ export async function getTechnicianScorecards(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(serviceRequests.assignedTo, users.name),
@@ -743,7 +759,7 @@ export async function getTechnicianScorecards(
       .from(serviceRequests)
       .innerJoin(
         invoices,
-        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void')`,
+        sql`${invoices.serviceRequestId} = ${serviceRequests.id} AND ${invoices.organizationId} = ${organizationId} AND ${invoices.state} NOT IN ('draft', 'void') AND ${visibleRows(invoices, vis)}`,
       )
       .where(
         withTenant(
@@ -751,6 +767,7 @@ export async function getTechnicianScorecards(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(serviceRequests.assignedTo),
@@ -766,7 +783,7 @@ export async function getTechnicianScorecards(
       .from(technicianTimeEntries)
       .innerJoin(
         serviceRequests,
-        sql`${serviceRequests.id} = ${technicianTimeEntries.serviceRequestId} AND ${serviceRequests.organizationId} = ${organizationId} AND ${serviceRequests.createdAt} >= ${fromDate} AND ${serviceRequests.createdAt} <= ${toDate}`,
+        sql`${serviceRequests.id} = ${technicianTimeEntries.serviceRequestId} AND ${serviceRequests.organizationId} = ${organizationId} AND ${serviceRequests.createdAt} >= ${fromDate} AND ${serviceRequests.createdAt} <= ${toDate} AND ${visibleRows(serviceRequests, vis)}`,
       )
       .where(withTenant(technicianTimeEntries, organizationId))
       .groupBy(technicianTimeEntries.technicianId),
@@ -788,6 +805,7 @@ export async function getTechnicianScorecards(
           organizationId,
           gte(serviceRequests.createdAt, fromDate),
           lte(serviceRequests.createdAt, toDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .groupBy(serviceRequests.assignedTo),

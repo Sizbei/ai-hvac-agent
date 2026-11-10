@@ -13,7 +13,7 @@
  * thousands of rows over a year) this is well within budget. If it ever slows,
  * the seam to precompute into demand_daily-style rollups is here.
  */
-import { eq, gte, inArray, lt, isNull, isNotNull, or, sql, count } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, isNull, isNotNull, or, sql, count } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   serviceRequests,
@@ -31,6 +31,7 @@ import type {
 } from "./operations-metrics-types";
 import { getDispatchOutcomeRollup } from "./dispatch-rollup";
 import { ON_SITE_STATUSES } from "./request-status";
+import { visibleRows, type Visibility } from "./visibility";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * DAY_MS;
@@ -135,9 +136,16 @@ function bucketDurations(
   return { current, previous };
 }
 
+/**
+ * Request, invoice and payment figures read only rows the viewer sees: status
+ * events follow their request, payments their invoice. Time entries (technician
+ * time) and the dispatch rollup (decision audit) are not customer history and
+ * are not filtered.
+ */
 export async function getOperationsMetrics(
   organizationId: string,
-  period: OperationsMetricsPeriod = {},
+  period: OperationsMetricsPeriod,
+  vis: Visibility,
 ): Promise<OperationsMetrics> {
   const now = new Date();
   const toDate_ = period.toDate ?? now;
@@ -173,7 +181,10 @@ export async function getOperationsMetrics(
       .from(requestStatusEvents)
       .innerJoin(
         serviceRequests,
-        eq(serviceRequests.id, requestStatusEvents.serviceRequestId),
+        and(
+          eq(serviceRequests.id, requestStatusEvents.serviceRequestId),
+          visibleRows(serviceRequests, vis),
+        ),
       )
       .where(
         // NO lower bound on `at`: min(at) must be the request's TRUE first
@@ -216,7 +227,10 @@ export async function getOperationsMetrics(
       .from(requestStatusEvents)
       .innerJoin(
         serviceRequests,
-        eq(serviceRequests.id, requestStatusEvents.serviceRequestId),
+        and(
+          eq(serviceRequests.id, requestStatusEvents.serviceRequestId),
+          visibleRows(serviceRequests, vis),
+        ),
       )
       .where(
         // NATIVE only: FieldPulse's webhook writes "assigned" status events for
@@ -259,6 +273,7 @@ export async function getOperationsMetrics(
           eq(invoices.state, "paid"),
           isNull(invoices.fieldpulseInvoiceId),
           isNull(invoices.hcpInvoiceId),
+          visibleRows(invoices, vis),
           eq(payments.status, "succeeded"),
           gte(payments.createdAt, prevFrom),
           lt(payments.createdAt, toDate_),
@@ -301,6 +316,7 @@ export async function getOperationsMetrics(
           isNull(invoices.fieldpulseInvoiceId),
           isNull(invoices.hcpInvoiceId),
           sql`${invoices.amountPaidCents} < ${invoices.totalCents}`,
+          visibleRows(invoices, vis),
         ),
       ),
 
@@ -328,6 +344,7 @@ export async function getOperationsMetrics(
           eq(invoices.state, "open"),
           or(isNotNull(invoices.fieldpulseInvoiceId), isNotNull(invoices.hcpInvoiceId))!,
           sql`${invoices.amountPaidCents} < ${invoices.totalCents}`,
+          visibleRows(invoices, vis),
         ),
       ),
 
@@ -343,6 +360,7 @@ export async function getOperationsMetrics(
           isNull(serviceRequests.hcpJobId),
           gte(serviceRequests.createdAt, fromDate),
           lt(serviceRequests.createdAt, toDate_),
+          visibleRows(serviceRequests, vis),
         ),
       ),
 
@@ -358,6 +376,7 @@ export async function getOperationsMetrics(
           isNull(serviceRequests.hcpJobId),
           gte(serviceRequests.createdAt, prevFrom),
           lt(serviceRequests.createdAt, fromDate),
+          visibleRows(serviceRequests, vis),
         ),
       ),
 
@@ -373,6 +392,7 @@ export async function getOperationsMetrics(
           or(isNotNull(serviceRequests.fieldpulseJobId), isNotNull(serviceRequests.hcpJobId))!,
           gte(serviceRequests.createdAt, fromDate),
           lt(serviceRequests.createdAt, toDate_),
+          visibleRows(serviceRequests, vis),
         ),
       ),
 

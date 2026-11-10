@@ -47,6 +47,8 @@ vi.mock('drizzle-orm', () => ({
   gte: (...a: unknown[]) => a,
   lte: (...a: unknown[]) => a,
   isNotNull: (...a: unknown[]) => a,
+  isNull: (...a: unknown[]) => a,
+  or: (...a: unknown[]) => a,
   desc: (...a: unknown[]) => a,
 }));
 
@@ -69,6 +71,7 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 
 import { getBotAnalytics } from './bot-analytics-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -106,7 +109,7 @@ beforeEach(() => {
 describe('getBotAnalytics', () => {
   it('returns an all-zero shape when there are no events', async () => {
     seed({});
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.totalTurns).toBe(0);
     expect(r.deterministicRatio).toBe(0);
     expect(r.escalationRate).toBe(0);
@@ -129,7 +132,7 @@ describe('getBotAnalytics', () => {
         avgLatency: '123.7',
       },
     });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.totalTurns).toBe(10);
     expect(r.deterministicRatio).toBe(0.7);
     expect(r.escalationRate).toBe(0.1);
@@ -150,7 +153,7 @@ describe('getBotAnalytics', () => {
         avgLatency: null,
       },
     });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.knowledgeAnswerRate).toBe(0.3);
   });
 
@@ -165,7 +168,7 @@ describe('getBotAnalytics', () => {
         avgLatency: null,
       },
     });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.deterministicRatio).toBe(0.333);
     expect(r.avgLatencyMs).toBeNull();
   });
@@ -179,7 +182,7 @@ describe('getBotAnalytics', () => {
         { intentId: 'pricing-diag', value: '2' },
       ],
     });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.intentDistribution.map((x) => x.intentId)).toEqual([
       'faq-hours',
       'cooling-no-cool',
@@ -193,7 +196,7 @@ describe('getBotAnalytics', () => {
 
   it('maps a null intent id to "unknown"', async () => {
     seed({ intents: [{ intentId: null, value: '3' }] });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.intentDistribution[0]).toEqual({ intentId: 'unknown', count: 3 });
   });
 
@@ -208,7 +211,7 @@ describe('getBotAnalytics', () => {
         { outcome: 'unclassified', value: '4' },
       ],
     });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     // Sorted by count desc.
     expect(r.outcomeDistribution.map((x) => x.outcome)).toEqual([
       'unclassified',
@@ -221,7 +224,7 @@ describe('getBotAnalytics', () => {
 
   it('abandon rate is 0 when there are no classified sessions (only unclassified)', async () => {
     seed({ outcomes: [{ outcome: 'unclassified', value: '5' }] });
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(r.abandonRate).toBe(0);
   });
 
@@ -229,7 +232,7 @@ describe('getBotAnalytics', () => {
     // withTenant is mocked to a sentinel; the test asserts the call shape doesn't
     // throw and the period defaults are applied (fromDate < toDate).
     seed({});
-    const r = await getBotAnalytics(ORG);
+    const r = await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(new Date(r.fromDate).getTime()).toBeLessThan(
       new Date(r.toDate).getTime(),
     );
@@ -239,7 +242,7 @@ describe('getBotAnalytics', () => {
     seed({});
     const fromDate = new Date('2026-01-01T00:00:00Z');
     const toDate = new Date('2026-02-01T00:00:00Z');
-    const r = await getBotAnalytics(ORG, { fromDate, toDate });
+    const r = await getBotAnalytics(ORG, { fromDate, toDate }, VISIBLE_ONLY);
     expect(r.fromDate).toBe(fromDate.toISOString());
     expect(r.toDate).toBe(toDate.toISOString());
   });
@@ -251,7 +254,7 @@ describe('getBotAnalytics', () => {
   it('sends its three independent selects in a single db.batch call', async () => {
     batchCalls.length = 0;
     seed({});
-    await getBotAnalytics(ORG);
+    await getBotAnalytics(ORG, {}, VISIBLE_ONLY);
     expect(batchCalls).toEqual([3]);
   });
 });

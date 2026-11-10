@@ -19,6 +19,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { notStandInSession } from "./stand-in-session";
+import { visibleRows, type Visibility } from "./visibility";
 import type { AiInsights } from "./ai-insights-types";
 
 /** Coerce a possibly-string aggregate value (neon-http) to a finite number. */
@@ -35,8 +36,13 @@ function asPercent(numerator: number, denominator: number): number {
   return Math.round((numerator / denominator) * 100);
 }
 
+/**
+ * Assistant metrics over the conversations the viewer sees: sessions and
+ * requests by their own flag, messages through their session.
+ */
 export async function getAiInsights(
   organizationId: string,
+  vis: Visibility,
 ): Promise<AiInsights> {
   // All 9 queries are independent — run them in a single db.batch to cut 9
   // serial round-trips down to 1 HTTP request.
@@ -61,6 +67,7 @@ export async function getAiInsights(
           customerSessions,
           organizationId,
           notStandInSession(customerSessions.token),
+          visibleRows(customerSessions, vis),
         ),
       ),
 
@@ -73,6 +80,7 @@ export async function getAiInsights(
           organizationId,
           eq(customerSessions.status, "escalated"),
           notStandInSession(customerSessions.token),
+          visibleRows(customerSessions, vis),
         ),
       ),
 
@@ -85,6 +93,7 @@ export async function getAiInsights(
           organizationId,
           eq(customerSessions.status, "abandoned"),
           notStandInSession(customerSessions.token),
+          visibleRows(customerSessions, vis),
         ),
       ),
 
@@ -105,9 +114,11 @@ export async function getAiInsights(
                 and(
                   eq(customerSessions.id, serviceRequests.sessionId),
                   notStandInSession(customerSessions.token),
+                  visibleRows(customerSessions, vis),
                 ),
               ),
           ),
+          visibleRows(serviceRequests, vis),
         ),
       ),
 
@@ -115,6 +126,14 @@ export async function getAiInsights(
     db
       .select({ value: count() })
       .from(messages)
+      .innerJoin(
+        customerSessions,
+        and(
+          eq(customerSessions.id, messages.sessionId),
+          eq(customerSessions.organizationId, organizationId),
+          visibleRows(customerSessions, vis),
+        ),
+      )
       .where(
         withTenant(
           messages,
@@ -127,6 +146,14 @@ export async function getAiInsights(
     db
       .select({ value: count() })
       .from(messages)
+      .innerJoin(
+        customerSessions,
+        and(
+          eq(customerSessions.id, messages.sessionId),
+          eq(customerSessions.organizationId, organizationId),
+          visibleRows(customerSessions, vis),
+        ),
+      )
       .where(
         withTenant(
           messages,
@@ -142,6 +169,14 @@ export async function getAiInsights(
         value: sql<number | string>`coalesce(sum(${messages.tokensUsed}), 0)`,
       })
       .from(messages)
+      .innerJoin(
+        customerSessions,
+        and(
+          eq(customerSessions.id, messages.sessionId),
+          eq(customerSessions.organizationId, organizationId),
+          visibleRows(customerSessions, vis),
+        ),
+      )
       .where(withTenant(messages, organizationId)),
 
     // Message feedback votes from the audit log (details is a JSON TEXT column).

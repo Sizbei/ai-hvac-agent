@@ -14,6 +14,7 @@ import { serviceRequests, serviceHistory, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { OPEN_STATUSES } from "./request-status";
 import { getOrgTimeZone } from "./org-time-zone";
+import { visibleRows, type Visibility } from "./visibility";
 import type {
   OpsInsights,
   CategoryCount,
@@ -27,9 +28,13 @@ function toNumber(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-
+/**
+ * Request and technician-load breakdowns for the insights page. Every request
+ * count reads only rows the viewer sees (hidden imported history drops out).
+ */
 export async function getOpsInsights(
   organizationId: string,
+  vis: Visibility,
 ): Promise<OpsInsights> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   // Validated IANA zone (resolveAfterHoursConfig), bound as a parameter.
@@ -51,19 +56,19 @@ export async function getOpsInsights(
     db
       .select({ key: serviceRequests.issueType, value: count() })
       .from(serviceRequests)
-      .where(withTenant(serviceRequests, organizationId))
+      .where(withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)))
       .groupBy(serviceRequests.issueType),
 
     db
       .select({ key: serviceRequests.urgency, value: count() })
       .from(serviceRequests)
-      .where(withTenant(serviceRequests, organizationId))
+      .where(withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)))
       .groupBy(serviceRequests.urgency),
 
     db
       .select({ key: serviceRequests.status, value: count() })
       .from(serviceRequests)
-      .where(withTenant(serviceRequests, organizationId))
+      .where(withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)))
       .groupBy(serviceRequests.status),
 
     db
@@ -74,6 +79,7 @@ export async function getOpsInsights(
           serviceRequests,
           organizationId,
           gte(serviceRequests.createdAt, sevenDaysAgo),
+          visibleRows(serviceRequests, vis),
         ),
       ),
 
@@ -101,7 +107,7 @@ export async function getOpsInsights(
           eq(users.organizationId, organizationId),
         ),
       )
-      .where(withTenant(serviceRequests, organizationId))
+      .where(withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)))
       .groupBy(serviceRequests.assignedTo, users.name),
 
     // Request volume by hour of day in the ORG's business time zone (a
@@ -125,6 +131,7 @@ export async function getOpsInsights(
           organizationId,
           isNull(serviceRequests.fieldpulseJobId),
           isNull(serviceRequests.hcpJobId),
+          visibleRows(serviceRequests, vis),
         ),
       )
       // By output position: the zone is a bound parameter, and Postgres
@@ -153,6 +160,7 @@ export async function getOpsInsights(
           organizationId,
           inArray(serviceRequests.status, [...OPEN_STATUSES]),
           or(isNotNull(serviceRequests.fieldpulseJobId), isNotNull(serviceRequests.hcpJobId))!,
+          visibleRows(serviceRequests, vis),
         ),
       ),
   ] as const);

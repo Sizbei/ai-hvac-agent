@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { StepId } from "./onboarding-state";
+import { VISIBLE_ONLY, visibleRowsSql } from "./visibility";
 
 /**
  * Pure SQL builders for the setup guide. Every subquery carries its own
@@ -9,7 +10,14 @@ import type { StepId } from "./onboarding-state";
 /** OLD: the stored state as an object (a JSON null would break `||`). */
 const OLD = sql`CASE WHEN jsonb_typeof(organization_settings.onboarding_state) = 'object' THEN organization_settings.onboarding_state ELSE '{}'::jsonb END`;
 
-/** One FROM-less SELECT of scalar subqueries, one column per Signals field. */
+/**
+ * One FROM-less SELECT of scalar subqueries, one column per Signals field.
+ * The request signals (any, booked with a technician, completed) count visible
+ * requests only, whoever is looking (plan ruling 2): hidden imported history
+ * must neither tick "Book your first request" nor trigger grandfathering.
+ * Technician, pricebook, widget, phone and integration signals describe real
+ * configuration and are not filtered.
+ */
 export function onboardingSelectSql(organizationId: string): SQL {
   const o = organizationId;
   return sql`SELECT
@@ -22,10 +30,10 @@ export function onboardingSelectSql(organizationId: string): SQL {
   (SELECT count(*) FROM users WHERE organization_id = ${o} AND role = 'technician' AND is_active AND password_hash IS NULL AND google_id IS NULL)::int AS tech_passwordless,
   EXISTS (SELECT 1 FROM staff_invites WHERE organization_id = ${o} AND role = 'technician' AND revoked_at IS NULL AND accepted_at IS NULL AND expires_at > now()) AS pending_invite,
   EXISTS (SELECT 1 FROM pricebook_items WHERE organization_id = ${o} AND active) AS pricebook,
-  EXISTS (SELECT 1 FROM service_requests WHERE organization_id = ${o}) AS any_request,
-  EXISTS (SELECT 1 FROM appointments a WHERE a.organization_id = ${o} AND a.cancelled_at IS NULL AND (a.starts_at IS NOT NULL OR a.scheduled_date IS NOT NULL) AND (
+  EXISTS (SELECT 1 FROM service_requests WHERE organization_id = ${o} AND ${visibleRowsSql("service_requests", VISIBLE_ONLY)}) AS any_request,
+  EXISTS (SELECT 1 FROM appointments a JOIN service_requests r ON r.id = a.service_request_id AND r.organization_id = ${o} AND ${visibleRowsSql("r", VISIBLE_ONLY)} WHERE a.organization_id = ${o} AND a.cancelled_at IS NULL AND (a.starts_at IS NOT NULL OR a.scheduled_date IS NOT NULL) AND (
     EXISTS (SELECT 1 FROM appointment_assignments aa JOIN users u ON u.id = aa.technician_id WHERE aa.organization_id = ${o} AND aa.appointment_id = a.id AND aa.status <> 'cancelled'::request_status AND u.organization_id = ${o} AND u.role = 'technician')
-    OR EXISTS (SELECT 1 FROM service_requests r JOIN users u ON u.id = r.assigned_to WHERE r.id = a.service_request_id AND r.organization_id = ${o} AND u.organization_id = ${o} AND u.role = 'technician')
+    OR EXISTS (SELECT 1 FROM users u WHERE u.id = r.assigned_to AND u.organization_id = ${o} AND u.role = 'technician')
   )) AS booked_assigned,
   (EXISTS (SELECT 1 FROM technician_time_entries WHERE organization_id = ${o})
     OR EXISTS (SELECT 1 FROM technician_locations WHERE organization_id = ${o})
@@ -35,7 +43,7 @@ export function onboardingSelectSql(organizationId: string): SQL {
   (EXISTS (SELECT 1 FROM fieldpulse_connections WHERE organization_id = ${o} AND connected = true)
     OR EXISTS (SELECT 1 FROM housecall_pro_connections WHERE organization_id = ${o} AND connected = true)
     OR EXISTS (SELECT 1 FROM google_calendar_connections WHERE organization_id = ${o} AND connected = true)) AS integration_connected,
-  EXISTS (SELECT 1 FROM service_requests WHERE organization_id = ${o} AND status = 'completed'::request_status) AS completed_request,
+  EXISTS (SELECT 1 FROM service_requests WHERE organization_id = ${o} AND status = 'completed'::request_status AND ${visibleRowsSql("service_requests", VISIBLE_ONLY)}) AS completed_request,
   (SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM organizations WHERE id = ${o}) AS org_created_at,
   (SELECT onboarding_state FROM organization_settings WHERE organization_id = ${o}) AS onboarding_state`;
 }

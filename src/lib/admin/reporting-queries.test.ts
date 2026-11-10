@@ -508,7 +508,7 @@ function seedLeadSource(s: {
 describe('getLeadSourceBreakdown', () => {
   it('returns a row for every enum value plus unknown, even with no data', async () => {
     seedLeadSource({ leads: [], booked: [], gross: [], refunds: [] });
-    const rows = await getLeadSourceBreakdown(ORG);
+    const rows = await getLeadSourceBreakdown(ORG, {}, VISIBLE_ONLY);
     const sources = rows.map((r) => r.source).sort();
     expect(sources).toEqual(
       [
@@ -540,7 +540,7 @@ describe('getLeadSourceBreakdown', () => {
       gross: [],
       refunds: [],
     });
-    const rows = await getLeadSourceBreakdown(ORG);
+    const rows = await getLeadSourceBreakdown(ORG, {}, VISIBLE_ONLY);
     const yelp = rows.find((r) => r.source === 'yelp');
     expect(yelp).toBeDefined();
     expect(yelp!.leads).toBe(5);
@@ -559,7 +559,7 @@ describe('getLeadSourceBreakdown', () => {
       gross: [],
       refunds: [],
     });
-    const rows = await getLeadSourceBreakdown(ORG);
+    const rows = await getLeadSourceBreakdown(ORG, {}, VISIBLE_ONLY);
     const unknown = rows.find((r) => r.source === 'unknown');
     expect(unknown).toBeDefined();
     expect(unknown!.leads).toBe(7);
@@ -592,7 +592,7 @@ describe('getLeadSourceBreakdown', () => {
       gross: [{ source: 'google', value: '50000' }], // neon-http sums as strings
       refunds: [{ source: 'google', value: '5000' }],
     });
-    const rows = await getLeadSourceBreakdown(ORG);
+    const rows = await getLeadSourceBreakdown(ORG, {}, VISIBLE_ONLY);
     const google = rows.find((r) => r.source === 'google');
     expect(google).toBeDefined();
     expect(google!.leads).toBe(10);
@@ -608,7 +608,7 @@ describe('getLeadSourceBreakdown', () => {
       gross: [{ source: 'google', value: '1000' }],
       refunds: [],
     });
-    await getLeadSourceBreakdown(ORG);
+    await getLeadSourceBreakdown(ORG, {}, VISIBLE_ONLY);
 
     // The leads where (1st capture) must be tenant-scoped on serviceRequests.
     const leadsWhere = captured[0].where;
@@ -706,7 +706,7 @@ describe('getLocationBreakdown', () => {
         { id: 'loc-3', label: null, zone: 'East', addressEncrypted: 'ENC(9 Elm Rd)' },
       ],
     });
-    const rows = await getLocationBreakdown(ORG);
+    const rows = await getLocationBreakdown(ORG, {}, VISIBLE_ONLY);
     const label = (id: string) => rows.find((r) => r.locationId === id)!.label;
     expect(label('loc-1')).toBe('12 Oak St');
     expect(label('loc-2')).toBe('Address not on file');
@@ -723,7 +723,7 @@ describe('getLocationBreakdown', () => {
       rating: [{ locationId: 'loc-1', value: '4.5' }],
       labels: [{ id: 'loc-1', label: 'Main St', zone: null }],
     });
-    const rows = await getLocationBreakdown(ORG);
+    const rows = await getLocationBreakdown(ORG, {}, VISIBLE_ONLY);
 
     const unassigned = rows.find((r) => r.locationId === 'unassigned');
     expect(unassigned).toBeDefined();
@@ -746,7 +746,7 @@ describe('getLocationBreakdown', () => {
       rating: [],
       labels: [{ id: 'loc-1', label: 'X', zone: null }],
     });
-    await getLocationBreakdown(ORG);
+    await getLocationBreakdown(ORG, {}, VISIBLE_ONLY);
 
     // jobs where (capture 0) tenant-scoped on serviceRequests.
     expect(
@@ -790,7 +790,7 @@ describe('getLocationBreakdown', () => {
       rating: [], // no review rows
       labels: [{ id: 'loc-1', label: 'Depot', zone: null }],
     });
-    const rows = await getLocationBreakdown(ORG);
+    const rows = await getLocationBreakdown(ORG, {}, VISIBLE_ONLY);
     const loc1 = rows.find((r) => r.locationId === 'loc-1');
     expect(loc1!.avgRating).toBeNull();
     expect(loc1!.revenueCents).toBe(0);
@@ -824,7 +824,7 @@ describe('getTechnicianScorecards', () => {
       labor: [{ technicianId: 'tech-1', value: 90 }], // 90 min -> 1.5h
       rating: [{ technicianId: 'tech-1', value: '4.8' }],
     });
-    const rows = await getTechnicianScorecards(ORG);
+    const rows = await getTechnicianScorecards(ORG, {}, VISIBLE_ONLY);
     expect(rows).toHaveLength(1);
     const t = rows[0];
     expect(t.technicianId).toBe('tech-1');
@@ -843,7 +843,7 @@ describe('getTechnicianScorecards', () => {
       labor: [], // no time entries at all for this tech
       rating: [],
     });
-    const rows = await getTechnicianScorecards(ORG);
+    const rows = await getTechnicianScorecards(ORG, {}, VISIBLE_ONLY);
     const t = rows.find((r) => r.technicianId === 'tech-2');
     expect(t).toBeDefined();
     expect(t!.laborHours).toBeNull();
@@ -859,7 +859,7 @@ describe('getTechnicianScorecards', () => {
       labor: [{ technicianId: 'tech-1', value: 60 }],
       rating: [{ technicianId: 'tech-1', value: '5' }],
     });
-    await getTechnicianScorecards(ORG);
+    await getTechnicianScorecards(ORG, {}, VISIBLE_ONLY);
 
     // jobs where (capture 0) tenant-scoped on serviceRequests.
     expect(
@@ -924,7 +924,7 @@ describe('getTechnicianScorecards', () => {
       labor: [],
       rating: [],
     });
-    const rows = await getTechnicianScorecards(ORG);
+    const rows = await getTechnicianScorecards(ORG, {}, VISIBLE_ONLY);
     expect(rows).toHaveLength(1);
     expect(rows[0].technicianId).toBe('tech-1');
   });

@@ -79,6 +79,7 @@ vi.mock('@/lib/db/tenant', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
+  and: (...a: unknown[]) => ({ kind: 'and', args: a }),
   eq: (...a: unknown[]) => ({ kind: 'eq', args: a }),
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
   inArray: (...a: unknown[]) => ({ kind: 'inArray', args: a }),
@@ -146,6 +147,7 @@ import {
   assignedAtCreation,
   paidAtVisit,
 } from './operations-metrics-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = 'org-1';
 const FROM = new Date('2026-06-01T00:00:00Z');
@@ -209,7 +211,7 @@ describe('getOperationsMetrics', () => {
       jobsPrevious: [{ value: '127' }],
     });
 
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
 
     // Response time = MEDIAN of current [86400, 172800] and previous [86400].
     expect(m.responseTimeSeconds.current).toBe(129600);
@@ -244,7 +246,7 @@ describe('getOperationsMetrics', () => {
         { serviceRequestId: 'r-wait', actorType: 'human', firstAt: '2026-06-06T00:10:00Z', createdAt: new Date('2026-06-06T00:00:00Z') },
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     expect(m.firstResponseHumanSeconds.current).toBe(600);
   });
 
@@ -257,7 +259,7 @@ describe('getOperationsMetrics', () => {
         { firstAt: '2026-06-12T17:23:10.828Z', createdAt: '2026-06-12T17:22:51.629Z' },
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     expect(m.timeToPaidSeconds.current).toBeNull();
     expect(m.samples.paidAtVisit).toBe(3);
     expect(m.samples.timeToPaid).toBe(0);
@@ -271,7 +273,7 @@ describe('getOperationsMetrics', () => {
         { firstAt: '2026-06-28T00:00:00Z', createdAt: '2026-01-01T00:00:00Z' }, // ~178 days
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     expect(m.timeToPaidSeconds.current).toBe(6 * 86400);
     expect(m.samples.timeToPaid).toBe(3);
     expect(m.samples.paidAtVisit).toBe(0);
@@ -279,7 +281,7 @@ describe('getOperationsMetrics', () => {
 
   it('time to paid starts at the issue date (issuedAt, else createdAt)', async () => {
     queueAll({});
-    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     const paidCols = JSON.stringify(captured[2]?.columns ?? {});
     expect(paidCols).toContain('coalesce(');
     expect(paidCols).toContain('invoices.issuedAt');
@@ -297,7 +299,7 @@ describe('getOperationsMetrics', () => {
         { serviceRequestId: 'r-auto', actorType: 'system', autoAssigned: true, firstAt: '2026-06-06T00:00:20Z', createdAt: new Date('2026-06-06T00:00:00Z') },
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     expect(m.firstResponseSystemSeconds).toBe(20);
   });
 
@@ -307,7 +309,7 @@ describe('getOperationsMetrics', () => {
         { firstAt: '2026-06-10T00:00:00Z', createdAt: new Date('2026-04-12T00:00:00Z') },
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     expect(m.samples.response).toBe(1);
   });
 
@@ -324,7 +326,7 @@ describe('getOperationsMetrics', () => {
         { serviceRequestId: 'r-x', actorType: 'human', firstAt: '2026-06-05T06:00:00Z', createdAt: new Date('2026-06-05T00:00:00Z') },
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     // The system assignment won (earliest) → the 6h human reassignment is NOT
     // counted as a first response.
     expect(m.firstResponseHumanSeconds.current).toBeNull();
@@ -341,7 +343,7 @@ describe('getOperationsMetrics', () => {
         { serviceRequestId: 'r-stale', actorType: 'human', firstAt: '2026-06-10T00:00:00Z', createdAt: new Date('2026-04-14T00:00:00Z') },
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     // Earliest-overall winner is the pre-window system event → it falls outside
     // both windows → NOTHING is counted. The in-window human reassignment does
     // NOT inflate the human headline.
@@ -351,7 +353,7 @@ describe('getOperationsMetrics', () => {
 
   it('returns null (not 0) for metrics with no qualifying rows', async () => {
     queueAll({}); // all defaults: empty event/paid rows, avgMinutes null, zero counts
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
 
     expect(m.responseTimeSeconds.current).toBeNull();
     expect(m.responseTimeSeconds.previous).toBeNull();
@@ -371,7 +373,7 @@ describe('getOperationsMetrics', () => {
         { firstAt: '2026-06-20T00:00:00Z', createdAt: new Date('2026-06-19T00:00:00Z') }, // 86400 kept
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     // Only the valid row survives → median of a single value.
     expect(m.responseTimeSeconds.current).toBe(86400);
   });
@@ -382,14 +384,14 @@ describe('getOperationsMetrics', () => {
         { firstAt: '2026-04-01T00:00:00Z', createdAt: new Date('2026-03-31T00:00:00Z') }, // before prevFrom → excluded
       ],
     });
-    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     expect(m.responseTimeSeconds.current).toBeNull();
     expect(m.responseTimeSeconds.previous).toBeNull();
   });
 
   it('on-site duration counts job entries only (general clock excluded)', async () => {
     queueAll({});
-    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
     const where = (captured[3]?.where ?? []).flat() as { kind?: string; args?: unknown[] }[];
     const kindEq = where.find(
       (w) => w?.kind === 'eq' && w.args?.[0] === 'technicianTimeEntries.kind',
@@ -399,7 +401,7 @@ describe('getOperationsMetrics', () => {
 
   it('scopes response-time and first-response queries to native requests (synced FP/HCP excluded)', async () => {
     queueAll({});
-    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
 
     // 1st select is the in_progress (response-time) query.
     const inProgressWhere = JSON.stringify(captured[0]?.where ?? []);
@@ -416,7 +418,7 @@ describe('getOperationsMetrics', () => {
 
   it('scopes the paid-invoice query to native invoices (synced FP/HCP excluded)', async () => {
     queueAll({});
-    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
 
     // 3rd select is the paid-invoice query. Its where args flatten to include the
     // isNull guards on both external-id columns and state='paid'.
@@ -459,7 +461,7 @@ describe('getOperationsMetrics', () => {
 
   it('AR aging buckets reference coalesce(issuedAt, createdAt) — not bare createdAt', async () => {
     queueAll({});
-    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+    await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
 
     // 5th select is native AR aging. The sql`` column expressions must reference
     // issuedAt so that native invoices without an issued date fall back to createdAt
@@ -476,7 +478,7 @@ it('exposes synced AR aging buckets (due-date based) alongside the legacy total'
       { currentCents: '1000', b0: '84000', b30: '28000', b60: '35000', totalCents: '148000', count: '133' },
     ],
   });
-  const m = await getOperationsMetrics(ORG);
+  const m = await getOperationsMetrics(ORG, {}, VISIBLE_ONLY);
   expect(m.syncedArAging).toEqual({
     currentCents: 1000,
     overdue1to30Cents: 84000,
@@ -494,7 +496,7 @@ it('totalOutstandingAllCents = native (b0+b30+b60) + syncedArTotalCents', async 
     aging: [{ b0: '2000', b30: '500', b60: '300' }],
     syncedAging: [{ currentCents: '5000', b0: '6000', b30: '3000', b60: '1000', totalCents: '15000', count: '12' }],
   });
-  const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+  const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
   expect(m.arAging.nativeOutstandingCents).toBe(2800);
   expect(m.syncedArTotalCents).toBe(15000);
   expect(m.totalOutstandingAllCents).toBe(17800);
@@ -502,6 +504,6 @@ it('totalOutstandingAllCents = native (b0+b30+b60) + syncedArTotalCents', async 
 
 it('totalOutstandingAllCents = 0 when both native and synced are zero', async () => {
   queueAll({});
-  const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO });
+  const m = await getOperationsMetrics(ORG, { fromDate: FROM, toDate: TO }, VISIBLE_ONLY);
   expect(m.totalOutstandingAllCents).toBe(0);
 });

@@ -7,7 +7,8 @@ import { scanSource, type ReadSite } from "./visibility-scan";
  * Hidden-history coverage gate. Every read of a flagged table (or a child of
  * one) in src/lib and the admin API must either apply the visibility filter or
  * be listed in exactly one allowlist under ./visibility-coverage/ with a reason.
- * The pending-*.json lists shrink to [] as the read-site sweeps land.
+ * The pending-*.json lists shrank to [] as the read-site sweeps landed and
+ * were deleted; only permanent.json remains.
  */
 
 interface AllowEntry {
@@ -153,12 +154,10 @@ const entries = [...lists.values()].flat();
 
 describe("hidden-history visibility coverage", () => {
   it("has the remaining allowlist files, each entry with an id and a reason", () => {
-    // Each sweep deletes its pending list once it is empty (Task 10: requests;
-    // Task 11: customers; Task 12: money).
-    expect([...lists.keys()]).toEqual([
-      "pending-insights.json",
-      "permanent.json",
-    ]);
+    // Each sweep deleted its pending list once it was empty (Task 10: requests;
+    // Task 11: customers; Task 12: money; Task 13: insights). Only the
+    // permanent allowlist remains.
+    expect([...lists.keys()]).toEqual(["permanent.json"]);
     for (const e of entries) {
       expect(typeof e.id).toBe("string");
       expect(e.reason.trim().length, `reason for ${e.id}`).toBeGreaterThan(0);

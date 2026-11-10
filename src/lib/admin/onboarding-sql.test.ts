@@ -79,6 +79,24 @@ describe("onboardingSelectSql", () => {
     expect(frag).not.toContain("housecall_pro_user_id");
   });
 
+  it("request signals count visible requests only; configuration signals are unfiltered", () => {
+    const signal = (col: string) => {
+      const end = flat.indexOf(` AS ${col}`);
+      const start = flat.lastIndexOf(" AS ", end - 1);
+      return flat.slice(start, end);
+    };
+    expect(signal("any_request")).toContain("service_requests.hidden_from_org = false");
+    expect(signal("completed_request")).toContain("service_requests.hidden_from_org = false");
+    expect(signal("booked_assigned")).toContain(
+      "JOIN service_requests r ON r.id = a.service_request_id AND r.organization_id = $",
+    );
+    expect(signal("booked_assigned")).toContain("r.hidden_from_org = false");
+    expect(flat.match(/hidden_from_org = false/g)).toHaveLength(3);
+    for (const col of ["technician_ready", "pricebook", "tech_signed_in_evidence", "widget_key", "integration_connected"]) {
+      expect(signal(col)).not.toContain("hidden_from_org");
+    }
+  });
+
   it("role-only technician check in booked_assigned (no is_active)", () => {
     const booked = flat.slice(flat.indexOf("appointment_assignments"), flat.indexOf(" AS booked_assigned"));
     expect(booked).toContain("role = 'technician'");

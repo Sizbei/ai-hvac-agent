@@ -10,11 +10,12 @@
  * neon-http note: SQL aggregates (count/avg) come back as strings (or null for
  * an empty set), so each value is coerced with Number() and coalesced to 0.
  */
-import { gte, lte, sql, count, avg, isNotNull, desc } from "drizzle-orm";
+import { and, eq, gte, lte, sql, count, avg, isNotNull, isNull, or, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { botEvents, customerSessions } from "@/lib/db/schema";
 import { notStandInSession } from "./stand-in-session";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "./visibility";
 
 export interface BotAnalyticsPeriod {
   readonly fromDate?: Date;
@@ -81,10 +82,13 @@ const UNCLASSIFIED_OUTCOME = "unclassified";
 /**
  * Compute an org's bot analytics for a period. Defaults to the last 30 days when
  * no range is given. All ratios are 0-1 floats; the UI formats as percentages.
+ * Sessions the viewer can't see drop out, and so do their turns (a turn follows
+ * its session). A turn whose session row is gone (soft reference) still counts.
  */
 export async function getBotAnalytics(
   organizationId: string,
-  period: BotAnalyticsPeriod = {},
+  period: BotAnalyticsPeriod,
+  vis: Visibility,
 ): Promise<BotAnalytics> {
   const now = new Date();
   const toDate = period.toDate ?? now;
@@ -119,12 +123,20 @@ export async function getBotAnalytics(
         avgLatency: avg(botEvents.latencyMs),
       })
       .from(botEvents)
+      .leftJoin(
+        customerSessions,
+        and(
+          eq(customerSessions.id, botEvents.sessionId),
+          eq(customerSessions.organizationId, organizationId),
+        ),
+      )
       .where(
         withTenant(
           botEvents,
           organizationId,
           gte(botEvents.createdAt, fromDate),
           lte(botEvents.createdAt, toDate),
+          or(isNull(customerSessions.id), visibleRows(customerSessions, vis))!,
         ),
       ),
 
@@ -134,6 +146,13 @@ export async function getBotAnalytics(
     db
       .select({ intentId: botEvents.intentId, value: count() })
       .from(botEvents)
+      .leftJoin(
+        customerSessions,
+        and(
+          eq(customerSessions.id, botEvents.sessionId),
+          eq(customerSessions.organizationId, organizationId),
+        ),
+      )
       .where(
         withTenant(
           botEvents,
@@ -141,6 +160,7 @@ export async function getBotAnalytics(
           isNotNull(botEvents.intentId),
           gte(botEvents.createdAt, fromDate),
           lte(botEvents.createdAt, toDate),
+          or(isNull(customerSessions.id), visibleRows(customerSessions, vis))!,
         ),
       )
       .groupBy(botEvents.intentId)
@@ -166,6 +186,7 @@ export async function getBotAnalytics(
           lte(customerSessions.createdAt, toDate),
           // Stand-in sessions are never summarized and would pad "unclassified".
           notStandInSession(customerSessions.token),
+          visibleRows(customerSessions, vis),
         ),
       )
       // GROUP BY the raw column (NOT the coalesce expr): Drizzle parameterizes

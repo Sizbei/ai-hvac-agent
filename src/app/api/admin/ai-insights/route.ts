@@ -1,4 +1,4 @@
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getAiInsights } from "@/lib/admin/ai-insights-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -6,10 +6,11 @@ import { logger } from "@/lib/logger";
 
 export async function GET() {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:ai-insights:${session.userId}`,
@@ -20,7 +21,7 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const insights = await getAiInsights(session.organizationId);
+    const insights = await getAiInsights(session.organizationId, viewer);
 
     return successResponse(insights);
   } catch (error: unknown) {

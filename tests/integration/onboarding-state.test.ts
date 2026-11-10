@@ -7,7 +7,7 @@ vi.mock("server-only", () => ({}));
 /**
  * Integration suite for the setup guide's stamps and flags. Runs against the
  * DEV database (`VITEST_INTEGRATION=1`); the two concurrency pairs are smoke
- * tests driven with the SQL builders directly. Creates four throwaway orgs and
+ * tests driven with the SQL builders directly. Creates five throwaway orgs and
  * deletes each one (cascade) in afterAll, independently.
  */
 
@@ -34,6 +34,7 @@ let orgA = "";
 let orgG = "";
 let orgA2 = "";
 let orgB = "";
+let orgH = "";
 
 async function run(statement: ReturnType<typeof sql>): Promise<Row[]> {
   const res = await db.execute(statement);
@@ -142,11 +143,12 @@ beforeAll(async () => {
   orgG = await make("G");
   orgA2 = await make("A2");
   orgB = await make("B");
+  orgH = await make("H");
 }, 60_000);
 
 afterAll(async () => {
   // One try/catch per org: a failed delete can never leak the others.
-  for (const id of [orgA, orgG, orgA2, orgB]) {
+  for (const id of [orgA, orgG, orgA2, orgB, orgH]) {
     if (!id) continue;
     try {
       await db.execute(sql`DELETE FROM organizations WHERE id = ${id}`);
@@ -277,5 +279,44 @@ describe("onboarding state (dev DB)", () => {
     expect((await stateObj(orgA2)).dismissedAt).toBeDefined();
 
     expect(await stateText(orgB)).toBe(before);
+  });
+
+  it("(i) hidden history alone: no request signals, book_first_request open, no grandfather dismissal", async () => {
+    // An old org whose only request is completed, booked with a technician and
+    // hidden (go-live marking). Ruling 2: signals count visible rows only.
+    await db.execute(
+      sql`UPDATE organizations SET created_at = now() - interval '20 days' WHERE id = ${orgH}`,
+    );
+    const { req } = await seedRest(orgH, "completed");
+    // Marking-style: hide by UPDATE after the insert (the visit trigger has run).
+    await db.execute(
+      sql`UPDATE service_requests SET hidden_from_org = true WHERE id = ${req} AND organization_id = ${orgH}`,
+    );
+    const signals = async () => (await run(s.onboardingSelectSql(orgH)))[0];
+
+    const hidden = await signals();
+    expect(hidden).toMatchObject({
+      any_request: false,
+      booked_assigned: false,
+      completed_request: false,
+      technician_ready: true,
+    });
+
+    const p = await q.getOnboarding(orgH, OPTS);
+    expect(p.steps.find((st) => st.id === "book_first_request")?.done).toBe(false);
+    expect(p.dismissedAt).toBeNull();
+    const st = await stateObj(orgH);
+    expect(st.dismissedAt).toBeUndefined();
+    expect(st.firstCompleted.book_first_request).toBeUndefined();
+
+    // Control: the same row, visible, sets all three signals.
+    await db.execute(
+      sql`UPDATE service_requests SET hidden_from_org = false WHERE id = ${req} AND organization_id = ${orgH}`,
+    );
+    expect(await signals()).toMatchObject({
+      any_request: true,
+      booked_assigned: true,
+      completed_request: true,
+    });
   });
 });

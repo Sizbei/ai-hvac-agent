@@ -60,6 +60,7 @@ vi.mock('./org-time-zone', () => ({
 }));
 
 import { getOpsInsights } from './ops-insights-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -98,7 +99,7 @@ beforeEach(() => {
 describe('getOpsInsights', () => {
   it('returns an all-zero shape when there are no requests', async () => {
     seed({ issue: [], urgency: [], status: [], last7: 0, tech: [] });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.totalRequests).toBe(0);
     expect(r.openRequests).toBe(0);
     expect(r.completedRequests).toBe(0);
@@ -113,7 +114,7 @@ describe('getOpsInsights', () => {
 
   it("returns the org's time zone the hour buckets are in", async () => {
     seed({ issue: [], urgency: [], status: [], last7: 0, tech: [] });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.timeZone).toBe('America/Chicago');
   });
 
@@ -130,7 +131,7 @@ describe('getOpsInsights', () => {
         { hour: '14', value: '3' },
       ],
     });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.requestsByHour).toHaveLength(24);
     expect(r.requestsByHour[9]).toEqual({ hour: 9, count: 5 });
     expect(r.requestsByHour[14]).toEqual({ hour: 14, count: 3 });
@@ -150,7 +151,7 @@ describe('getOpsInsights', () => {
       // 3 jobs, total 30000c ($300), avg 10000.5c → rounds to 10001.
       cost: { count: '3', total: '30000', average: '10000.5' },
     });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.costStats).toEqual({
       count: 3,
       totalCents: 30000,
@@ -167,7 +168,7 @@ describe('getOpsInsights', () => {
       tech: [],
       cost: { count: '0', total: '0', average: '0' },
     });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.costStats.averageCents).toBe(0);
   });
 
@@ -187,7 +188,7 @@ describe('getOpsInsights', () => {
       tech: [],
       openImported: '84',
     });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.openRequests).toBe(119);
     expect(r.openImported).toBe(84);
     // open + completed + cancelled now equals the total.
@@ -213,7 +214,7 @@ describe('getOpsInsights', () => {
       tech: [],
     });
 
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.totalRequests).toBe(8); // 3+1+1+2+1
     expect(r.openRequests).toBe(5); // pending+assigned+in_progress
     expect(r.completedRequests).toBe(2);
@@ -233,7 +234,7 @@ describe('getOpsInsights', () => {
       last7: 0,
       tech: [],
     });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     expect(r.byIssueType.map((x) => x.key)).toEqual(['b', 'c', 'a']);
   });
 
@@ -249,7 +250,7 @@ describe('getOpsInsights', () => {
         { technicianId: null, technicianName: null, total: '2', active: '2', completed: '0' },
       ],
     });
-    const r = await getOpsInsights(ORG);
+    const r = await getOpsInsights(ORG, VISIBLE_ONLY);
     // Sorted by active desc: Bob(3), unassigned(2), Alice(1).
     expect(r.technicianLoad.map((t) => t.technicianName)).toEqual([
       'Bob',
