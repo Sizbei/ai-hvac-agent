@@ -309,25 +309,42 @@ describe("migration 0059 un-hide triggers (dev DB)", { timeout: 30_000 }, () => 
   it("re-executing every 0059 statement is a no-op", async () => {
     const columns = sql`SELECT table_name, column_name, column_default, is_nullable FROM information_schema.columns
       WHERE table_schema = 'public' AND column_name IN ('hidden_from_org','feature_flags') ORDER BY table_name, column_name`;
-    const flags = sql`SELECT feature_flags FROM organizations WHERE id IN (${SPEARS}, ${org}) ORDER BY id`;
+    const probeFlags = async () =>
+      (await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`))[0]!.feature_flags;
     const beforeColumns = await run(columns);
-    const beforeFlags = await run(flags);
 
     const statements = readFileSync("drizzle/0059_golive.sql", "utf8")
       .split("--> statement-breakpoint")
       .map((s) => s.trim())
       .filter(Boolean);
-    for (let pass = 0; pass < 2; pass++) {
-      for (const stmt of statements) await db.execute(sql.raw(stmt));
-    }
+    // The seed targets the live org, which no suite may touch: it is replayed
+    // below against the throwaway org instead.
+    const isSeed = (s: string) => s.includes("UPDATE organizations SET feature_flags");
+    const seeds = statements.filter(isSeed);
+    expect(seeds).toHaveLength(1);
+    expect(seeds[0]).toContain(`WHERE id = '${SPEARS}'`);
+    const probeSeed = seeds[0].replace(`'${SPEARS}'`, `'${org}'`);
+    expect(probeSeed).not.toContain(SPEARS);
 
+    for (let pass = 0; pass < 2; pass++) {
+      for (const stmt of statements.filter((s) => !isSeed(s))) await db.execute(sql.raw(stmt));
+    }
     expect(await run(columns)).toEqual(beforeColumns);
     expect(beforeColumns).toHaveLength(6);
     for (const col of beforeColumns) expect(col.is_nullable).toBe("NO");
-    expect(await run(flags)).toEqual(beforeFlags);
-    const [spears] = await run(sql`SELECT feature_flags FROM organizations WHERE id = ${SPEARS}`);
-    expect(spears!.feature_flags).toMatchObject({ reviewRequests: false, payLinks: false });
-    const [probe] = await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`);
-    expect(probe!.feature_flags).toEqual({});
+    expect(await probeFlags()).toEqual({});
+
+    // The seed sets both defaults once; a second run changes nothing.
+    await db.execute(sql.raw(probeSeed));
+    expect(await probeFlags()).toEqual({ reviewRequests: false, payLinks: false });
+    await db.execute(sql.raw(probeSeed));
+    expect(await probeFlags()).toEqual({ reviewRequests: false, payLinks: false });
+
+    // A retry after the owner toggled a flag keeps the toggle and other keys.
+    await db.execute(
+      sql`UPDATE organizations SET feature_flags = '{"payLinks":true,"other":1}'::jsonb WHERE id = ${org}`,
+    );
+    await db.execute(sql.raw(probeSeed));
+    expect(await probeFlags()).toEqual({ payLinks: true, other: 1, reviewRequests: false });
   }, 60_000);
 });

@@ -14,9 +14,10 @@ ALTER TABLE "estimates" ADD COLUMN IF NOT EXISTS "hidden_from_org" boolean DEFAU
 --> statement-breakpoint
 ALTER TABLE "customer_sessions" ADD COLUMN IF NOT EXISTS "hidden_from_org" boolean DEFAULT false NOT NULL;
 --> statement-breakpoint
--- Spears' live org starts with review requests and pay links off. || keeps any
--- other keys and re-running it changes nothing.
-UPDATE organizations SET feature_flags = feature_flags || '{"reviewRequests":false,"payLinks":false}'::jsonb WHERE id = '00000000-0000-0000-0000-000000000001';
+-- Spears' live org starts with review requests and pay links off. The defaults
+-- sit on the left of ||, so any value already set (a platform-owner toggle
+-- before a retried run) wins, and re-running it changes nothing.
+UPDATE organizations SET feature_flags = '{"reviewRequests":false,"payLinks":false}'::jsonb || feature_flags WHERE id = '00000000-0000-0000-0000-000000000001';
 --> statement-breakpoint
 -- A visible child attached to a hidden parent brings the parent back into the
 -- org's view. Each un-hide only touches a row that is hidden, and none of them

@@ -44,7 +44,7 @@ describe("migration 0059", () => {
   it("seeds reviewRequests:false and payLinks:false for 00000000-0000-0000-0000-000000000001 only, merging with ||", () => {
     const updates = FLAT.filter((s) => s.startsWith("UPDATE"));
     expect(updates).toEqual([
-      `UPDATE organizations SET feature_flags = feature_flags || '{"reviewRequests":false,"payLinks":false}'::jsonb WHERE id = '${SPEARS}';`,
+      `UPDATE organizations SET feature_flags = '{"reviewRequests":false,"payLinks":false}'::jsonb || feature_flags WHERE id = '${SPEARS}';`,
     ]);
   });
 
