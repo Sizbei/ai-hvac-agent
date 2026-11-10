@@ -39,11 +39,28 @@ describe("summarizeLogLines", () => {
       json({ path: `/some/${TOKEN}/thing`, statusCode: 500 }),
     ]);
     expect(Object.keys(s.byRoute)).toEqual(
-      expect.arrayContaining(["/admin/invite/[token]", "/portal/[token]", "/api/admin/customers/[id]/erase", "/api/admin/requests/[id]", "/some/[token]/thing"]),
+      expect.arrayContaining(["/admin/invite/[token]", "/portal/[token]", "/api/admin/customers/[id]/erase", "/api/admin/requests/[id]", "/some/[x]/thing"]),
     );
     for (const key of Object.keys(s.byRoute)) {
       expect(key).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/i);
       expect(key.split("/").every((seg) => seg.startsWith("[") || !/^[A-Za-z0-9_-]{17,}$/.test(seg))).toBe(true);
+    }
+  });
+
+  it("hides non-allowlisted segments", () => {
+    const s = summarizeLogLines([json({ path: "/u/jane.smith@example.com", statusCode: 500 })]);
+    expect(s.byRoute).toEqual({ "/u/[x]": 1 });
+  });
+
+  it("text fallback with arbitrary path-like text only yields allowlisted keys", () => {
+    const s = summarizeLogLines([
+      "500 /Jane_Smith/555-123-4567/a%40b.com/ok-route",
+      "boom 502 /secret-1234567/x",
+      "see /Users/jane/file.txt 503",
+    ]);
+    for (const key of Object.keys(s.byRoute)) {
+      expect(key.split("/").every((seg) => seg === "" || /^\[(x|id|token)\]$/.test(seg) || (/^[a-z][a-z0-9-]{0,30}$/.test(seg) && !/\d{4,}/.test(seg)))).toBe(true);
+      expect(key).not.toMatch(/1234|secret|@|Jane/);
     }
   });
 

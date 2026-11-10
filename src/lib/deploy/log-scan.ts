@@ -12,7 +12,8 @@ export type LogSummary = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NUMERIC = /^\d+$/;
-const TOKEN_LIKE = /^[A-Za-z0-9_-]{17,}$/;
+const SAFE_SEGMENT = /^[a-z][a-z0-9-]{0,30}$/;
+const DIGIT_RUN = /\d{4,}/;
 const TOKEN_PARENTS = new Set(["invite", "portal"]);
 
 export function normalizeRoute(rawPath: string): string {
@@ -21,8 +22,9 @@ export function normalizeRoute(rawPath: string): string {
   const out = segs.map((seg, i) => {
     if (!seg) return seg;
     if (UUID.test(seg) || NUMERIC.test(seg)) return "[id]";
-    if (TOKEN_LIKE.test(seg) || TOKEN_PARENTS.has(segs[i - 1] ?? "")) return "[token]";
-    return seg;
+    if (TOKEN_PARENTS.has(segs[i - 1] ?? "")) return "[token]";
+    // Allowlist: anything not plainly a route word is hidden.
+    return SAFE_SEGMENT.test(seg) && !DIGIT_RUN.test(seg) ? seg : "[x]";
   });
   return out.join("/") || "/";
 }
