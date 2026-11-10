@@ -1179,6 +1179,30 @@ END $$;
 
 ---
 
+### Task 23: Deploy and test on production (controller-run; user-authorized 2026-11-10)
+
+Runs only after Task 22, the final whole-branch review and its fix wave are committed, and full gates are green.
+
+**Preconditions (all must hold; otherwise stop and report):**
+- `vercel whoami` succeeds. The CLI token was expired on 2026-11-10; the user runs `! vercel login`.
+- After hours for Spears (Eastern time, outside about 07:00–19:00) or explicit user go-ahead. Migration 0059 runs inside the build and writes prod: columns default false, and the flags are seeded off. It neither hides nor deletes data.
+- The branch is merged to `main` and pushed (user-approved merge).
+- Comms queue guard on prod reads 0.
+
+**Steps:**
+- [ ] Record the current prod deployment URL (rollback target: `vercel rollback <url>`).
+- [ ] `vercel deploy --prod --yes`. Watch the build log for `0059_golive` applied once.
+- [ ] `bash scripts/agent/prod-smoke.sh`, which includes the 401 for the retired demo email.
+- [ ] `node scripts/agent/measure-latency.mjs --base <prod url>`. Add the prod column to the speed before/after table.
+- [ ] Read-only prod checks as rchen:
+  - the org reads "Spears Services";
+  - the map is hidden;
+  - the platform switches render;
+  - View as Chick shows the empty account with the setup guide and checklist;
+  - any write in preview is refused.
+- [ ] The prod SQL in `docs/spears-handover.md` (marking script `--prod`, Chick's owner promotion) stays user-run. Never run it by an agent.
+- [ ] Append the deploy URL, smoke output and latency table to `docs/spears-handover.md`. Commit `docs(golive): deploy record`.
+
 ## Self-review
 
 - **Spec coverage:**
