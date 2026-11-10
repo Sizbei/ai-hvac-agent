@@ -32,4 +32,21 @@ describe("admin loading coverage", () => {
     const missing = dirs.filter((d) => !resolvesLoading(d)).map((d) => path.relative(DASHBOARD, d) || "(root)");
     expect(missing).toEqual([]);
   });
+
+  it("a detail [id] route never inherits a list-level loading.tsx", () => {
+    const inherited = dirs
+      .filter((d) => /\[[^\]]+\]$/.test(d))
+      .filter((d) => {
+        for (let p = d; p.startsWith(DASHBOARD); p = path.dirname(p)) {
+          if (existsSync(path.join(p, "loading.tsx"))) return p !== d && p !== DASHBOARD;
+        }
+        return false;
+      })
+      .map((d) => path.relative(DASHBOARD, d));
+    expect(inherited).toEqual([]);
+  });
+
+  it("has an in-shell not-found.tsx at the (dashboard) level", () => {
+    expect(existsSync(path.join(DASHBOARD, "not-found.tsx"))).toBe(true);
+  });
 });
