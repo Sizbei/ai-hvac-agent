@@ -259,6 +259,7 @@ export default function PricebookPage() {
         isLoading={isLoading}
         onEdit={handleEditClick}
         onDeactivate={(item) => { setDeactivateError(null); setPendingDeactivate(item); }}
+        onCreate={handleAddClick}
         searchTerm={debouncedSearch}
         isFiltered={Boolean(debouncedSearch.trim()) || typeFilter !== ALL_TYPES || laborOnly}
         onClearFilters={() => {

@@ -5,6 +5,8 @@ import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { EmptyState } from '@/components/admin/ui/empty-state';
+import { EmptyStateAction } from '@/components/admin/ui/empty-state-action';
+import { emptyActionFor } from '@/lib/admin/empty-state-actions';
 import {
   DataTableShell,
   type DataTableColumn,
@@ -24,6 +26,8 @@ interface RequestTableProps {
   readonly hasActiveFilters?: boolean;
   /** Called when the user clicks "Clear filters" in the empty state. */
   readonly onClearFilters?: () => void;
+  /** Day-one "New request" action (the page's existing create-dialog opener). */
+  readonly onCreate?: () => void;
 }
 
 /** Submitted day in business time, like the sheet and calendar (not the viewer's zone). */
@@ -159,6 +163,7 @@ export function RequestTable({
   onRowClick,
   hasActiveFilters = false,
   onClearFilters,
+  onCreate,
 }: RequestTableProps) {
   const emptyState = (
     <EmptyState
@@ -170,11 +175,18 @@ export function RequestTable({
           : 'Service requests submitted by customers will appear here.'
       }
       action={
-        hasActiveFilters && onClearFilters ? (
-          <Button variant="outline" size="sm" onClick={onClearFilters}>
-            Clear filters
-          </Button>
-        ) : undefined
+        hasActiveFilters ? (
+          onClearFilters ? (
+            <Button variant="outline" size="sm" onClick={onClearFilters}>
+              Clear filters
+            </Button>
+          ) : undefined
+        ) : (
+          <EmptyStateAction
+            action={emptyActionFor('requests', { hasActiveFilters })}
+            onCallback={onCreate}
+          />
+        )
       }
     />
   );
