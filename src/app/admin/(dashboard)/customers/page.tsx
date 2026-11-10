@@ -38,6 +38,7 @@ import { CustomerPeopleCards } from '@/components/admin/customers/customer-peopl
 import { CustomerDrawer } from '@/components/admin/customers/customer-drawer';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { BackToTourStrip } from '@/components/admin/setup/back-to-tour-strip';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
 import { SyncPill } from '@/components/admin/sync-pill';
@@ -261,6 +262,7 @@ export default function CustomersPage() {
 
   return (
     <PageShell>
+      <BackToTourStrip />
       <PageHeader
         title="Customers"
         subtitle={
