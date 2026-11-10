@@ -21,16 +21,19 @@ function signalsFromRow(row: Row): Signals {
   };
 }
 
-/** GET: one SELECT, then the stamp statement only when something new completed. */
+/**
+ * GET: one SELECT, then the stamp statement only when something new completed
+ * and `write` is true (false for the platform owner's read-only "View as").
+ */
 export async function getGuide(
   organizationId: string,
   userId: string,
-  { features, now = new Date() }: { features: Pick<Features, "payLinks">; now?: Date },
+  { features, write, now = new Date() }: { features: Pick<Features, "payLinks">; write: boolean; now?: Date },
 ): Promise<GuidePayload> {
   const res = await db.execute(guideSelectSql(organizationId, userId));
   const signals = signalsFromRow((res.rows[0] ?? {}) as Row);
   const d = deriveGuide(signals, now, features);
-  if (Object.keys(d.newStamps).length > 0) {
+  if (write && Object.keys(d.newStamps).length > 0) {
     try {
       await db.execute(guideStampSql({ organizationId, userId, newStamps: d.newStamps }));
     } catch (error) {

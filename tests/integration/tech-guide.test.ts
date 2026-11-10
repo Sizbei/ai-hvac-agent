@@ -95,7 +95,7 @@ afterAll(async () => {
 
 describe("technician guide (dev DB)", () => {
   it("(a) a new technician is 0 of 2 with the no-job note and nothing stamped", async () => {
-    const p = await q.getGuide(org1, helper, { features: { payLinks: true } });
+    const p = await q.getGuide(org1, helper, { features: { payLinks: true }, write: true });
     expect(p.progress.requiredDone).toBe(0);
     expect(p.upNext).toBe("start_job");
     expect(p.steps[0].note).toBe("The office hasn't assigned you a job yet. It shows in your jobs when they do.");
@@ -105,25 +105,25 @@ describe("technician guide (dev DB)", () => {
 
   it("(b) a started row completes start_job, stamps it, and the stamp is sticky", async () => {
     ({ rid: rid1, row: helperRow } = await seedJob(org1, lead, helper));
-    expect((await q.getGuide(org1, helper, { features: { payLinks: true } })).steps[0].note).toBeUndefined();
+    expect((await q.getGuide(org1, helper, { features: { payLinks: true }, write: true })).steps[0].note).toBeUndefined();
     await db.execute(sql`UPDATE appointment_assignments SET en_route_at = now() WHERE id = ${helperRow} AND organization_id = ${org1}`);
-    const p = await q.getGuide(org1, helper, { features: { payLinks: true } });
+    const p = await q.getGuide(org1, helper, { features: { payLinks: true }, write: true });
     expect(p.steps[0].done).toBe(true);
     expect(p.upNext).toBe("finish_job");
     const st = await stateOf(helper, org1);
     expect((st?.firstCompleted as Row)?.start_job).toBeDefined();
     await db.execute(sql`UPDATE appointment_assignments SET en_route_at = NULL WHERE id = ${helperRow} AND organization_id = ${org1}`);
-    expect((await q.getGuide(org1, helper, { features: { payLinks: true } })).steps[0].done).toBe(true);
+    expect((await q.getGuide(org1, helper, { features: { payLinks: true }, write: true })).steps[0].done).toBe(true);
   });
 
   it("(c) a completed started row finishes the guide; the next read writes nothing", async () => {
     await db.execute(sql`UPDATE appointment_assignments SET started_at = now(), completed_at = now() WHERE id = ${helperRow} AND organization_id = ${org1}`);
-    const p = await q.getGuide(org1, helper, { features: { payLinks: true } });
+    const p = await q.getGuide(org1, helper, { features: { payLinks: true }, write: true });
     expect(p.finished).toBe(true);
     expect(p.cardHidden).toBe(false);
     const before = JSON.stringify(await stateOf(helper, org1));
     expect((JSON.parse(before).firstCompleted as Row).finish_job).toBeDefined();
-    await q.getGuide(org1, helper, { features: { payLinks: true } });
+    await q.getGuide(org1, helper, { features: { payLinks: true }, write: true });
     expect(JSON.stringify(await stateOf(helper, org1))).toBe(before);
   });
 
@@ -133,7 +133,7 @@ describe("technician guide (dev DB)", () => {
     await new Promise((r) => setTimeout(r, 20));
     const second = await q.hideGuide(org1, helper);
     expect(second?.hiddenAt).toBe(first?.hiddenAt);
-    expect((await q.getGuide(org1, helper, { features: { payLinks: true } })).cardHidden).toBe(true);
+    expect((await q.getGuide(org1, helper, { features: { payLinks: true }, write: true })).cardHidden).toBe(true);
     expect(await q.readGuideHidden(org1, helper)).toBe(true);
   });
 
@@ -142,11 +142,11 @@ describe("technician guide (dev DB)", () => {
     await db.execute(sql`UPDATE appointment_assignments SET en_route_at = now(), started_at = now() WHERE id = ${row} AND organization_id = ${org2}`);
     await db.execute(sql`INSERT INTO job_materials (organization_id,service_request_id,description,created_by) VALUES (${org2},${rid},'Probe part',${techB})`);
     await db.execute(sql`INSERT INTO request_notes (organization_id,request_id,author_id,content) VALUES (${org2},${rid},${techB},'Probe note')`);
-    const pb = await q.getGuide(org2, techB, { features: { payLinks: true } });
+    const pb = await q.getGuide(org2, techB, { features: { payLinks: true }, write: true });
     expect(pb.steps.find((x) => x.id === "add_material")?.done).toBe(true);
     expect(pb.steps.find((x) => x.id === "note_or_photo")?.done).toBe(true);
     const fresh = await tech(org1);
-    const pa = await q.getGuide(org1, fresh, { features: { payLinks: true } });
+    const pa = await q.getGuide(org1, fresh, { features: { payLinks: true }, write: true });
     expect(pa.steps.every((x) => !x.done)).toBe(true);
     const cross = (await run(s.guideSelectSql(org2, helper)))[0];
     for (const [k, v] of Object.entries(cross)) {
@@ -160,12 +160,12 @@ describe("technician guide (dev DB)", () => {
     await db.execute(sql`INSERT INTO appointment_assignments (organization_id,appointment_id,technician_id,is_lead,status) VALUES (${org1},${appt},${freshHelper},false,'assigned'::request_status)`);
     await db.execute(sql`INSERT INTO attachments (organization_id,service_request_id,filename,mime_type,size,storage_key) VALUES (${org1},${rid1},'a.jpg','image/jpeg',1,'org_'||${org1}||'_admin_x.jpg')`);
     await db.execute(sql`UPDATE service_requests SET signed_at = now() WHERE id = ${rid1} AND organization_id = ${org1}`);
-    const before = await q.getGuide(org1, freshHelper, { features: { payLinks: true } });
+    const before = await q.getGuide(org1, freshHelper, { features: { payLinks: true }, write: true });
     expect(before.steps.find((x) => x.id === "note_or_photo")?.done).toBe(false);
     expect(before.steps.find((x) => x.id === "capture_signature")?.done).toBe(false);
-    expect((await q.getGuide(org1, lead, { features: { payLinks: true } })).steps.find((x) => x.id === "capture_signature")?.done).toBe(true);
+    expect((await q.getGuide(org1, lead, { features: { payLinks: true }, write: true })).steps.find((x) => x.id === "capture_signature")?.done).toBe(true);
     await db.execute(sql`INSERT INTO attachments (organization_id,service_request_id,filename,mime_type,size,storage_key) VALUES (${org1},${rid1},'b.jpg','image/jpeg',1,'org_'||${org1}||'_session_'||${rid1}||'_y.jpg')`);
-    expect((await q.getGuide(org1, freshHelper, { features: { payLinks: true } })).steps.find((x) => x.id === "note_or_photo")?.done).toBe(true);
+    expect((await q.getGuide(org1, freshHelper, { features: { payLinks: true }, write: true })).steps.find((x) => x.id === "note_or_photo")?.done).toBe(true);
   });
 
   it("(f) two stamp statements with disjoint keys both land", async () => {
@@ -184,6 +184,6 @@ describe("technician guide (dev DB)", () => {
     const old = new Date(Date.now() - 25 * 3_600_000).toISOString();
     await db.execute(s.guideStampSql({ organizationId: org1, userId: fresh, newStamps: { start_job: old, finish_job: old } }));
     expect(await q.readGuideHidden(org1, fresh)).toBe(true);
-    expect((await q.getGuide(org1, fresh, { features: { payLinks: true } })).cardHidden).toBe(true);
+    expect((await q.getGuide(org1, fresh, { features: { payLinks: true }, write: true })).cardHidden).toBe(true);
   });
 });

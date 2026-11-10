@@ -65,6 +65,24 @@ describe("previewGate", () => {
     expect(previewGate("PATCH", "/api/admin/guide")).toBe("refuse");
   });
 
+  it("previewGate refuses POST /api/tech/time", () => {
+    expect(previewGate("POST", "/api/tech/time")).toBe("refuse");
+  });
+
+  it("refuses every non-GET under /api/tech/ and allows its reads", () => {
+    for (const m of ["POST", "PATCH", "PUT", "DELETE", "OPTIONS"]) {
+      expect(previewGate(m, "/api/tech/guide")).toBe("refuse");
+      expect(previewGate(m, "/api/tech/location")).toBe("refuse");
+      expect(previewGate(m, "/api/tech/jobs/abc/status")).toBe("refuse");
+      expect(previewGate(m, "/api/tech/jobs/abc/invoice/payments")).toBe("refuse");
+      expect(previewGate(m, "/api/auth/tech/logout")).toBe("refuse");
+    }
+    expect(previewGate("GET", "/api/tech/guide")).toBe("allow");
+    expect(previewGate("GET", "/api/tech/jobs")).toBe("allow");
+    expect(previewGate("GET", "/tech/jobs")).toBe("allow");
+    expect(previewGate("GET", "/tech/guide")).toBe("allow");
+  });
+
   it("lets the exit and logout POSTs through, and only those", () => {
     expect(previewGate("POST", "/api/admin/preview/exit")).toBe("allow");
     expect(previewGate("POST", "/api/auth/logout")).toBe("allow");

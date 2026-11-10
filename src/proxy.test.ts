@@ -18,7 +18,7 @@ vi.mock("@/lib/auth/preview-gate", async (importOriginal) => {
 });
 
 import { NextRequest } from "next/server";
-import { proxy } from "./proxy";
+import { proxy, config } from "./proxy";
 import { signToken } from "@/lib/auth/config";
 import { PREVIEW_COOKIE, signPreviewCookie } from "@/lib/auth/preview-cookie";
 
@@ -107,6 +107,61 @@ describe("proxy without a preview cookie (the old path, unchanged)", () => {
     const res = await proxy(req("/admin/customers"));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("https://app.example.com/admin/login");
+  });
+});
+
+describe("proxy on /tech (Task 19)", () => {
+  it("the matcher covers the technician pages", () => {
+    expect(config.matcher).toContain("/tech/:path*");
+  });
+
+  it("a real technician (no preview cookie) never consults the preview gate", async () => {
+    const cases = [
+      req("/tech/jobs", { cookies: { hvac_tech_session: "tech-token" } }),
+      req("/tech/guide", { cookies: { hvac_tech_session: "tech-token" } }),
+      req("/tech/jobs/abc", { cookies: { hvac_tech_session: "tech-token" } }),
+      req("/tech/jobs"),
+      req("/api/tech/time", { method: "POST", cookies: { hvac_tech_session: "tech-token" } }),
+    ];
+    for (const r of cases) {
+      const res = await proxy(r);
+      expect(passedThrough(res)).toBe(true);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("set-cookie")).toBeNull();
+      expect(res.headers.get("location")).toBeNull();
+    }
+    expect(decisionSpy).not.toHaveBeenCalled();
+  });
+
+  it("valid bound cookie lets a technician page read through", async () => {
+    const res = await proxy(
+      req("/tech/guide", { cookies: { hvac_admin_session: session, [PREVIEW_COOKIE]: preview } }),
+    );
+    expect(passedThrough(res)).toBe(true);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("valid bound cookie refuses a technician write", async () => {
+    for (const [method, path] of [
+      ["POST", "/api/tech/time"],
+      ["PATCH", "/api/tech/guide"],
+      ["POST", "/api/tech/location"],
+      ["POST", "/api/tech/jobs/abc/status"],
+    ] as const) {
+      const res = await proxy(
+        req(path, { method, cookies: { hvac_admin_session: session, [PREVIEW_COOKIE]: preview } }),
+      );
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("PREVIEW_READ_ONLY");
+    }
+  });
+
+  it("a forged cookie is cleared on a technician page", async () => {
+    const res = await proxy(
+      req("/tech/jobs", { cookies: { hvac_admin_session: session, [PREVIEW_COOKIE]: "garbage" } }),
+    );
+    expect(passedThrough(res)).toBe(true);
+    expectPreviewCleared(res);
   });
 });
 

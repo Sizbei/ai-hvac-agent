@@ -32,13 +32,19 @@ describe("GET /api/tech/guide", () => {
   it("returns the payload for the session's org and user", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: true } });
+    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: true }, write: true });
+  });
+  it("a preview session reads without writing stamps", async () => {
+    (getTechSession as unknown as Mock).mockResolvedValue({ ...session, preview: true });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: true }, write: false });
   });
   it("falls back to pay links off when the feature read throws", async () => {
     (getFeatures as unknown as Mock).mockRejectedValue(new Error("db"));
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: false } });
+    expect(getGuide).toHaveBeenCalledWith("o", "u", { features: { payLinks: false }, write: true });
     expect((await res.json()).data.upNext).toBe("start_job");
   });
   it("500 with human copy when the query throws", async () => {

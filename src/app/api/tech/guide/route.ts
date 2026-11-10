@@ -28,7 +28,8 @@ export async function GET() {
       logger.warn({ code: errorCode(error) }, "Feature read failed for the technician guide; using pay links off");
       return { payLinks: false };
     });
-    return successResponse(await getGuide(session.organizationId, session.userId, { features }));
+    // "View as" a technician is read-only: derive the steps, never stamp them.
+    return successResponse(await getGuide(session.organizationId, session.userId, { features, write: !session.preview }));
   } catch (error) {
     logger.error({ code: errorCode(error) }, "Failed to load the technician guide");
     return errorResponse("Couldn't load the guide.", "INTERNAL_ERROR", 500);
