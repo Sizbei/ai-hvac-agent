@@ -1630,6 +1630,22 @@ These 20 tasks don't repeat any of Tasks 1â€“23. HEAD is `a6f18ee`, so Tasks 1â€
      - pushing to or merging into `main`.
    - **Implementer subagents** remain DEV-only. Every guard from override 6 stays, as defence against accidents. Smoke writes stay opt-in (`SMOKE_WRITES=1`) because they leave a fake chat in the inbox. The controller may enable them once and then hide that session.
 
+8. **User authorization, 2026-11-10: "deploying along the way is fine. try to do as much as possible without my approval".**
+   - **No longer needs the user's approval:**
+     - incremental prod deploys at checkpoints;
+     - fast-forward merging this branch into `main` and pushing it (after full gates);
+     - `vercel rollback` if a deploy breaks prod smoke;
+     - setting the platform env vars the controller already knows (`PLATFORM_ADMIN_EMAILS` = the owner's sign-in email, `PLATFORM_ORG_ID` = `00000000-0000-0000-0000-000000000001`), by name via `vercel env add`.
+   - **Still needs the user's approval:**
+     - sending Chick's owner invite, because the user asked to send it themselves;
+     - any DELETE of prod rows.
+   - **Deploy checkpoints.** Each one runs the full gates, then ff-merges and pushes `main`, then `vercel deploy --prod --yes`. After that come smoke, View-as checks and a ledger record.
+     - **D1** after Task 39: lockdown, migration 0059, switches and protection. Set the env vars first, then run the org rename to "Spears Services" and check that the flags were seeded off.
+     - **D2** after Task 13: visibility filters. Then the marking script on prod: dry run, then `--prod --apply --mode history`, then the onboarding reset.
+     - **D3** after Task 18: onboarding, polish and the P8 walk fixes.
+     - **D4** is Task 23: the final deploy after the whole-branch review, then Task 43's watch.
+   - If `vercel whoami` fails at a checkpoint, record it in the ledger, keep building, and retry at the next checkpoint.
+
 ### Controller execution order (supersedes the drafted order below)
 1. Task 6.
 2. Task 39 (now includes the smoke and migrator guards).
