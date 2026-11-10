@@ -1203,6 +1203,492 @@ Runs only after Task 22, the final whole-branch review and its fix wave are comm
 - [ ] The prod SQL in `docs/spears-handover.md` (marking script `--prod`, Chick's owner promotion) stays user-run. Never run it by an agent.
 - [ ] Append the deploy URL, smoke output and latency table to `docs/spears-handover.md`. Commit `docs(golive): deploy record`.
 
+---
+
+## Wave 2 — Tasks 24–43 (user request 2026-11-10: "setup ready and polished, site faster, deploying")
+
+Drafted by a planner agent against the code at `a6f18ee`; reconciled by the controller. **Binding overrides (these win over any wave-2 text below):**
+
+1. **Onboarding spec v3 FINAL is the authority** (`docs/superpowers/specs/2026-11-10-first-run-onboarding-design.md`, `b9f36b8`). The draft was written against v2. Where they differ, v3 wins, in particular:
+   - Task 24:
+     - 0060 has no `SET lock_timeout`.
+     - PATCH always returns `204`, with no no-op skip.
+     - The `guide` payload is v3 D1's (`… payLinks, hasFieldPulse, historyHidden, historyContact`), read by a separate SELECT that degrades to `guide: null`.
+     - `historyHidden = !viewer.showHidden`.
+   - Task 25: uses `cardView({ data, error, slow, placement, demoFlags })` and v3's state table and copy. The X is hidden and "Up next" is `outline` while the welcome is due. It also builds the sidebar "Quick tour" link in both footers.
+   - Task 26:
+     - The section is mounted once in a stable place, with its position decided at mount.
+     - It keeps local `stop`/`completed` state.
+     - It uses `window.history.replaceState` (not `router.replace`).
+     - The fallback applies on `guide: null` or a failed GET.
+     - Finish removes `?lesson` and forces a refresh.
+     - Back is ghost, Show me outline, Next primary, and the hero action is `outline` while the tour is above it.
+   - Task 27: the strip reads `window.location` once on mount.
+   - Task 28: pricebook label is "Add item".
+   - Task 29 (D6): no dependency on Task 19. It adds `features` now, and Task 19 later adds `write`. If `getFeatures` throws, use `payLinks:false`.
+2. **Task 31 rulings:**
+   - The admin sign-in page keeps its "Create an account" link only when `NEXT_PUBLIC_SIGNUP_ENABLED` is not `"false"`. The handover tells the user to set it `false` on prod.
+   - Root public metadata stays org-neutral.
+   - The admin tab fallback becomes "Service console".
+3. **Task 38:** `regions: ["iad1"]` only. Fluid compute is reported, never toggled. That is the user's call in the handover.
+4. **Deploy tasks 40–42:**
+   - They need the user to run `! npx neonctl auth` and `! vercel login`. If either is missing at that point, ledger it and continue with the next task.
+   - A preview deploy is only ever made with `DATABASE_URL` overridden to the rehearsal branch, never with the inherited prod URL. If the override can't be verified, skip the preview deploy.
+   - No agent writes to the prod DB or passes `--prod`.
+5. **Order:** use the **controller execution order** below; it supersedes the drafted order at the end of this wave. The wave-1 pair rule applies, but in practice the controller runs one implementer at a time. Tasks 24–29 are **Must** (onboarding; they run before Task 18).
+6. **Wave-2 critic round 1 (architect/opus: 1 blocker, 6 majors). Binding fixes:**
+   - **Smoke never writes prod** (B1). Task 39 also changes `scripts/agent/prod-smoke.sh`:
+     - `BASE` is required, with no prod default.
+     - The `POST /api/session` and `/api/chat` probes run only with `SMOKE_WRITES=1`, and are refused when `BASE` is the prod alias or a `*.vercel.app` prod URL.
+     - Tasks 23, 41 and 43 run without writes. `AGENTS.md` and the admin-pages skill get the new invocation.
+   - **The migrator refuses prod outside the prod build** (M2). Task 39 adds a guard to `src/lib/db/migrate.ts`: if the URL host contains `ep-withered-hill` and `VERCEL_ENV !== "production"`, it exits 1. This comes with a test.
+     - Task 40 pins `--parent` to the DEV branch by id, and refuses if the new branch's host is `ep-withered-hill`.
+   - **Preview isolation is proven before any request** (M1). Task 41 deploys with build-time and runtime overrides: `-b DATABASE_URL=… -e DATABASE_URL=…`, plus `-e AUTH_SECRET=<fresh random>`. Confirm the flag names with `--help`.
+     - Before it, set a canary on the rehearsal branch only: rename org `…0001` to "Rehearsal branch".
+     - A GET of a public page that shows the org name must show the canary before anything else runs. No canary means stop, with no further requests.
+     - Authenticated measurement on the preview uses a session minted with the overridden secret, or is skipped.
+     - Task 42 deploys the old commit from a `git worktree` in the scratchpad, with the same overrides, after confirming that commit's `migrate.ts` has the `VERCEL_ENV` guard.
+   - **No authenticated agent request on prod before the user's onboarding reset** (M3). An admin page load as rchen stamps onboarding and can grandfather-dismiss.
+     - Task 38's "Before" measures prod **unauthenticated** only: the public chat page and the `/admin/login` TTFB.
+     - Task 23's authenticated checks and latency run only via View as Chick (`write:false`). They run only after the user confirms runbook step 7 (onboarding reset) is done; otherwise they are skipped and ledgered.
+   - **Watch output is pattern-only** (M4). `summarizeLogLines` keys are route patterns (`/admin/invite/[token]`, `/portal/[token]`, `[id]`). Add a test that no key contains a uuid or a token-like segment (more than 16 url-safe chars).
+   - **Task 29 runs before Task 18** (M5), right after Task 28, with `getGuide(org, userId, { features })` only. Task 19 later adds `write`.
+   - **Git checks apply only for `--env production`** (M6). Run them with `git status --porcelain --untracked-files=no`, so the user's untracked `.agents/` never fails the check.
+   - **Minors:**
+     - Task 25 also modifies `src/lib/admin/setup-card-view.ts` and `src/components/admin/sidebar.tsx` (the Quick tour link). This is safe because Task 6 runs earlier.
+     - Task 37 also adds `customers/[id]/loading.tsx`.
+     - Task 31's demo scan covers user-visible copy only, not codes or keys. With `NEXT_PUBLIC_SIGNUP_ENABLED=false`, the `/signup` page and `/api/auth/signup/*` return 404.
+     - Test names and copy in Tasks 25 and 26 follow spec v3 (e.g. "Stop {n} of 5", the `buildLessons({ payLinks, hasFieldPulse, historyHidden })` signature, `historyContact`, `?replay=1`).
+   - **Proportion:**
+     - Tasks 33 and 34 drop to **Could** and run only if time remains after Task 23's preconditions are met.
+     - Task 36 is **deferred to after go-live**. It is not in this run, because it would add a third one-way prod migration for a gain the draft calls "may be negligible".
+
+
+These 20 tasks don't repeat any of Tasks 1–23. HEAD is `a6f18ee`, so Tasks 1–4 and 9 are done. Wherever I say "inferred", I worked it out from code and did not measure or run it. Every task follows the plan's Global Constraints: the gates, DEV only, `git add` by path, and the commit trailer.
+
+**Facts the tasks rely on, checked this session:**
+- The journal ends at `0059_golive`, so the onboarding migration is 0060 and any index migration would be 0061.
+- `next.config.ts` has no `images` key. `cacheComponents` is off (`next.config.ts:5-6`). That rules out `unstable_instant`, which needs Cache Components (`node_modules/next/dist/docs/01-app/02-guides/instant-navigation.md:78`).
+- `lucide-react` is already in the default `optimizePackageImports` list (`.../optimizePackageImports.md:23`).
+- The bundle analyzer is `npx next experimental-analyze --output`, which writes to `.next/diagnostics/analyze` (`.../package-bundling.md:78-96`, Next 16.1 or later; we have 16.2.6).
+- The Neon HTTP connection cache is always on (`node_modules/@neondatabase/serverless/CHANGELOG.md:109`). So Neon connection reuse needs no work, and no task is planned for it.
+- `migrate.ts:15-21` skips migrations when `VERCEL_ENV` isn't `production`. Its comment says preview deploys inherit the prod `DATABASE_URL`. That makes a preview deploy dangerous unless `DATABASE_URL` is overridden (Task 41).
+- `vercel.json` has no `regions` key and nothing about Fluid compute.
+- Sentry is optional: it only turns on when `SENTRY_DSN` is set (`next.config.ts:47`, `src/instrumentation.ts:23-29`).
+
+---
+
+## A. Setup ready and polished (Tasks 24–32)
+
+### Task 24: Migration 0060, per-user guide state, guide API (onboarding D1 and D7)
+- **Why:** The spec's D1 and D7 (`2026-11-10-first-run-onboarding-design.md:64-101,186-193`). Admin users have no per-user state today; the only precedent is the technicians' `users.field_guide_state` (`schema.ts:320`, inventory §5).
+- **Files:**
+  - Create: `drizzle/0060_admin_guide.sql`, `drizzle/meta/0060_snapshot.json`, `src/lib/db/migration-0060.test.ts`, `src/lib/admin/admin-guide-state.ts` (+test), `src/app/api/admin/guide/route.ts` (+test), `tests/integration/admin-guide-state.test.ts`.
+  - Modify: `src/lib/db/schema.ts` (users, next to `:320`), `drizzle/meta/_journal.json`, `src/lib/admin/onboarding-steps.ts:46-53` (`OnboardingPayload`), `src/app/api/admin/onboarding/route.ts` (GET), `src/lib/admin/onboarding-store.ts` (`EMPTY_SNAPSHOT`), `vitest.config.ts`.
+- **Interface:**
+  - Types: `type LessonId = "requests"|"schedule"|"technicians"|"customers"|"paid"` and `LESSON_IDS`.
+  - `parseAdminGuideState(raw: unknown): AdminGuideState` never throws.
+  - `mergeGuidePatch(state, patch, nowIso): AdminGuideState | null` returns null when nothing changes.
+  - `welcomeDue(role, state): boolean`.
+  - `guidePatchSchema` is strict and needs at least one key.
+  - The GET payload gains `guide: { welcomeDue, lastLesson, tourCompletedAt, readOnly, hasFieldPulse, historyHidden }`.
+  - **Deviation to flag to the spec owner:** spec D3's `buildLessons` needs `hasFieldPulse` and `historyHidden`, but D1's payload shape doesn't include them, so I added them here.
+  - `PATCH /api/admin/guide` answers `200 { guide }`, `400`, `401`, `403 PREVIEW_READ_ONLY` or cross-site, or `429`. It is not audited (D1).
+- **Verify:**
+  - Pure tests: `0060 sets lock_timeout then ADD COLUMN IF NOT EXISTS admin_guide_state jsonb (nullable, no default)`, `welcomeDismissedAt/tourStartedAt/tourCompletedAt are write-once`, `lesson sets tourStartedAt if absent`, `a no-op body skips the UPDATE`.
+  - Integration test: `the PATCH cannot touch another user's or another org's row` and `a preview GET leaves admin_guide_state and onboarding_state unchanged`.
+  - `npx drizzle-kit generate` reports "No schema changes".
+- **After:** Task 15 (viewer preview target) and Task 13 (onboarding signals are visible-only). If Tasks 14–15 are cut, `readOnly` is always false (D7).
+- **Tier:** Must. The spec says Must; it sits past cut line A only because it depends on Task 15.
+- **Agent:** tdd-guide; database-reviewer reviews `0060` and the merge UPDATE.
+
+### Task 25: Welcome row in the Getting-started card (D2)
+- **Why:**
+  - Spec D2 (`:103-120`).
+  - `setup-card.tsx:78` renders nothing unless placement is `operations` (inventory §1), but D2 says the row still shows under `integrations`.
+  - critic-ux-r2 M2–M4 (`critic-ux-r2.md:4-6`): two dismiss controls, two primary buttons, and no table of card states.
+- **Files:** Create `src/lib/admin/welcome-view.ts` (+test). Modify `src/components/admin/onboarding/setup-card.tsx`.
+- **Interface:**
+  - `welcomeRowView({ guide, orgName, placement, cardState }): { show; title; line; primary: { label; href }; hideCardDismiss: boolean; upNextVariant: "outline" | "default" }`.
+  - `hideCardDismiss` and `upNextVariant` resolve M3 and M4.
+  - "Not now" PATCHes `dismissWelcome` and moves focus to the next focusable element or the `h1`. In preview it only updates memory.
+- **Verify:**
+  - Test names: `row shows when placement is integrations`, `"Continue the tour (3 of 5)" after lastLesson=customers`, `no-FieldPulse line drops the first sentence`, `historyHidden variant per r2 B1 if spec v3 adopts it`, `readOnly never PATCHes`.
+  - Screenshot: `node scripts/agent/screenshot-page.mjs /admin 1440` and `… /admin 390`, then look at both.
+- **After:** Task 24. It can pair with Task 26, because the files are disjoint and both only consume Task 24's types.
+- **Tier:** Must. **Agent:** tdd-guide.
+
+### Task 26: "Learn the basics" tour section on `/admin/setup` (D3 and D5)
+- **Why:** Spec D3 and D5 (`:122-172`). No admin tour exists anywhere (inventory §3). Also critic r2 M5 (the phone back gesture loses the lesson) and N3.
+- **Files:**
+  - Create: `src/lib/admin/tour-lessons.ts` (+test), `src/lib/admin/tour-view.ts` (+test), `src/components/admin/setup/learn-the-basics.tsx`.
+  - Modify: `src/components/admin/setup/setup-page-client.tsx` (mount it outside the data gate, add the D5 header link).
+- **Interface:**
+  - `buildLessons(features: Features, ctx: { hasFieldPulse: boolean; historyHidden: boolean }): readonly Lesson[]`.
+  - `tourPosition(lessonParam: string | null, guide): { index: number; placement: "above" | "below" | "collapsed" }`.
+  - Lesson changes call `router.replace("?lesson=…#learn")` (M5).
+  - Each lesson change fires a PATCH `lesson`, and Finish fires `tourCompleted`. Both are fire-and-forget.
+- **Verify:**
+  - Tests: `payLinks off → no pay-link sentence`, `no lesson mentions map or review texts`, `customers + historyHidden appends the history note`, `invalid ?lesson falls back to requests`, `completed collapses to "You've seen the basics · Replay tour"`.
+  - Run `npx vitest run src/lib/admin/tour-lessons.test.ts src/lib/admin/tour-view.test.ts`.
+  - Screenshot `/admin/setup?lesson=requests#learn` at 1440 and 390.
+- **After:** Task 24. It pairs with Task 25.
+- **Tier:** Must. **Agent:** tdd-guide.
+
+### Task 27: Back-to-tour strip on 5 pages (D4)
+- **Why:** Spec D4 (`:160-167`). `BackToGuideBanner` is already mounted on staff, requests, settings and pricebook (`staff/page.tsx:136`, `requests/page.tsx:124`, …). The new strip must stay separate from it and not fetch onboarding.
+- **Files:**
+  - Create: `src/lib/admin/tour-strip.ts` (+test), `src/components/admin/setup/back-to-tour-strip.tsx` (built from `InfoBanner`).
+  - Modify these pages under `src/app/admin/(dashboard)/`: `requests/page.tsx`, `calendar/page.tsx`, `staff/page.tsx`, `customers/page.tsx`, `invoices/page.tsx`.
+- **Interface:** `parseTourParams(sp: URLSearchParams): { lesson: LessonId; n: number; href: string } | null`. It returns null unless `from=tour` is set and `lesson` is in `LESSON_IDS`.
+- **Verify:**
+  - Tests: `from=setup returns null`, `lesson=map returns null`, `href is /admin/setup?lesson=<id>#learn`, `n matches the lesson order`.
+  - Screenshot each page with `?from=tour&lesson=<id>` at 390.
+  - r2 N4 (the strip disappears on drill-in) is out of scope; note it in the report.
+- **After:** Task 26, because the lesson ids and order must be final.
+- **Tier:** Must. **Agent:** tdd-guide.
+
+### Task 28: Day-one empty states with one primary action (D6)
+- **Why:** These empty states have no next action today:
+  - `request-table.tsx:164-170`;
+  - pricebook is plain text, not `EmptyState` (`pricebook-table.tsx:80`);
+  - invoices has text only (`invoices/page.tsx:471-483`);
+  - estimates (`estimates/page.tsx:315-319`);
+  - dispatch has text only (`dispatch/page.tsx:208-212`).
+- **Files:**
+  - Modify `request-table.tsx` (add an `onCreate?` prop), `requests/page.tsx`, `pricebook-table.tsx`, `pricebook/page.tsx`, `invoices/page.tsx`, `estimates/page.tsx`, `dispatch/page.tsx`.
+  - Create `src/lib/admin/empty-state-actions.ts` (+test).
+- **Interface:** `emptyActionFor(page, { hasActiveFilters }): { kind: "callback"; label } | { kind: "link"; label; href } | null`.
+  - Labels follow D6 exactly: "New request", "Add price", "Open estimates", "New estimate", "Open staff".
+  - Callbacks use the page's existing open callback, not `?new=1`, because `useOpenFromParam` only reads on mount.
+- **Verify:**
+  - Test: `filters active → null (the filter-clear action stays)`.
+  - Screenshot every empty page in a throwaway DEV org from `createOrgCore`, minted with `MINT_ORG_ID`, and delete the org afterwards. `seed-org.mjs` won't work here because it needs at least 1 customer (`seed-org.mjs:84`).
+- **After:** Task 27, because both touch `requests/page.tsx` and `invoices/page.tsx`.
+- **Tier:** Must. **Agent:** tdd-guide.
+
+### Task 29: Tech guide shows pay-link copy only when pay links are on (D8)
+- **Why:**
+  - `guide-steps.ts:67` tells technicians "A pay link lets the customer pay by phone… or tap Send pay link".
+  - Prod starts with `payLinks:false` (`0059_golive.sql:20`), and the send is refused (`money-triggers.ts`, Task 4).
+  - The tests pin the current strings (`guide-steps.test.ts:31,43`).
+- **Files:** Modify `src/lib/tech/guide-steps.ts` (+test), `src/lib/tech/guide-queries.ts` (+test), `src/app/api/tech/guide/route.ts`.
+- **Interface:** The step builder takes `features: Pick<Features, "payLinks">`, and `getGuide(org, userId, { write, features })` passes it through.
+- **Verify:**
+  - Tests: `payLinks off → collect_payment why = "Cash and checks are recorded on the spot."` and `how drops ", or tap Send pay link"`; `on → unchanged strings`.
+  - Screenshot `/tech/guide` at 390.
+- **After:** Task 19, which owns `getGuide(…, { write })`. If Task 19 is cut, run this after Task 18 and add only `features`.
+- **Tier:** Must. **Agent:** tdd-guide.
+
+### Task 30: Fill Spears' empty settings on DEV; give the user a key-names-only report for prod
+- **Why:**
+  - Checklist step 1 needs `business_info.phone` and `businessHours`, and step 2 needs `logo_url` (inventory §1, `onboarding-sql.ts:17-19`).
+  - Settings live in `organization_settings` (`schema.ts:1159-1202`).
+  - The Spears facts that are verified: name, address, Eastern time. Hours are unverified (`memory/spears-services-brand.md:17-20`). There is no logo file in the repo.
+  - critic r2 M7 asks to say which steps will still be open.
+- **Files:** Create `src/lib/admin/settings-prefill.ts` (+test) and `scripts/agent/prefill-org-settings.mjs`.
+- **Interface:**
+  - `prefillPatch(current, facts): { businessInfo?: Record<string, string>; companyName?: string; timezone?: string }` fills empty keys only. Existing values always win.
+  - CLI: `--org <uuid> [--apply]`. It is a dry run by default. It always refuses `ep-withered-hill`, and there is no `--prod` flag at all.
+  - `--report` prints which keys are empty, by name only.
+- **Verify:**
+  - Tests: `never overwrites a non-empty key`, `never sets businessHours or logoUrl` (unverified or no asset), `refuses the prod host`.
+  - The dry run on DEV shows the keys it would fill.
+  - The output includes a "Confirm with Chick" list (hours, logo, phone) for Task 22.
+- **After:** Nothing it depends on. It runs before Task 18 so the walk sees a realistic checklist.
+- **Tier:** Should. **Agent:** tdd-guide.
+
+### Task 31: Copy sweep for demo or placeholder wording, tab titles and human error copy
+- **Why:**
+  - **Tab titles and descriptions:** The root metadata reads "HVAC Customer Service" / "AI-powered HVAC service request assistant" (`src/app/layout.tsx:23-26`). The sign-in tab reads "Admin - HVAC Dashboard" (`src/app/admin/layout.tsx:4`), although `ADMIN_TITLE_FALLBACK = "Service console"` (`admin-title.ts:5`).
+  - **Placeholder:** Chick sees "Acme Heating & Cooling" in Settings (`branding-panel.tsx:112`).
+  - **Signup link:** The sign-in page says "New to Spears? Create an account" → `/signup` (`login-form.tsx:57-62`). That could lead Chick's staff to create a separate org.
+  - **Error copy:** Many hooks use "Failed to load X" (for example `use-invoices.ts:166`, `use-estimates.ts:140`, `use-pricebook.ts:175`). Raw `e.message` reaches the UI at `use-agenda.ts:57,83` and `communications/templates/page.tsx:117`.
+- **Files:** Those files, plus a new `src/lib/admin/copy-canon.test.ts`.
+- **Interface:** None. The guard test scans `src/hooks`, `src/components/admin` and `src/app/admin` for these patterns in string literals:
+  - `/Failed to (load|fetch)/`;
+  - `\bdemo\b`;
+  - `Acme`;
+  - `setError(` fed by `e.message` or `err.message`.
+- **Decisions for the user (don't pick silently):**
+  - Should the signup link stay on prod?
+  - Should the root title, which shows on the public pages, become org-neutral or say "Spears Services"?
+- **Out of scope:** 138 ASCII "Couldn't" strings in 68 files break the Unicode `’` rule, but they predate this work, so I'm only noting them.
+- **Verify:** `npx vitest run src/lib/admin/copy-canon.test.ts` fails before the sweep and passes after.
+- **After:** Task 28. **Tier:** Should. **Agent:** tdd-guide.
+
+### Task 32: Automated 390 px audit of Chick's daily pages, then a fix wave
+- **Why:**
+  - Task 18 walks at 390 px by eye. This task checks it mechanically first, so Task 18 confirms problems instead of discovering them.
+  - Known risks: the preview banner has to fit at 390 px, and the setup page relies on `sm:` breakpoints (`assumptions.md:121-127`); r2 N9 (the tap target for the X).
+  - Inferred: no overflow has been measured yet.
+- **Files:** Create `src/lib/admin/mobile-audit.ts` (+test) and `scripts/agent/mobile-audit.mjs`, which reuses the screenshot script's minting. Fixes go in whichever files the findings point to, one commit each.
+- **Interface:**
+  - `auditFindings(m: { scrollWidth; viewport; targets: { selector; w; h }[] }): Finding[]` flags overflow above 0 px, and interactive elements in `main` smaller than 44×44.
+  - CLI: `node scripts/agent/mobile-audit.mjs [--preview-as <id>]`.
+  - Pages: `/admin`, `/admin/requests`, `/admin/calendar`, `/admin/customers`, `/admin/customers/<id>`, `/admin/invoices`, `/admin/invoices/<id>`, `/admin/estimates`, `/admin/staff`, `/admin/conversations`, `/admin/setup?lesson=requests`.
+- **Verify:** The pure tests pass. The script exits 0 with "0 findings" after the fixes, and the before and after outputs go into `<scratchpad>/mobile-audit-{before,after}.txt`.
+- **After:** Tasks 25–28 and 31, before Task 18.
+- **Tier:** Should. **Agent:** e2e-runner.
+
+---
+
+## B. Faster (Tasks 33–38)
+
+**Measuring:** every task measures with `node scripts/agent/measure-latency.mjs --runs 5 --out <scratchpad>/latency-<task>-{before,after}.txt` against `npm run build && npm run start`. Runs as Chick add `--preview-as <dev chick id>` (Task 15). The Task 16 baseline is the reference.
+
+### Task 33: Read the admin session once per server render
+- **Why:**
+  - `getAdminSession` has no React `cache` (`session.ts:31`).
+  - One first load calls it up to three times: `generateMetadata` (`(dashboard)/layout.tsx:18`), the layout (`:29`), and pages such as `invoices/[id]/page.tsx:22`.
+  - Each call verifies the JWT and may run the revocation SELECT. That cache is per instance and lasts 30 s (`session-revocation.ts:39-56`), so on a cold instance every call misses (inferred).
+  - `loadBillingState` already uses `cache` (`layout.tsx:62`).
+- **Files:** Modify `src/lib/auth/session.ts` (+test).
+- **Interface:** None. `getAdminSession` keeps its signature. Route handlers are unaffected, because `cache` doesn't memoize outside a render.
+- **Verify:**
+  - Test: with a mocked `react.cache`, `two getAdminSession calls in one render run isSessionUserCurrent once`.
+  - Measure the entry load of `/admin` and of `/admin/invoices/<id>`. If `measure-latency.mjs` only times clicks, add `--entry`.
+  - Expectation: a small gain, a few ms in iad1 (inferred).
+- **After:** Task 15 (`viewer.ts` consumes it). **Tier:** Could. **Agent:** tdd-guide.
+
+### Task 34: Warm list data when the pointer or focus reaches a sidebar link
+- **Why:**
+  - In production, `<Link>` already prefetches the route shell automatically (`prefetching.md:34-57`, `sidebar.tsx:163`).
+  - Data still waits for the page's client hook. That is the "client waterfall" in the speed spec (`speed-design.md:8-12`).
+  - Fourteen hooks share `createSwrCache`, which has get/set but no in-flight dedupe (`swr-cache.ts:13-35`).
+- **Files:** Modify `src/lib/admin/swr-cache.ts` (+test) to add `prime(key, loader)`. Modify `use-admin-requests.ts`, `use-invoices.ts`, `use-admin-customers.ts` and `use-estimates.ts` to export a page-1 primer. Modify `src/components/admin/sidebar.tsx` to call the primers on `onPointerEnter` / `onFocus`.
+- **Interface:** `prime(key: string, loader: () => Promise<T>): void` does nothing if the key is fresh or already loading, and swallows errors.
+- **Risk:** `adminRead` allows 60 requests per minute per user (`rate-limit.ts:94`), and Requests already polls every 10 s (`use-admin-requests.ts:37-38`). So it primes at most once per TTL, per key.
+- **Verify:**
+  - Tests: `prime does nothing on a fresh key`, `prime dedupes concurrent calls`, `a failed prime leaves the cache empty`.
+  - Measure first-row p50 on Requests, Invoices and Customers, before and after.
+  - Ship only if p50 improves by at least 50 ms locally; otherwise revert and report.
+- **After:** Task 21, which reshapes the same hooks' fetch chains. **Tier:** Could. **Agent:** tdd-guide.
+
+### Task 35: Client bundle and font weight, measured with the analyzer
+- **Why:**
+  - Nobody has measured the bundle yet.
+  - The heavy dependencies are already loaded lazily: the map uses `next/dynamic` (`dispatch-map-provider.tsx:32-39`), and calendar drag-and-drop uses `dynamic` with `ssr:false` (`calendar/page.tsx:26-28`).
+  - So the candidates are inferred:
+    - the shared admin shell (global search, `@base-ui/react`);
+    - IBM Plex Mono loading three static weights (`layout.tsx:16-21`), even though only 4 files pair mono with semibold.
+- **Files:** Whatever the analyzer points to. The likely fixes are `next/dynamic` splits and `layout.tsx` font weights.
+- **Interface:** None.
+- **Verify:**
+  - `npx next experimental-analyze --output`, then `cp -r .next/diagnostics/analyze <scratchpad>/analyze-before`, and the same again after.
+  - Record the shared client JS and woff2 bytes on `/admin` from the Playwright network log.
+  - Keep a change only if it saves at least 10 KB gz or removes a font file, and `measure-latency` frame and first-row values don't regress.
+  - Dropping a font weight is a design call: check against `~/.claude/design-principles.md`.
+- **After:** Task 21. **Tier:** Should. **Agent:** refactor-cleaner, with build-error-resolver if the build breaks.
+
+### Task 36: Partial indexes for visible-only reads, only if EXPLAIN shows they help (migration 0061)
+- **Why:**
+  - Migration 0059 adds `hidden_from_org` but no index (`0059_golive.sql:7-15`).
+  - After history marking, most rows on the five tables are hidden, and Chick's reads filter `= false`.
+  - Precedent: `0042_perf_indexes.sql:2` says the tables have about 11k rows and a plain `CREATE INDEX` is fine.
+  - Inferred: the gain may be negligible.
+- **Files (only if justified):**
+  - Create `drizzle/0061_visible_indexes.sql`, its snapshot, and `src/lib/db/migration-0061.test.ts`.
+  - Modify `schema.ts` (`index(...).where(sql\`hidden_from_org = false\`)`, so drizzle-kit stays in sync) and `_journal.json`.
+- **Interface:** None.
+- **Verify:**
+  - Render the visible-only `getRequests`, `listInvoices` and `getCustomers` SQL with `PgDialect`.
+  - Run `EXPLAIN (ANALYZE, BUFFERS)` on DEV after Task 18's history marking, then measure as Chick before and after.
+  - Ship only if a plan shows the filter removing more than 50% of rows and execution time drops.
+  - Otherwise close the task with the EXPLAIN output in the report.
+  - `drizzle-kit generate` reports "No schema changes".
+- **After:** Task 18 (needs marked DEV data), Task 20 (final query shapes) and Task 24 (0060). **Tier:** Could. **Agent:** database-reviewer.
+
+### Task 37: Loading and not-found follow-ups after Task 17
+- **Why:**
+  - A `loading.tsx` wraps its page and every child segment (`loading.md:78`). So `invoices/loading.tsx` also shows while `/admin/invoices/<id>` loads: the list skeleton for a detail page, which causes layout shift.
+  - Task 17 Step 4b only checks `/admin`, calendar, estimates/<id> and customers/<id>.
+  - `notFound()` is called at `settings/forms/[id]/page.tsx:12` and, after Task 6, by `/admin/map`, but `(dashboard)` has no `not-found.tsx`.
+  - `error.tsx:21-37` hand-rolls a Card instead of using the `ErrorState` primitive.
+- **Files:**
+  - Create `(dashboard)/invoices/[id]/loading.tsx`, plus `settings/forms/[id]/loading.tsx` if its screenshot shifts.
+  - Create `(dashboard)/not-found.tsx`: "We couldn’t find that page" with "Go to dashboard".
+  - Modify `(dashboard)/error.tsx` to compose `ErrorState`, and extend `src/lib/admin/loading-coverage.test.ts`.
+- **Interface:** None.
+- **Verify:**
+  - Test: `a detail [id] route never inherits a list-level loading.tsx`.
+  - Screenshot `/admin/map` (switch off) and see the 404 inside the admin shell.
+  - Measure the frame on `/admin/invoices/<id>` before and after; it should stay under 100 ms locally.
+- **After:** Task 17. It can pair with Task 31 (disjoint files). **Tier:** Should. **Agent:** tdd-guide.
+
+### Task 38: Pin the function region; Fluid compute is the user's call
+- **Why:**
+  - `vercel.json` has no `regions` key (`vercel.json:1-53`).
+  - The speed spec's S5 only reports the compute mode (`speed-design.md:59-62`), and Task 16 records it.
+  - Cold starts take 1.5–2 s (`speed-design.md:10`).
+  - Neon is in us-east-1.
+- **Files:** Modify `vercel.json` to add `"regions": ["iad1"]`. Add the Fluid setting only if the user approves it and Task 16's notes say it's off.
+  - Check the `fluid` key's name and Hobby-plan limits in the current Vercel docs (context7) before editing.
+- **Interface:** None.
+- **Verify:**
+  - Before: `measure-latency.mjs --base <prod url>` with a user-supplied `HVAC_SESSION`, against current prod. Record the first run after 15 minutes idle (cold) and the warm p50.
+  - After: the same in Task 23.
+  - `vercel.json` must still parse, and the crons must stay unchanged (12 entries).
+- **After:** Task 35, and before Task 41 so the preview builds with it. **Tier:** Should. **Agent:** e2e-runner (measurement; the config edit is one line).
+
+---
+
+## C. Deploy (Tasks 39–43)
+
+### Task 39: Pre-deploy checklist script that checks env var names only
+- **Why:**
+  - Task 23's preconditions are checked by hand (`plan:1186-1190`).
+  - Handover step 3 needs these vars set: `PLATFORM_ADMIN_EMAILS`, `PLATFORM_ORG_ID`, `RESEND_API_KEY`, `NEXT_PUBLIC_APP_URL`, and `DEMO_MODE_ORG_IDS` must be unset (`plan:1122-1127`).
+  - `REQUIRED_ENV_VARS` already exists but isn't exported (`env-validation.ts:23-148`).
+- **Files:** Create `src/lib/deploy/env-check.ts` (+test) and `scripts/agent/predeploy-check.mjs`. Modify `src/lib/env-validation.ts` to export `requiredEnvNames()` and nothing else.
+- **Interface:**
+  - `parseVercelEnvLs(stdout: string): string[]`, tested against a fixture captured from a real `vercel env ls` run with the values column removed (inferred format).
+  - `envCheck({ required, forbidden, present }): { missing: string[]; forbiddenPresent: string[] }`.
+  - CLI: `node scripts/agent/predeploy-check.mjs [--env production|preview]`. It also checks that:
+    - `vercel whoami` succeeds;
+    - the git tree is clean and on `main`;
+    - HEAD equals `origin/main`;
+    - the newest `drizzle/*.sql` tag equals the last journal tag.
+- **Safety:** It never calls `vercel env pull` and never prints a value.
+- **Verify:**
+  - Tests: `missing DEMO-free list passes`, `DEMO_MODE_ORG_IDS present fails`, `output contains no '='`.
+  - The script exits 0 or 1 with a one-line reason per failure.
+- **After:** Nothing. It can pair with Task 5. **Tier:** Must. **Agent:** tdd-guide.
+
+### Task 40: Rehearse the migrations on a fresh Neon branch of DEV
+- **Why:**
+  - Prod will apply 0059, 0060 and maybe 0061 inside one build (`vercel.json:2`), and an instant rollback can't undo a migration (memory `migrations-not-run-on-deploy`).
+  - DEV already has 0059, so the branch should come from a point in time before 0059 if Neon allows it (inferred). Check the flags with `npx neonctl branches create --help`.
+- **Files:** None committed. Results go into the task report for Task 22.
+- **Interface:** None.
+- **Verify:**
+  - The user runs `neonctl auth`.
+  - The agent runs `npx neonctl branches create --parent <dev branch> [--parent-timestamp <pre-0059>] --name rehearse-golive`.
+  - Then `DATABASE_URL=<branch url> npm run db:migrate`. Expect each new tag applied once and record the time per migration. Run it again and expect a no-op.
+  - Run `VITEST_INTEGRATION=1` on `golive-unhide`, `admin-guide-state` and `onboarding-state` against the branch.
+  - The branch URL lives only in an env var and is never echoed. The branch is deleted after Task 42.
+- **After:** Task 36, so the set of migrations is final. **Tier:** Must. **Agent:** database-reviewer.
+
+### Task 41: Preview deploy against the rehearsal branch, then smoke the preview URL
+- **Why:**
+  - Preview builds skip migrations (`migrate.ts:15-21`), and their comment says previews inherit the prod `DATABASE_URL`. A preview of this branch would then run new code against prod's un-migrated schema.
+  - `prod-smoke.sh:6` already accepts `BASE`, but it has no checks for the new routes.
+- **Files:**
+  - Modify `scripts/agent/prod-smoke.sh`:
+    - add an optional `BYPASS` header (`x-vercel-protection-bypass`, which the user supplies if deployment protection is on; inferred);
+    - add unauthenticated `401` checks for `PATCH /api/admin/guide`, `GET /api/admin/preview` and `PATCH /api/platform/organizations/<uuid>`;
+    - confirm every expected code against localhost first.
+- **Interface:** `BASE=<preview url> BYPASS=<token> bash scripts/agent/prod-smoke.sh`.
+- **Verify:**
+  - `node scripts/agent/predeploy-check.mjs --env preview` passes.
+  - Check `vercel deploy --help` for the runtime env flag, then run `vercel deploy --yes -e DATABASE_URL=<branch url>` without `--prod`.
+  - Smoke passes, and `measure-latency.mjs --base <preview>` is recorded.
+  - `bash -n scripts/agent/prod-smoke.sh` exits 0.
+- **After:** Tasks 40 and 38, and the final whole-branch review. **Tier:** Should. **Agent:** e2e-runner.
+
+### Task 42: Rollback rehearsal (old code on the new schema, and un-hide)
+- **Why:**
+  - The rollback plan relies on two claims (`plan:1167-1172`): that a Vercel instant rollback is safe, and that 0059 is additive so it stays. Neither has been tested.
+  - `--unhide` has only run in integration tests (`plan:743`).
+- **Files:** None committed. Results go to Task 22 for the handover's rollback section.
+- **Interface:** None.
+- **Verify:**
+  - Get the current prod deployment's commit from `vercel inspect <prod url>` (read-only).
+  - Deploy that commit as a preview pointed at the rehearsal branch, which has the new migrations. `prod-smoke.sh` must pass.
+  - On the branch, run `npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --apply --mode history`, then `--unhide`. Row counts must match the pre-apply counts.
+  - The branch host isn't `ep-withered-hill`, so no `--prod` is needed. Agents never pass it.
+  - Record the exact `vercel rollback` syntax from `--help`, but never run it.
+- **After:** Task 41. **Tier:** Should. **Agent:** e2e-runner.
+
+### Task 43: Post-deploy watch script
+- **Why:**
+  - Task 23 stops after one smoke run (`plan:1195`).
+  - Sentry is only on when `SENTRY_DSN` is set (`next.config.ts:47`, `instrumentation.ts:23-29`).
+  - Logs carry codes and ids only (Global Constraints), so a summary can be printed safely.
+- **Files:** Create `src/lib/deploy/log-scan.ts` (+test) and `scripts/agent/postdeploy-watch.sh`.
+- **Interface:**
+  - `summarizeLogLines(lines: string[]): { total; status5xx; byRoute: Record<string, number> }` prints counts only, never raw lines.
+  - CLI: `bash scripts/agent/postdeploy-watch.sh <deployment url> [--minutes 60] [--every 10]`. It loops `prod-smoke.sh` and `vercel logs` (check the syntax with `vercel logs --help`; inferred).
+  - If `SENTRY_DSN` is among the names from `vercel env ls production`, it prints "Check Sentry issues for release <sha>". It never calls the Sentry API.
+- **Verify:** Tests: `counts 5xx by route`, `ignores 4xx`, `prints no line content`. `bash -n` exits 0.
+- **After:** Build it any time after Task 39 (it can pair with Task 35). Run it after Task 23 for 60 minutes and append the summary to the deploy record.
+- **Tier:** Should. **Agent:** tdd-guide.
+
+---
+
+### Controller execution order (supersedes the drafted order below)
+1. Task 6.
+2. Task 39 (now includes the smoke and migrator guards).
+3. Task 30.
+4. Task 7, then Task 8.
+5. Tasks 10 → 11 → 12 → 13. *Cut line A.*
+6. Task 16.
+7. Task 14, then Task 17.
+8. Task 15.
+9. Task 24.
+10. Task 25, then Task 26.
+11. Task 27, then Task 28, then Task 29.
+12. Task 31, then Task 37.
+13. Task 32.
+14. Task 18 (P8 walk). *Cut line B.*
+15. Task 19.
+16. Task 20, then Task 21.
+17. Task 35, then Task 43 (build), then Task 38.
+18. *If time remains:* Task 33, then Task 34.
+19. **Final whole-branch review and one fix wave.**
+20. Task 40, then Task 41, then Task 42 (each needs the user's `neonctl` / `vercel` login; skip and ledger if missing).
+21. Task 22.
+22. Task 39 run, then Task 23 (deploy and test), then Task 43 run (60 min).
+
+Task 36 is deferred.
+
+## Drafted execution order (superseded — kept for reference)
+
+Each `∥` pair follows the plan's pair rule: disjoint files and no shared compile-time callers. Everything else runs one task at a time.
+
+1. **Task 5 ∥ Task 39.** Task 39 only adds an export to `env-validation.ts`; Task 5 never touches it.
+2. **Task 6 ∥ Task 30.** Task 30 creates only new files and writes DEV data.
+3. **Task 7 ∥ Task 8**, as planned.
+4. **Tasks 10 → 11 → 12 → 13.** *Cut line A.*
+5. **Task 16**, alone (baseline).
+6. **Task 14 ∥ Task 17**, as planned.
+7. **Task 15**, then **Task 33** (`session.ts`, measured against Task 16).
+8. **Task 24** (0060 and the API).
+9. **Task 25 ∥ Task 26.** Card files and setup-page files are disjoint.
+10. **Task 27**, then **Task 28** (both touch `requests/page.tsx` and `invoices/page.tsx`).
+11. **Task 31 ∥ Task 37.** Hooks, login, metadata and branding panel on one side; new `loading`/`not-found` files and `error.tsx` on the other.
+12. **Task 32** (mobile audit and fixes).
+13. **Task 18** (walk; the dev mirror includes the Task 30 settings). *Cut line B.*
+14. **Task 19 → Task 29.**
+15. **Task 20 → Task 21.**
+16. **Task 36** (needs Task 18's marked DEV data).
+17. **Task 34**, then **Task 35 ∥ Task 43 (build)**, then **Task 38**.
+18. **Final whole-branch review and fix wave**, then **Task 40 → Task 41 → Task 42**.
+19. **Task 22.** It adds the Task 30 confirm list, the Task 40 and 42 rehearsal results, Task 43 usage, and the three onboarding rollout lines (spec `:224-232`).
+20. **Task 39 run** (a Task 23 precondition), then **Task 23**, then **Task 43 run** (60 minutes).
+
+**File conflicts to note:**
+- `vitest.config.ts` is append-only and touched by Tasks 24 and 36.
+- `scripts/agent/measure-latency.mjs` is touched by Tasks 16 and 15, and by 33 if it adds `--entry`.
+- `setup-card.tsx` is touched only by Task 25; `onboarding/route.ts` by Tasks 15 and then 24.
+- The hooks are touched in sequence by Tasks 31, 21 and 34.
+- `sidebar.tsx` is touched by Tasks 6 and 34.
+- `vercel.json` is touched only by Task 38.
+
+**Open questions before building:**
+- **Task 31:** should the "New to Spears? Create an account" link stay on prod, and what should the root/public tab title say?
+- **Task 38:** is enabling Fluid compute OK?
+- **Tasks 25–26:** onboarding spec v2 is still under review. Should critic-ux-r2 B1/M1 (the history-hidden copy and the "kept safe" wording) change the exact copy before these tasks start?
+- **Task 24:** I added `hasFieldPulse` and `historyHidden` to the onboarding payload, which spec D1's shape doesn't include. This needs the spec owner's OK.
+
+**Where evidence is inferred:**
+- The gain from Task 33.
+- The bundle candidates in Task 35.
+- Whether the index in Task 36 helps at all; it's gated on EXPLAIN output.
+- The `vercel env ls`, `vercel logs` and `vercel deploy -e` output formats and flags; each task checks `--help` first.
+- Whether deployment protection is on for previews.
+- Neon's point-in-time branching flag.
+
 ## Self-review
 
 - **Spec coverage:**
