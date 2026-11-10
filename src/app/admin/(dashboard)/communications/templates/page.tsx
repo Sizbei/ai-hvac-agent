@@ -61,7 +61,7 @@ export default function CommunicationTemplatesPage() {
       setTemplates(parseTemplatesResponse<Template>(await response.json()));
       setLoadFailed(false);
     } catch (err) {
-      console.error("Failed to fetch templates:", err);
+      console.error("Couldn’t load templates:", err);
       setLoadFailed(true);
     } finally {
       setLoading(false);
@@ -108,13 +108,14 @@ export default function CommunicationTemplatesPage() {
       );
       if (!response.ok) {
         const data: unknown = await response.json().catch(() => null);
-        throw new Error(templateDeleteErrorMessage(data));
+        setDeleteError(templateDeleteErrorMessage(data));
+        return;
       }
       setDeletingTemplate(null);
       await fetchTemplates();
     } catch (err) {
       console.error("Failed to delete template:", err);
-      setDeleteError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setDeleteError("Something went wrong. Please try again.");
     } finally {
       setIsDeleting(false);
     }

@@ -54,10 +54,10 @@ export function useDispatchBoard(date: string): UseDispatchBoardResult {
       if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'Failed to load dispatch board' },
+          error: { message: 'Couldn’t load dispatch board. Please try again.' },
         }));
         if (isMountedRef.current && run === runRef.current) {
-          setError(body?.error?.message ?? 'Failed to load dispatch board');
+          setError(body?.error?.message ?? 'Couldn’t load dispatch board. Please try again.');
         }
         return;
       }

@@ -100,7 +100,7 @@ export interface ReplyApiError {
 export function replyErrorToCopy(error: ReplyApiError): string {
   switch (error.code) {
     case 'DEMO_RESTRICTED':
-      return 'Sending replies is disabled for the demo account.';
+      return 'Sending replies is turned off for this account.';
     case 'RATE_LIMITED':
       return "You're sending replies too quickly — wait a moment and try again.";
     case 'UNSUPPORTED_CHANNEL':

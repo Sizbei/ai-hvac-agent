@@ -56,10 +56,10 @@ export function useMonthCalendar(
       if (!isMountedRef.current || run !== runRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'Failed to load calendar' },
+          error: { message: 'Couldn’t load calendar. Please try again.' },
         }));
         if (isMountedRef.current && run === runRef.current) {
-          setError(body?.error?.message ?? 'Failed to load calendar');
+          setError(body?.error?.message ?? 'Couldn’t load calendar. Please try again.');
         }
         return;
       }

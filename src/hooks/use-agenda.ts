@@ -20,7 +20,7 @@ async function fetchPage(cursor: string | null): Promise<AgendaPage> {
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? 'Failed to load agenda');
+    throw new Error(body?.error?.message ?? 'Couldn’t load agenda. Please try again.');
   }
   const body = (await res.json()) as { success: boolean; data: AgendaPage };
   return body.data;
@@ -53,8 +53,9 @@ export function useAgenda(enabled = true): UseAgendaResult {
       setHasMore(page.hasMore);
       setError(null);
     } catch (e) {
+      console.error('[agenda] load failed', e);
       if (isMountedRef.current) {
-        setError(e instanceof Error ? e.message : 'Failed to load agenda');
+        setError('Couldn’t load agenda. Please try again.');
       }
     } finally {
       inFlightRef.current = false;
@@ -79,8 +80,9 @@ export function useAgenda(enabled = true): UseAgendaResult {
       setHasMore(page.hasMore);
       setError(null);
     } catch (e) {
+      console.error('[agenda] load failed', e);
       if (isMountedRef.current) {
-        setError(e instanceof Error ? e.message : 'Failed to load older bookings');
+        setError('Couldn’t load older bookings. Please try again.');
       }
     } finally {
       inFlightRef.current = false;

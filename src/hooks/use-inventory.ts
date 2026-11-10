@@ -150,7 +150,7 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         if (seq !== fetchSeqRef.current) return;
 
         if (!invRes.ok || !poRes.ok) {
-          setError('Failed to load inventory');
+          setError('Couldn’t load inventory. Please try again.');
           return;
         }
 

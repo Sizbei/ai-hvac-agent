@@ -39,7 +39,7 @@ export function useWidgetKeys(): UseWidgetKeysResult {
     try {
       const res = await fetch('/api/admin/widget-keys');
       if (!res.ok) {
-        setError(await readError(res, 'Failed to load keys'));
+        setError(await readError(res, 'Couldn’t load keys. Please try again.'));
         return;
       }
       const body = (await res.json()) as { data: { keys: WidgetKeyRecord[] } };

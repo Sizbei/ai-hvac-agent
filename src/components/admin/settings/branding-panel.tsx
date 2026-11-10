@@ -109,7 +109,7 @@ export function BrandingPanel({ config, onSave, onDirtyChange }: BrandingPanelPr
               id="company-name"
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Acme Heating & Cooling"
+              placeholder="Riverside Heating & Cooling"
               maxLength={120}
             />
           </div>

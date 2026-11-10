@@ -163,7 +163,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
       try {
         const res = await adminFetch(`/api/admin/invoices${buildQuery(params)}`);
         if (!res.ok) {
-          if (!hasCachedData) setError('Failed to load invoices');
+          if (!hasCachedData) setError('Couldn’t load invoices. Please try again.');
           return;
         }
         const body = (await res.json()) as {

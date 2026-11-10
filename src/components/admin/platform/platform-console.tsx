@@ -597,7 +597,7 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => void }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={200}
-                placeholder="Acme HVAC"
+                placeholder="Riverside HVAC"
               />
             </div>
             <div className="space-y-2">

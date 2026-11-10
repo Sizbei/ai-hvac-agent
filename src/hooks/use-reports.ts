@@ -163,7 +163,7 @@ export function useReports(range: ReportRange = {}): UseReportsResult {
         const res = await adminFetch(`/api/admin/reports${qs ? `?${qs}` : ''}`);
         if (!active) return;
         if (!res.ok) {
-          setError('Failed to load report');
+          setError('Couldn’t load report. Please try again.');
           return;
         }
         const body = (await res.json()) as {

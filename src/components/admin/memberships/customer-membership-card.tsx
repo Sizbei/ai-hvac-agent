@@ -70,7 +70,7 @@ export function CustomerMembershipCard({
     try {
       const res = await fetch(`/api/admin/customers/${customerId}/membership`);
       if (!res.ok) {
-        setError('Failed to load membership');
+        setError('Couldn’t load membership. Please try again.');
         return;
       }
       const body = (await res.json()) as {

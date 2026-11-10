@@ -124,7 +124,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
             types: json.data.types ?? [],
           });
         } else if (!hasCachedData) {
-          setError(json.error?.message ?? 'Failed to load pricebook');
+          setError(json.error?.message ?? 'Couldn’t load pricebook. Please try again.');
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
@@ -172,7 +172,7 @@ export function useTaxRates(): UseTaxRatesResult {
     try {
       const res = await adminFetch('/api/admin/pricebook/tax-rates');
       if (!res.ok) {
-        setError('Failed to load tax rates');
+        setError('Couldn’t load tax rates. Please try again.');
         return;
       }
       const body = (await res.json()) as {

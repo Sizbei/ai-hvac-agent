@@ -137,7 +137,7 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
       try {
         const res = await adminFetch(`/api/admin/estimates${buildQuery(params)}`);
         if (!res.ok) {
-          if (responseApplies(key, currentKeyRef.current)) setError('Failed to load estimates');
+          if (responseApplies(key, currentKeyRef.current)) setError('Couldn’t load estimates. Please try again.');
           return;
         }
         const body = (await res.json()) as {

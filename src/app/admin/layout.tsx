@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
+import { ADMIN_TITLE_FALLBACK } from '@/lib/admin/admin-title';
 
 export const metadata: Metadata = {
-  title: 'Admin - HVAC Dashboard',
+  title: ADMIN_TITLE_FALLBACK,
 };
 
 export default function AdminLayout({

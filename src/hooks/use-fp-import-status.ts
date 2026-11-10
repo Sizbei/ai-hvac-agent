@@ -62,7 +62,7 @@ export function useFpImportStatus(): UseFpImportStatusResult {
     try {
       const res = await fetch('/api/admin/integrations/fieldpulse/import-status');
       if (!res.ok) {
-        setError('Failed to load import status');
+        setError('Couldn’t load import status. Please try again.');
         return [];
       }
       const body = (await res.json()) as { success: boolean; data: { runs: FpImportRun[] } };
