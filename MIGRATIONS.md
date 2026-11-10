@@ -42,6 +42,17 @@ sequence and rollback procedure.
 > database (preview builds deliberately skip migrations), or a schema fix you
 > want applied before the code that depends on it ships.
 
+> **Production host guard.** `migrate.ts` refuses (exit 1, before connecting)
+> whenever `DATABASE_URL`'s host is the production Neon endpoint
+> (`ep-withered-hill`) and `VERCEL_ENV` is not `production`, unless
+> `MIGRATE_PROD_CONFIRM=1` is set. Consequences:
+>
+> - A **preview build that inherits the prod `DATABASE_URL` now FAILS the
+>   build** (it used to log "Skipping migrations" and continue). Preview
+>   deploys must override `DATABASE_URL` to a non-prod branch.
+> - A **manual prod migration needs `MIGRATE_PROD_CONFIRM=1`**. Option A's
+>   workflow sets it; for Option B export it yourself.
+
 ### Option A — GitHub Actions (manual, out-of-band)
 
 1. Open the repo's **Actions** tab → **Migrate (manual)** workflow.
@@ -59,6 +70,8 @@ sequence and rollback procedure.
 ```bash
 # Put the target DB URL in .env.local (or export DATABASE_URL), then:
 npm run db:migrate
+# Production host only — a deliberate, confirmed run:
+MIGRATE_PROD_CONFIRM=1 npm run db:migrate
 ```
 
 `migrate.ts` loads `.env.local`, but an already-exported `DATABASE_URL` env var

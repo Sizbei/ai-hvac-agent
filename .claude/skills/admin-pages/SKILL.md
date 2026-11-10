@@ -44,7 +44,8 @@ description: Use when working on ANY admin page — shared recipes (session mint
 `npx tsx scripts/agent/predeploy-check.mjs` (exit 0), then
 `vercel deploy --prod --yes`, then
 `BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`
-(read-only; `SMOKE_WRITES=1` adds the chat probe). Migrations run in the
+(read-only; `SMOKE_WRITES=1` adds the chat probe, and off localhost it also
+needs `SMOKE_PROD_WRITES=1`). Migrations run in the
 Vercel build.
 
 ## Design system (compose, don't hand-roll)

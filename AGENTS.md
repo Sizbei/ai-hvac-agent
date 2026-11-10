@@ -22,8 +22,8 @@ pure-helper vitest only; test component logic by extracting pure functions.
 `npx tsx scripts/agent/predeploy-check.mjs` (must exit 0), deploy with
 `vercel deploy --prod --yes`, then
 `BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`
-(read-only; `SMOKE_WRITES=1` adds the chat probe and is refused on the prod
-alias). Migrations auto-run in the build; the migrator refuses the prod host
+(read-only; `SMOKE_WRITES=1` adds the chat probe, and off localhost it also
+needs `SMOKE_PROD_WRITES=1`). Migrations auto-run in the build; the migrator refuses the prod host
 outside `VERCEL_ENV=production`. Vercel Hobby caps crons at daily.
 
 ## Agent scripts (`scripts/agent/`)

@@ -11,7 +11,7 @@ describe("prodMigrationRefusal", () => {
 
   it.each([undefined, "", "preview", "development"])("refuses the prod host when VERCEL_ENV is %j", (vercelEnv) => {
     expect(prodMigrationRefusal({ databaseUrl: PROD_URL, vercelEnv })).toBe(
-      "Refusing to migrate: DATABASE_URL is the production database and VERCEL_ENV is not production.",
+      "Refusing to migrate: DATABASE_URL is the production database and VERCEL_ENV is not production (set MIGRATE_PROD_CONFIRM=1 for a deliberate manual run).",
     );
   });
 
@@ -30,6 +30,19 @@ describe("prodMigrationRefusal", () => {
   it("only looks at the host, not the password or database name", () => {
     const url = "postgresql://u:ep-withered-hill@ep-quiet-dev-123456.neon.tech/ep-withered-hill";
     expect(prodMigrationRefusal({ databaseUrl: url, vercelEnv: undefined })).toBeNull();
+  });
+
+  it("refuses the prod host in any letter case", () => {
+    const upper = PROD_URL.replace("ep-withered-hill", "EP-Withered-Hill");
+    expect(prodMigrationRefusal({ databaseUrl: upper, vercelEnv: undefined })).not.toBeNull();
+  });
+
+  it("allows the prod host outside the build when MIGRATE_PROD_CONFIRM is exactly 1", () => {
+    expect(prodMigrationRefusal({ databaseUrl: PROD_URL, vercelEnv: undefined, confirm: "1" })).toBeNull();
+  });
+
+  it.each([undefined, "", "0", "true", "yes"])("does not treat MIGRATE_PROD_CONFIRM=%j as a confirm", (confirm) => {
+    expect(prodMigrationRefusal({ databaseUrl: PROD_URL, vercelEnv: "preview", confirm })).not.toBeNull();
   });
 
   it("never echoes the URL", () => {

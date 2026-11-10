@@ -3,11 +3,11 @@
 #   BASE=https://<deployment> bash scripts/agent/prod-smoke.sh
 #   BASE=https://<deployment> SMOKE_WRITES=1 bash scripts/agent/prod-smoke.sh
 # SMOKE_WRITES=1 adds the chat-streaming probe, which creates a chat session
-# (a fake chat in that org's inbox). It is refused on the prod alias unless
-# SMOKE_PROD_WRITES=1 is also set (controller only, once; then hide the chat).
+# (a fake chat in that org's inbox). Against any non-localhost BASE it is
+# refused unless SMOKE_PROD_WRITES=1 is also set (controller only, once; then
+# hide the chat). A localhost BASE needs only SMOKE_WRITES=1.
 # Exits non-zero on any failed expectation.
 set -u
-PROD_ALIAS="ai-hvac-agent-lovat.vercel.app"
 if [ -z "${BASE:-}" ]; then
   echo "usage: BASE=https://<deployment> [SMOKE_WRITES=1] bash scripts/agent/prod-smoke.sh" >&2
   exit 1
@@ -46,10 +46,21 @@ if [ "${SMOKE_WRITES:-}" != "1" ]; then
   echo "skip chat streams: skipped (writes off)"
   exit $fail
 fi
-case "$BASE" in
-  *"://$PROD_ALIAS"*)
+# Host, lowercased, without scheme, path or port. Anything odd (userinfo,
+# unparseable) is left as-is, so it never matches localhost: fail closed.
+host=$(printf '%s' "$BASE" | tr '[:upper:]' '[:lower:]')
+host=${host#*://}
+host=${host%%[/?#]*}
+case "$host" in
+  *@*) ;;
+  \[*\]|\[*\]:*) host=${host#\[}; host=${host%%]*} ;;
+  *:*) [ -z "$(printf '%s' "${host##*:}" | tr -d '0-9')" ] && host=${host%:*} ;;
+esac
+case "$host" in
+  localhost|127.0.0.1|::1) ;;
+  *)
     if [ "${SMOKE_PROD_WRITES:-}" != "1" ]; then
-      echo "FAIL chat streams: refused (writes against the prod alias need SMOKE_PROD_WRITES=1)"
+      echo "FAIL chat streams: refused (writes off localhost also need SMOKE_PROD_WRITES=1)"
       exit 1
     fi ;;
 esac

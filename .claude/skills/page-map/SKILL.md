@@ -61,5 +61,5 @@ at intake; missed geocodes are backfilled by the booking-recovery cron.
 swap logic + `map-pins.test.ts`) + `src/app/api/admin/mapkit-token/route.test.ts`
 (7 tests) + `src/app/api/admin/dispatch/map/route.test.ts`.
 Visual via the admin-pages recipe; zoom out ~3 clicks to check the service
-ring. After deploy: `bash scripts/agent/prod-smoke.sh` covers the token
+ring. After deploy: `BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh` covers the token
 route's 503/200.

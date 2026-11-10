@@ -50,4 +50,7 @@ jobs:
         if: steps.guard.outputs.run == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # migrate.ts refuses the production host outside the Vercel prod
+          # build unless this is set; running this workflow is the confirm.
+          MIGRATE_PROD_CONFIRM: "1"
         run: npm run db:migrate

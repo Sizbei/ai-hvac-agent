@@ -21,7 +21,8 @@ do not quietly write around it.
   the page program (`3d4ca1e` → `082421b`) are built and gated but NOT
   deployed.
 - `git push` does not reliably trigger a Vercel build — deploy with
-  `vercel deploy --prod --yes`, then `bash scripts/agent/prod-smoke.sh`.
+  `vercel deploy --prod --yes`, then
+  `BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`.
 - Migrations run in the build (`buildCommand: npm run db:migrate && next build`).
 
 ## INCIDENT — an unauthorised production deploy happened
@@ -70,7 +71,7 @@ build in this repo, so this had no production impact — it bought verification
 only.
 
 Remaining deploy step (NOT done — see PLAN.md for the decision):
-`vercel deploy --prod --yes` then `bash scripts/agent/prod-smoke.sh`.
+`vercel deploy --prod --yes` then `BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`.
 
 ## Production baseline (before any deploy in this program)
 

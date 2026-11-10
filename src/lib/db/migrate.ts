@@ -7,11 +7,12 @@ import { prodMigrationRefusal } from "./migrate-guard";
 dotenv.config({ path: ".env.local" });
 
 async function runMigrations(): Promise<void> {
-  // Before anything else (and before connecting): only the production build may
-  // migrate the production host.
+  // Before anything else (and before connecting): only the production build,
+  // or an explicit MIGRATE_PROD_CONFIRM=1 run, may migrate the production host.
   const refusal = prodMigrationRefusal({
     databaseUrl: process.env.DATABASE_URL,
     vercelEnv: process.env.VERCEL_ENV,
+    confirm: process.env.MIGRATE_PROD_CONFIRM,
   });
   if (refusal) {
     console.error(refusal);

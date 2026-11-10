@@ -19,5 +19,5 @@ Run these in order for the page under change (route like `/admin/map`):
    page's skill describes, update `.claude/skills/page-<slug>/SKILL.md` in
    the same commit, then `node scripts/agent/verify-skills.mjs` (0 missing).
 4. **Post-deploy:** `vercel deploy --prod --yes` then
-   `bash scripts/agent/prod-smoke.sh`; for visual pages, screenshot prod via
+   `BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`; for visual pages, screenshot prod via
    View as (platform owner) — see docs/spears-handover.md — and look at it.

@@ -54,7 +54,7 @@ vercel ls --prod | head -3          # note the current production URL
 vercel deploy --prod --yes
 
 # 6. Verify immediately
-bash scripts/agent/prod-smoke.sh    # all probes must pass
+BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh    # all probes must pass
 ```
 
 ## What "good" looks like at step 6
@@ -74,7 +74,7 @@ capturing the baseline.
 
 ```bash
 vercel rollback            # Hobby: goes to the immediately previous deployment
-bash scripts/agent/prod-smoke.sh
+BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh
 ```
 
 Then remember auto-assignment is now OFF. When you're ready to move forward
