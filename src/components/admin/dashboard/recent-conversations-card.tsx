@@ -37,7 +37,7 @@ export function RecentConversationsCard() {
       action={
         <Link
           href="/admin/conversations"
-          className="inline-flex items-center gap-0.5 text-xs font-medium text-link hover:underline"
+          className="inline-flex items-center gap-0.5 max-sm:min-h-11 text-xs font-medium text-link hover:underline"
         >
           View all
           <ChevronRight className="size-3.5" />

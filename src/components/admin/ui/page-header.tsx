@@ -46,7 +46,7 @@ export function PageHeader({
         {back && (
           <Link
             href={back.href}
-            className="mb-1.5 inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-1.5 inline-flex items-center gap-1 text-[13px] max-sm:min-h-11 text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" aria-hidden="true" />
             {back.label ?? "Back"}

@@ -23,7 +23,7 @@ export function BackToTourStrip() {
   return (
     <InfoBanner>
       Quick tour · Stop {tour.n} of 5 ·{' '}
-      <Link href={tour.href} className="font-medium underline underline-offset-2">
+      <Link href={tour.href} className="inline-flex font-medium underline underline-offset-2 max-sm:min-h-11 max-sm:items-center">
         Back to tour
       </Link>
     </InfoBanner>
