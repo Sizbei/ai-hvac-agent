@@ -22,6 +22,10 @@ export interface AdminRequest {
   readonly syncedSource: 'fieldpulse' | 'housecall' | null;
 }
 
+/** A requests-list row: what the list renders (speed S3). The description
+ * and updatedAt are read from the detail endpoint. */
+export type AdminRequestListRow = Omit<AdminRequest, 'description' | 'updatedAt'>;
+
 /**
  * Which visit the office shows as current (current-visit.ts). "request": the
  * request's own technician/window columns. "visit": a later visit (#2+) is the

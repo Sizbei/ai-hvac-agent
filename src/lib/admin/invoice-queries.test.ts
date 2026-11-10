@@ -5,6 +5,7 @@ import {
   getInvoiceDetailById,
   reconcilePayment,
   listStuckPayments,
+  LIST_INVOICE_FIELDS,
 } from "./invoice-queries";
 import { VISIBLE_ONLY } from "./visibility";
 import { db } from "@/lib/db";
@@ -879,6 +880,78 @@ describe("listInvoices", () => {
         amountPaidCents: 5000,
       }),
     );
+  });
+});
+
+describe("listInvoices payload contract", () => {
+  // A DB-faithful row: exactly the columns the page-rows SELECT asked for.
+  const SAMPLE: Record<string, unknown> = {
+    id: "inv-1",
+    state: "open",
+    totalCents: 10000,
+    amountPaidCents: 2500,
+    customerId: "cust-1",
+    serviceRequestId: "req-1",
+    createdAt: new Date("2026-01-02"),
+    issuedAt: new Date("2026-01-01"),
+    dueDate: null,
+    lastReminderSentAt: null,
+    fieldpulseInvoiceId: "fp-9",
+    hcpInvoiceId: null,
+    fieldpulseData: { discount: 5, notes: "x".repeat(2000) },
+    nameEncrypted: null,
+  };
+  const rowFromCols = (cols: object) =>
+    Object.fromEntries(Object.keys(cols).map((k) => [k, k in SAMPLE ? SAMPLE[k] : null]));
+
+  /** select #pageRowsCall answers with a row built from its own column map. */
+  function mockFaithfulRows(pageRowsCall: number) {
+    let i = 0;
+    vi.mocked(db.select).mockImplementation(((cols?: object) => {
+      const call = i++;
+      const r =
+        call === pageRowsCall ? [rowFromCols(cols ?? {})] : call === 1 ? [{ n: 1 }] : [];
+      const p = Promise.resolve(r);
+      const chain: unknown = Object.assign(p, {
+        from: () => chain,
+        leftJoin: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        groupBy: () => chain,
+        limit: () => chain,
+        offset: () => chain,
+        then: p.then.bind(p),
+      });
+      return chain;
+    }) as never);
+  }
+
+  it("listInvoices row keys equal LIST_INVOICE_FIELDS and contain no fieldpulseData", async () => {
+    mockFaithfulRows(2); // sourceCounts, count, page rows
+    const result = await listInvoices(ORG, {}, VISIBLE_ONLY);
+    const row = result.invoices[0]!;
+    expect(Object.keys(row).sort()).toEqual([...LIST_INVOICE_FIELDS].sort());
+    expect(row).not.toHaveProperty("fieldpulseData");
+    expect(row).not.toHaveProperty("serviceRequestId");
+    // The blob is never read from the DB for a list page.
+    const pageSelect = vi.mocked(db.select).mock.calls[2]![0] as object;
+    expect(Object.keys(pageSelect)).not.toContain("fieldpulseData");
+    expect(Object.keys(pageSelect)).not.toContain("serviceRequestId");
+  });
+
+  it("the search path returns the same trimmed row shape", async () => {
+    mockFaithfulRows(3); // sourceCounts, count, page rows, then the search scan
+    const result = await listInvoices(ORG, { search: "fp-9" }, VISIBLE_ONLY);
+    const row = result.invoices[0]!;
+    expect(Object.keys(row).sort()).toEqual([...LIST_INVOICE_FIELDS].sort());
+    const scanSelect = vi.mocked(db.select).mock.calls[3]![0] as object;
+    expect(Object.keys(scanSelect)).not.toContain("fieldpulseData");
+  });
+
+  it("still derives syncedSource and the customer name", async () => {
+    mockFaithfulRows(2);
+    const [row] = (await listInvoices(ORG, {}, VISIBLE_ONLY)).invoices;
+    expect(row).toMatchObject({ id: "inv-1", syncedSource: "fieldpulse", customerName: null });
   });
 });
 

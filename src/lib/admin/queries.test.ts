@@ -68,6 +68,8 @@ function createChainableMock(resolvedValue: unknown) {
 // We need per-call resolution, so track call sequences
 let selectCallIndex = 0;
 let selectResolutions: unknown[][] = [[]];
+// The column map each db.select(cols) call received (payload contract tests).
+const selectCallArgs: unknown[][] = [];
 let insertResolution: unknown = [];
 let updateResolution: unknown = [];
 // Records every db.batch([...statements]) call so tests can assert
@@ -79,7 +81,8 @@ const executeCalls: unknown[] = [];
 
 vi.mock('@/lib/db', () => ({
   db: {
-    select: (..._args: unknown[]) => {
+    select: (...args: unknown[]) => {
+      selectCallArgs.push(args);
       const idx = selectCallIndex;
       selectCallIndex++;
       return createChainableMock(
@@ -271,6 +274,7 @@ import {
   getSchedulingCalendar,
   getMonthCalendar,
   countUnscheduledRequests,
+  LIST_REQUEST_FIELDS,
 } from '@/lib/admin/queries';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
@@ -279,6 +283,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   selectCallIndex = 0;
   selectResolutions = [[]];
+  selectCallArgs.length = 0;
   insertResolution = [];
   updateResolution = [];
   batchCallArgs = [];
@@ -334,6 +339,45 @@ describe('getRequests', () => {
     expect(result.requests[0]).toHaveProperty('id', 'req-1');
     expect(result.requests[0]).toHaveProperty('customerName');
     expect(typeof result.requests[0].createdAt).toBe('string');
+  });
+
+  it('getRequests row keys equal LIST_REQUEST_FIELDS and contain no fieldpulseData', async () => {
+    const now = new Date();
+    selectResolutions = [
+      [{ value: 1 }],
+      [
+        {
+          id: 'req-1',
+          status: 'pending',
+          issueType: 'heating',
+          urgency: 'medium',
+          description: 'A long free-text description the list never shows',
+          referenceNumber: 'HVAC-0001',
+          customerNameEncrypted: null,
+          customerNameFromCustomer: null,
+          fieldpulseJobId: 'fp-1',
+          hcpJobId: null,
+          assignedToName: null,
+          isAfterHours: false,
+          createdAt: now,
+          updatedAt: now,
+          officeVisit: null,
+        },
+      ],
+    ];
+
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
+    const row = result.requests[0]!;
+    expect(Object.keys(row).sort()).toEqual([...LIST_REQUEST_FIELDS].sort());
+    expect(row).not.toHaveProperty('fieldpulseData');
+    expect(row).not.toHaveProperty('description');
+    expect(row).not.toHaveProperty('updatedAt');
+    expect(row).toMatchObject({ id: 'req-1', syncedSource: 'fieldpulse' });
+    // The page-rows SELECT (second call; the first is the count) never reads them.
+    const rowCols = Object.keys(selectCallArgs[1]![0] as object);
+    expect(rowCols).not.toContain('description');
+    expect(rowCols).not.toContain('updatedAt');
+    expect(rowCols).not.toContain('fieldpulseData');
   });
 
   it('applies a reference-number prefix search, escaping LIKE metacharacters', async () => {

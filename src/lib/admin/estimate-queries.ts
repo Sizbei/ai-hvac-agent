@@ -327,8 +327,6 @@ export interface EstimateListRow {
   readonly fieldpulseStatusName: string | null;
   /** Human-readable estimate title from FieldPulse. Null for native estimates. */
   readonly title: string | null;
-  /** FieldPulse spillover data; null for native estimates. */
-  readonly fieldpulseData: Record<string, unknown> | null;
   /** Decrypted customer name from the joined customers row. Null when no customer. */
   readonly customerName: string | null;
   /** ISO string of the effective created-at (FieldPulse created_at if present, else native). */
@@ -337,6 +335,29 @@ export interface EstimateListRow {
   /** Options on the estimate; total is "up to" while undecided with more than one. */
   readonly optionCount: number;
 }
+
+/**
+ * The keys of a list row (speed S3): only what the list renders. The
+ * FieldPulse blob lives on the detail endpoint; an expanded FieldPulse row
+ * fetches it from there.
+ */
+export const LIST_ESTIMATE_FIELDS = [
+  "id",
+  "status",
+  "totalCents",
+  "customerId",
+  "serviceRequestId",
+  "createdAt",
+  "expiresAt",
+  "signedAt",
+  "syncedSource",
+  "fieldpulseStatusName",
+  "title",
+  "customerName",
+  "effectiveCreatedAt",
+  "soldOptionId",
+  "optionCount",
+] as const satisfies readonly (keyof EstimateListRow)[];
 
 const ESTIMATE_PAGE_SIZE = 50;
 
@@ -510,7 +531,6 @@ export async function listEstimates(
     fieldpulseEstimateId: estimates.fieldpulseEstimateId,
     fieldpulseStatusName: estimates.fieldpulseStatusName,
     title: estimates.title,
-    fieldpulseData: estimates.fieldpulseData,
     nameEncrypted: customers.nameEncrypted,
     effectiveCreatedAt: EFFECTIVE_CREATED_AT_SQL,
     soldOptionId: estimates.soldOptionId,
@@ -550,11 +570,10 @@ export async function listEstimates(
     });
 
     const sliced = filtered.slice(offset, offset + limit);
-    const estimateRows = sliced.map(({ fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, effectiveCreatedAt, ...r }) => ({
+    const estimateRows = sliced.map(({ fieldpulseEstimateId, fieldpulseStatusName, nameEncrypted, effectiveCreatedAt, ...r }) => ({
       ...r,
       syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
       fieldpulseStatusName: fieldpulseStatusName ?? null,
-      fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
       customerName: safeDecryptName(nameEncrypted ?? null),
       effectiveCreatedAt: effectiveCreatedAt instanceof Date
         ? effectiveCreatedAt.toISOString()
@@ -585,11 +604,10 @@ export async function listEstimates(
   ]);
 
   const total = countResult[0]?.n ?? 0;
-  const estimateRows = rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, effectiveCreatedAt, ...r }) => ({
+  const estimateRows = rows.map(({ fieldpulseEstimateId, fieldpulseStatusName, nameEncrypted, effectiveCreatedAt, ...r }) => ({
     ...r,
     syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
-    fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
     customerName: safeDecryptName(nameEncrypted ?? null),
     effectiveCreatedAt: effectiveCreatedAt instanceof Date
       ? effectiveCreatedAt.toISOString()

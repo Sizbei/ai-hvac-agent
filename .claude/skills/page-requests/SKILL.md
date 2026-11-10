@@ -170,6 +170,9 @@ rows run the subqueries). Integration proof:
 **Forms section (M3d):** `src/components/admin/request-forms-section.tsx` (pure view helpers `src/lib/admin/request-forms-view.ts`) after Visits on the detail sheet; `GET /api/admin/requests/[id]/forms` (`getRequestForms`: submissions with answers decrypted server-side — undecryptable → `unreadable`, never a 500 — answerless drafts omitted, `missingRequired` per request status) and `POST …/forms/[submissionId]/reopen` `{ revision }` (CAS; audit `form_reopened`; nobody is notified). A 409 STALE or ANSWERS_REMOVED shows its message (`FORM_OFFICE_COPY` in `src/lib/admin/form-route-copy.ts`) and reloads the section, so the next Reopen sends the fresh revision. Only the office reopens a submitted form; the technician's `submitted` state is final until then. A visit holding a submission is never deleted by the visit trigger (migration 0058), so the section can always name its visit. Final-review rulings (detail in page-tech): R1, a technician's save sent as they leave the page merges field-wise over a colleague's newer save (only fields the colleague didn't change are applied), so the section can show both technicians' answers in one draft; R2, an erased customer's site view says membership is withheld, never "Not a member."; R3, technician form routes answer "This job isn't yours." for a job the technician can't read.
 
 **Invariants:**
+- List rows are `AdminRequestListRow` and carry only `LIST_REQUEST_FIELDS`
+  (`src/lib/admin/queries.ts`; contract test in `queries.test.ts`): no
+  `description` or `updatedAt` (the detail sheet reads them by id).
 - `PER_PAGE = 50`; limit is enforced server-side too (max 100). The pager uses
   `safePage = Math.min(page, totalPages)` so an out-of-bounds page never renders.
 - Filter state is URL-synced (`useUrlFilterSync`) with defaults dropped

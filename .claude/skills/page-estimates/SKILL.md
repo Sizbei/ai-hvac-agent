@@ -25,6 +25,10 @@ response — no client-side reduce. PER_PAGE=50. Default tab is "Open" (the
 actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
 
 **Invariants (violate = bug):**
+- List rows carry only `LIST_ESTIMATE_FIELDS` (`src/lib/admin/estimate-queries.ts`;
+  contract test in `estimate-list-pagination.test.ts`). No `fieldpulseData` in the
+  list: an expanded FieldPulse row reads it on expand via
+  `src/components/admin/lazy-fieldpulse-details.tsx` from the detail endpoint.
 - FieldPulse-synced estimates (syncedSource='fieldpulse') are read-only in
   this UI — the detail page renders an InfoBanner and hides "Mark sold" and
   "Generate invoice" actions. Mutations are blocked on the server in
