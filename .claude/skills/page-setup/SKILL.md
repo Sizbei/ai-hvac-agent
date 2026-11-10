@@ -95,9 +95,13 @@ not audited. Tests: `tests/integration/admin-guide-state.test.ts`.
 `src/lib/admin/tour-lessons.ts` (`buildLessons`, conservative context when
 `guide` is null). `SetupPageClient` renders ONE tree for loading/error/data;
 the tour sits in one of two fixed slots (above the hero for a valid
-`?lesson`, else below), chosen once from the URL after mount, so it never
-remounts. Stop/completed are local, seeded once; stop changes use
-`history.replaceState`, never router navigation. Writes (`lesson`,
+`?lesson`, else below), chosen once from `useSearchParams` on the first
+render, so it never remounts. Stop/completed are local, seeded once from the
+first onboarding response that settles after mount (`shouldSeedTour`), never a
+cached snapshot; each stored lesson calls `invalidateOnboarding()`. Stop
+changes use `history.replaceState`, never router navigation; during a replay
+"Show me" carries `replay=1`. The hero action is `outline` whenever the tour is
+expanded. Writes (`lesson`,
 `tourCompleted`) are skipped when `readOnly` or `guide` is null.
 
 **Client store contract:** fetches are sequence-tagged (older responses dropped);

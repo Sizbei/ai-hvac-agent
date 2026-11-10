@@ -12,7 +12,7 @@ interface SetupHeroProps {
   readonly number: number;
   /** The step re-opened: warning glyph and a "Needs attention" header. */
   readonly attention?: boolean;
-  /** `outline` while the quick tour sits expanded above the hero: one primary per screen. */
+  /** `outline` while the quick tour is expanded: one primary per screen. */
   readonly actionVariant?: 'default' | 'outline';
 }
 

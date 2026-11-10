@@ -55,6 +55,25 @@ export function seedTour(mount: TourMount, guide: AdminGuidePayload | null): Tou
   };
 }
 
+/**
+ * Seed only from a response loaded after this mount: wait for the mount's
+ * refresh to settle, so a cached snapshot (an old `lastLesson`) never seeds.
+ * A settled failure with no data seeds the conservative tour.
+ */
+export function shouldSeedTour(s: {
+  seeded: boolean;
+  refreshSettled: boolean;
+  hasData: boolean;
+  error: boolean;
+}): boolean {
+  return !s.seeded && s.refreshSettled && (s.hasData || s.error);
+}
+
+/** "Show me" during a replay carries `replay=1` so the way back stays open. */
+export function withReplay(href: string, replay: boolean): string {
+  return replay ? `${href}${href.includes("?") ? "&" : "?"}replay=1` : href;
+}
+
 /** The search string for `history.replaceState`: other params kept; `lesson: null` removes both tour keys. */
 export function tourSearch(search: string, next: { lesson: LessonId | null; replay: boolean }): string {
   const params = new URLSearchParams(search);

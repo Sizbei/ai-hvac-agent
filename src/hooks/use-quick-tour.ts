@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { adminFetch } from '@/lib/admin/admin-fetch';
 import { LESSON_IDS, type GuidePatch, type LessonId } from '@/lib/admin/admin-guide-state';
-import { refreshOnboarding } from '@/lib/admin/onboarding-store';
+import { invalidateOnboarding, refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { OnboardingPayload } from '@/lib/admin/onboarding-steps';
 import { buildLessons, lessonContext, type Lesson } from '@/lib/admin/tour-lessons';
 import {
   readTourMount,
   seedTour,
+  shouldSeedTour,
   stopAnnouncement,
   TOUR_DONE_LINE,
   tourSearch,
@@ -17,11 +19,13 @@ import {
 } from '@/lib/admin/tour-view';
 
 export interface QuickTour {
-  /** Null until the URL has been read after mount; then held. */
-  readonly mount: TourMount | null;
+  /** Read from the URL on the first render (hash after mount); then held. */
+  readonly mount: TourMount;
   /** Null until the first onboarding response (data or error). */
   readonly progress: TourProgress | null;
   readonly lessons: readonly Lesson[];
+  /** In a replay: "Show me" links carry `replay=1`. */
+  readonly replaying: boolean;
   /** Polite live-region text; empty until the user changes stop. */
   readonly announcement: string;
   readonly go: (index: number) => void;
@@ -29,16 +33,23 @@ export interface QuickTour {
   readonly replay: () => void;
 }
 
-/** Fire-and-forget: every failure (auth redirect included) is ignored. */
-function patchGuide(body: GuidePatch): Promise<void> {
+/** Fire-and-forget: every failure (auth redirect included) is ignored. Resolves to `ok`. */
+function patchGuide(body: GuidePatch): Promise<boolean> {
   return adminFetch('/api/admin/guide', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then(
-    () => undefined,
-    () => undefined,
+    (res) => res.ok,
+    () => false,
   );
+}
+
+/** A stored lesson changed `lastLesson`: never seed a later mount from the old snapshot. */
+function patchLesson(lesson: LessonId): void {
+  void patchGuide({ lesson }).then((ok) => {
+    if (ok) invalidateOnboarding();
+  });
 }
 
 /** No navigation, no scroll, no remount (the repo's use-url-filter-sync pattern). */
@@ -53,7 +64,9 @@ function replaceTourUrl(next: { lesson: LessonId | null; replay: boolean }): voi
  * from `guide`. Writes are skipped while previewing or when `guide` is null.
  */
 export function useQuickTour(data: OnboardingPayload | null, error: boolean): QuickTour {
-  const [mount, setMount] = useState<TourMount | null>(null);
+  const searchParams = useSearchParams();
+  const [mount, setMount] = useState<TourMount>(() => readTourMount(`?${searchParams.toString()}`, ''));
+  const [refreshSettled, setRefreshSettled] = useState(false);
   const [progress, setProgress] = useState<TourProgress | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [announcement, setAnnouncement] = useState('');
@@ -62,12 +75,20 @@ export function useQuickTour(data: OnboardingPayload | null, error: boolean): Qu
   const lessons = buildLessons(lessonContext(guide));
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the URL after mount
-    setMount(readTourMount(window.location.search, window.location.hash));
+    // The hash never reaches the server: read it once after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the URL hash after mount
+    if (window.location.hash === '#learn') setMount((m) => (m.focus ? m : { ...m, focus: true }));
+    let live = true;
+    void refreshOnboarding().then(() => {
+      if (live) setRefreshSettled(true);
+    });
+    return () => {
+      live = false;
+    };
   }, []);
 
-  // Seed once, on the first response; later refreshes never move the tour.
-  if (mount && progress === null && (data !== null || error)) {
+  // Seed once, from a response loaded after this mount; later refreshes never move the tour.
+  if (shouldSeedTour({ seeded: progress !== null, refreshSettled, hasData: data !== null, error })) {
     setProgress(seedTour(mount, guide));
     setReplaying(mount.replay);
   }
@@ -76,7 +97,7 @@ export function useQuickTour(data: OnboardingPayload | null, error: boolean): Qu
   useEffect(() => {
     if (!progress || wroteMount.current) return;
     wroteMount.current = true;
-    if (mount?.lesson && !progress.completed && canWrite) void patchGuide({ lesson: mount.lesson });
+    if (mount.lesson && !progress.completed && canWrite) patchLesson(mount.lesson);
   }, [progress, mount, canWrite]);
 
   function go(index: number): void {
@@ -85,7 +106,7 @@ export function useQuickTour(data: OnboardingPayload | null, error: boolean): Qu
     setProgress({ index: next, completed: false });
     replaceTourUrl({ lesson, replay: replaying });
     setAnnouncement(stopAnnouncement(next, lessons[next].title));
-    if (canWrite) void patchGuide({ lesson });
+    if (canWrite) patchLesson(lesson);
   }
 
   function finish(): void {
@@ -101,8 +122,8 @@ export function useQuickTour(data: OnboardingPayload | null, error: boolean): Qu
     setReplaying(true);
     replaceTourUrl({ lesson: LESSON_IDS[0], replay: true });
     setAnnouncement(stopAnnouncement(0, lessons[0].title));
-    if (canWrite) void patchGuide({ lesson: LESSON_IDS[0] });
+    if (canWrite) patchLesson(LESSON_IDS[0]);
   }
 
-  return { mount, progress, lessons, announcement, go, finish, replay };
+  return { mount, progress, lessons, replaying, announcement, go, finish, replay };
 }

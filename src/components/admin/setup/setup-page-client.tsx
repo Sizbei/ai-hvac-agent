@@ -227,11 +227,11 @@ export function SetupPageClient() {
   }, [data]);
 
   const tour = useQuickTour(data, error);
-  const { mount } = tour;
-  const tourAbove = mount?.placement === 'above';
-  // Rendered in exactly one of two fixed slots, chosen once at mount, so the
-  // tour never remounts when the checklist data or an error arrives.
-  const tourSection = mount && <QuickTourSection tour={{ ...tour, mount }} slow={slow} />;
+  const tourAbove = tour.mount.placement === 'above';
+  const tourExpanded = tour.progress !== null && !tour.progress.completed;
+  // Rendered in exactly one of two fixed slots, chosen from the URL on the
+  // first render, so the tour never remounts when data or an error arrives.
+  const tourSection = <QuickTourSection tour={tour} slow={slow} />;
   const hero = data ? heroView(data) : null;
 
   let primary: React.ReactNode = null;
@@ -241,7 +241,7 @@ export function SetupPageClient() {
         step={hero.step}
         number={hero.number}
         attention={hero.attention}
-        actionVariant={tourAbove && tour.progress && !tour.progress.completed ? 'outline' : 'default'}
+        actionVariant={tourExpanded ? 'outline' : 'default'}
       />
     );
   } else if (!data && error) {
@@ -262,7 +262,7 @@ export function SetupPageClient() {
 
   return (
     <PageShell narrow>
-      <SetupHeader data={data} invite={mount !== null && showTourInvite(mount, tour.progress)} />
+      <SetupHeader data={data} invite={showTourInvite(tour.mount, tour.progress)} />
       {tourAbove && tourSection}
       {primary}
       {!tourAbove && tourSection}

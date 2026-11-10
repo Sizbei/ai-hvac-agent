@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   readTourMount,
   seedTour,
+  shouldSeedTour,
   showTourInvite,
   stopAnnouncement,
   stopLabel,
   TOUR_DONE_LINE,
   tourSearch,
   type TourMount,
+  withReplay,
 } from "./tour-view";
 import type { AdminGuidePayload } from "./admin-guide-state";
 
@@ -78,6 +80,17 @@ describe("seedTour (local stop/completed, seeded once from guide)", () => {
     expect(seedTour(mount("?lesson=requests&replay=1"), COMPLETED)).toEqual({ index: 0, completed: false });
   });
 
+  it("replay=1 without ?lesson reopens a completed tour, below the hero, at lastLesson", () => {
+    const m = mount("?replay=1");
+    expect(m).toEqual({ lesson: null, replay: true, placement: "below", focus: false });
+    expect(seedTour(m, COMPLETED)).toEqual({ index: 3, completed: false });
+  });
+
+  it("guide null + replay → the URL's stop, not collapsed", () => {
+    expect(seedTour(mount("?lesson=schedule&replay=1"), null)).toEqual({ index: 1, completed: false });
+    expect(seedTour(mount("?replay=1"), null)).toEqual({ index: 0, completed: false });
+  });
+
   it("guide null (failed guide read or failed GET) → the URL's stop, never collapsed", () => {
     expect(seedTour(mount("?lesson=paid"), null)).toEqual({ index: 4, completed: false });
     expect(seedTour(mount(""), null)).toEqual({ index: 0, completed: false });
@@ -129,5 +142,43 @@ describe("showTourInvite (header line)", () => {
 
   it("hidden while ?lesson is present", () => {
     expect(showTourInvite(mount("?lesson=requests"), { index: 0, completed: false })).toBe(false);
+  });
+});
+
+describe("shouldSeedTour (only from a response loaded after this mount)", () => {
+  const base = { seeded: false, refreshSettled: true, hasData: true, error: false };
+
+  it("cached data from before this mount does not seed until the mount's refresh settles", () => {
+    expect(shouldSeedTour({ ...base, refreshSettled: false })).toBe(false);
+  });
+
+  it("seeds once the refresh settled with data", () => {
+    expect(shouldSeedTour(base)).toBe(true);
+  });
+
+  it("seeds on a settled failed GET with no data (conservative tour)", () => {
+    expect(shouldSeedTour({ ...base, hasData: false, error: true })).toBe(true);
+  });
+
+  it("does not seed with neither data nor error (e.g. an auth redirect)", () => {
+    expect(shouldSeedTour({ ...base, hasData: false })).toBe(false);
+  });
+
+  it("seeds only once", () => {
+    expect(shouldSeedTour({ ...base, seeded: true })).toBe(false);
+  });
+});
+
+describe("withReplay (Show me during a replay)", () => {
+  it("adds replay=1 while replaying", () => {
+    expect(withReplay("/admin/calendar?from=tour&lesson=schedule", true)).toBe(
+      "/admin/calendar?from=tour&lesson=schedule&replay=1",
+    );
+  });
+
+  it("leaves the link alone otherwise", () => {
+    expect(withReplay("/admin/calendar?from=tour&lesson=schedule", false)).toBe(
+      "/admin/calendar?from=tour&lesson=schedule",
+    );
   });
 });

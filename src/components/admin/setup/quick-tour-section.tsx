@@ -10,7 +10,7 @@ import { ProgressBar } from '@/components/admin/ui/progress-bar';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import type { QuickTour } from '@/hooks/use-quick-tour';
 import type { LessonId } from '@/lib/admin/admin-guide-state';
-import { stopLabel, TOUR_DONE_LINE, TOUR_LENGTH, type TourMount } from '@/lib/admin/tour-view';
+import { stopLabel, TOUR_DONE_LINE, TOUR_LENGTH, withReplay } from '@/lib/admin/tour-view';
 
 const TITLE = 'Quick tour';
 const REPLAY_HREF = '/admin/setup?lesson=requests&replay=1#learn';
@@ -23,11 +23,10 @@ const LESSON_ICONS: Record<LessonId, LucideIcon> = {
   paid: Receipt,
 };
 
-/** `arrive` scrolls the section to the top; `heading` only moves focus. */
-type PendingFocus = 'arrive' | 'heading' | 'replay' | null;
+type PendingFocus = 'heading' | 'replay' | null;
 
 interface QuickTourSectionProps {
-  readonly tour: QuickTour & { readonly mount: TourMount };
+  readonly tour: QuickTour;
   /** The page's 300 ms gate: no skeleton flash on a fast load. */
   readonly slow: boolean;
 }
@@ -59,29 +58,34 @@ function TourSkeleton({ slow }: { slow: boolean }) {
  * by `SetupPageClient`; all state lives in `useQuickTour`.
  */
 export function QuickTourSection({ tour, slow }: QuickTourSectionProps) {
-  const { mount, progress, lessons, announcement } = tour;
+  const { mount, progress, lessons, announcement, replaying } = tour;
   const sectionRef = useRef<HTMLElement>(null);
   const replayRef = useRef<HTMLAnchorElement>(null);
-  const pendingFocus = useRef<PendingFocus>(mount.focus ? 'arrive' : null);
+  const pendingFocus = useRef<PendingFocus>(null);
+  const arrived = useRef(false);
   const ready = progress !== null;
   const completed = progress?.completed ?? false;
 
-  // Arrival (`?lesson` / `#learn`) and the Finish/Replay hand-offs; Back and
-  // Next keep focus on the pressed button by themselves.
+  // Arrival (`?lesson` / `#learn`, once, when the tour is ready) scrolls the
+  // section to the top; Finish/Replay hand focus over. Back and Next keep focus
+  // on the pressed button by themselves.
   useEffect(() => {
-    const target = pendingFocus.current;
-    if (!ready || target === null) return;
+    if (!ready) return;
+    const arrive = mount.focus && !arrived.current;
+    if (arrive) arrived.current = true;
+    const target = arrive ? 'heading' : pendingFocus.current;
     pendingFocus.current = null;
     if (target === 'replay') {
       replayRef.current?.focus();
       return;
     }
+    if (target !== 'heading') return;
     const heading = sectionRef.current?.querySelector<HTMLElement>('h2');
     if (!heading) return;
     heading.tabIndex = -1;
-    if (target === 'arrive') sectionRef.current?.scrollIntoView({ block: 'start' });
-    heading.focus({ preventScroll: target === 'arrive' });
-  }, [ready, completed]);
+    if (arrive) sectionRef.current?.scrollIntoView({ block: 'start' });
+    heading.focus({ preventScroll: arrive });
+  }, [ready, completed, mount.focus]);
 
   function finish(): void {
     pendingFocus.current = 'replay';
@@ -89,6 +93,8 @@ export function QuickTourSection({ tour, slow }: QuickTourSectionProps) {
   }
 
   function replay(e: React.MouseEvent<HTMLAnchorElement>): void {
+    // Modified or non-primary clicks keep the browser's link behaviour (new tab, window…).
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     e.preventDefault();
     pendingFocus.current = 'heading';
     tour.replay();
@@ -143,7 +149,7 @@ export function QuickTourSection({ tour, slow }: QuickTourSectionProps) {
               Back
             </Button>
             <div className="ml-auto flex items-center gap-2">
-              <Button variant="outline" render={<Link href={lesson.href} />}>
+              <Button variant="outline" render={<Link href={withReplay(lesson.href, replaying)} />}>
                 Show me
               </Button>
               <Button onClick={last ? finish : () => tour.go(index + 1)}>{last ? 'Finish' : 'Next'}</Button>
