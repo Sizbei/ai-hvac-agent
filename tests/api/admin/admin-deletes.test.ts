@@ -27,6 +27,13 @@ const {
 vi.mock('@/lib/auth/session', () => ({
   getAdminSession: () => mockGetAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock('@/lib/auth/viewer', () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 // `authz` is `server-only`, so it must be mocked for these route modules to be
 // importable under vitest. The stub mirrors the real tier check rather than

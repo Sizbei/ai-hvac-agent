@@ -11,6 +11,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, visibleRowsSql, type Visibility } from "@/lib/admin/visibility";
 import { decrypt } from "@/lib/crypto";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
 import { issueTypeLabel, humanizeCode } from "@/lib/admin/request-labels";
@@ -89,6 +90,7 @@ function displayableName(...encrypted: (string | null)[]): string | null {
 export async function searchCustomers(
   organizationId: string,
   q: string,
+  vis: Visibility,
 ): Promise<SearchResult[]> {
   const term = q.toLowerCase();
   const rows = await db
@@ -100,7 +102,7 @@ export async function searchCustomers(
       fieldpulseCustomerId: customers.fieldpulseCustomerId,
     })
     .from(customers)
-    .where(withTenant(customers, organizationId))
+    .where(withTenant(customers, organizationId, visibleRows(customers, vis)))
     .orderBy(desc(customers.createdAt))
     .limit(SCAN_LIMIT_CUSTOMERS);
 
@@ -130,6 +132,7 @@ export async function searchCustomers(
 export async function searchInvoices(
   organizationId: string,
   q: string,
+  vis: Visibility,
 ): Promise<SearchResult[]> {
   const term = q.toLowerCase();
   const rows = await db
@@ -141,7 +144,7 @@ export async function searchInvoices(
       hcpInvoiceId: invoices.hcpInvoiceId,
     })
     .from(invoices)
-    .where(withTenant(invoices, organizationId))
+    .where(withTenant(invoices, organizationId, visibleRows(invoices, vis)))
     .orderBy(desc(invoices.createdAt))
     .limit(SCAN_LIMIT_INVOICES);
 
@@ -172,6 +175,7 @@ export async function searchInvoices(
 export async function searchJobs(
   organizationId: string,
   q: string,
+  vis: Visibility,
 ): Promise<SearchResult[]> {
   const rows = await db
     .select({
@@ -183,17 +187,19 @@ export async function searchJobs(
       customerNameEncrypted: customers.nameEncrypted,
     })
     .from(serviceRequests)
-    // FieldPulse-imported requests keep the name only on the customer row.
+    // FieldPulse-imported requests keep the name only on the customer row; a
+    // hidden customer adds no name.
     .leftJoin(
       customers,
       and(
         eq(customers.id, serviceRequests.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
     .where(
       and(
-        withTenant(serviceRequests, organizationId),
+        withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)),
         or(
           ilike(serviceRequests.issueType, `%${q}%`),
           ilike(serviceRequests.referenceNumber, `%${q}%`),
@@ -243,6 +249,7 @@ const SHORT_ID_SHAPE = /^[0-9a-f][0-9a-f-]{3,35}$/i;
 export async function searchConversations(
   organizationId: string,
   q: string,
+  vis: Visibility,
 ): Promise<SearchResult[]> {
   const pattern = containsPattern(q);
   const firstCustomerMessage = sql<string | null>`(
@@ -270,6 +277,7 @@ export async function searchConversations(
         customerSessions,
         organizationId,
         notStandInSession(customerSessions.token),
+        visibleRows(customerSessions, vis),
         sql`(
             ${sessionContactMatches(customerSessions.metadata, pattern)}
             OR EXISTS (
@@ -277,6 +285,7 @@ export async function searchConversations(
               WHERE ${serviceRequests.sessionId} = ${customerSessions.id}
                 AND ${serviceRequests.organizationId} = ${customerSessions.organizationId}
                 AND ${serviceRequests.referenceNumber} ILIKE ${pattern}
+                AND ${visibleRowsSql("service_requests", vis)}
             )
             OR ${firstCustomerMessage} ILIKE ${pattern}
             ${idMatch}
@@ -309,7 +318,8 @@ export async function searchConversations(
         ),
       )
       .orderBy(asc(messages.createdAt)),
-    // The linked request's customer names the chat when the bot captured none.
+    // The linked request's customer names the chat when the bot captured none
+    // (a hidden request or customer names nothing).
     db
       .select({
         sessionId: serviceRequests.sessionId,
@@ -323,10 +333,16 @@ export async function searchConversations(
         and(
           eq(customers.id, serviceRequests.customerId),
           eq(customers.organizationId, organizationId),
+          visibleRows(customers, vis),
         ),
       )
       .where(
-        withTenant(serviceRequests, organizationId, inArray(serviceRequests.sessionId, sessionIds)),
+        withTenant(
+          serviceRequests,
+          organizationId,
+          inArray(serviceRequests.sessionId, sessionIds),
+          visibleRows(serviceRequests, vis),
+        ),
       )
       .orderBy(asc(serviceRequests.createdAt)),
   ]);
@@ -421,6 +437,7 @@ export async function searchStaff(
 export async function searchEstimates(
   organizationId: string,
   q: string,
+  vis: Visibility,
 ): Promise<SearchResult[]> {
   const term = q.toLowerCase();
   const rows = await db
@@ -432,7 +449,7 @@ export async function searchEstimates(
       fieldpulseStatusName: estimates.fieldpulseStatusName,
     })
     .from(estimates)
-    .where(withTenant(estimates, organizationId))
+    .where(withTenant(estimates, organizationId, visibleRows(estimates, vis)))
     .orderBy(desc(estimates.createdAt))
     .limit(SCAN_LIMIT_ESTIMATES);
 
@@ -504,6 +521,7 @@ export async function searchPricebook(
 export async function searchAllEntities(
   organizationId: string,
   q: string,
+  vis: Visibility,
 ): Promise<SearchResult[]> {
   const [
     customerResults,
@@ -514,11 +532,11 @@ export async function searchAllEntities(
     pricebookResults,
     staffResults,
   ] = await Promise.all([
-    searchCustomers(organizationId, q),
-    searchInvoices(organizationId, q),
-    searchJobs(organizationId, q),
-    searchConversations(organizationId, q),
-    searchEstimates(organizationId, q),
+    searchCustomers(organizationId, q, vis),
+    searchInvoices(organizationId, q, vis),
+    searchJobs(organizationId, q, vis),
+    searchConversations(organizationId, q, vis),
+    searchEstimates(organizationId, q, vis),
     searchPricebook(organizationId, q),
     searchStaff(organizationId, q),
   ]);

@@ -7,6 +7,13 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 const deleteCustomer = vi.fn();
 vi.mock("@/lib/admin/crm-queries", () => ({

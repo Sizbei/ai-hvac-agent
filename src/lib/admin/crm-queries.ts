@@ -28,6 +28,7 @@ import {
   membershipStatusEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "./visibility";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logAudit } from "@/lib/admin/audit";
 import {
@@ -111,7 +112,7 @@ export function invalidateCustomerSearchCache(organizationId: string): void {
  */
 export async function getCustomers(
   organizationId: string,
-  options?: {
+  options: {
     readonly includeArchived?: boolean;
     readonly page?: number;
     readonly limit?: number;
@@ -121,6 +122,7 @@ export async function getCustomers(
     readonly membershipStatus?: string | null;
     readonly fieldpulseSynced?: boolean;
   },
+  vis: Visibility,
 ): Promise<CustomerListPage> {
   const includeArchived = options?.includeArchived ?? false;
   const page = Math.max(1, options?.page ?? 1);
@@ -155,6 +157,9 @@ export async function getCustomers(
   if (membershipStatus) conditions.push(eq(customers.membershipStatus, membershipStatus));
   if (fieldpulseSynced) conditions.push(isNotNull(customers.fieldpulseCustomerId));
   const whereClause = withTenant(customers, organizationId, ...conditions);
+  // A hidden customer is out of the list, its total and the search scan; a
+  // hidden request is out of the request count and last-service date. Each
+  // read below names its own filter (the coverage test counts one per read).
 
   // Distinct property types for the filter dropdown — cheap; runs in parallel
   // with the page/count so it adds no serial latency.
@@ -162,7 +167,12 @@ export async function getCustomers(
     .selectDistinct({ propertyType: customers.propertyType })
     .from(customers)
     .where(
-      withTenant(customers, organizationId, isNotNull(customers.propertyType)),
+      withTenant(
+        customers,
+        organizationId,
+        isNotNull(customers.propertyType),
+        visibleRows(customers, vis),
+      ),
     )
     .then((rows) =>
       rows
@@ -239,7 +249,7 @@ export async function getCustomers(
     const pageSub = db
       .select(customerCols)
       .from(customers)
-      .where(whereClause)
+      .where(and(whereClause, visibleRows(customers, vis)))
       .orderBy(...listOrder)
       .limit(limit)
       .offset((page - 1) * limit)
@@ -263,7 +273,10 @@ export async function getCustomers(
       })
       .from(pageSub)
       .leftJoin(customerEquipment, eq(customerEquipment.customerId, pageSub.id))
-      .leftJoin(serviceRequests, eq(serviceRequests.customerId, pageSub.id))
+      .leftJoin(
+        serviceRequests,
+        and(eq(serviceRequests.customerId, pageSub.id), visibleRows(serviceRequests, vis)),
+      )
       .groupBy(
         pageSub.id,
         pageSub.nameEncrypted,
@@ -283,7 +296,7 @@ export async function getCustomers(
     const countPromise = db
       .select({ n: count() })
       .from(customers)
-      .where(whereClause);
+      .where(and(whereClause, visibleRows(customers, vis)));
 
     const [rows, countResult, propertyTypes] = await Promise.all([
       pagePromise,
@@ -309,13 +322,14 @@ export async function getCustomers(
     customerType,
     membershipStatus,
     fieldpulseSynced,
+    vis.showHidden,
   );
   const fingerprintPromise = db
     .select({
       fp: sql<string>`md5(coalesce(string_agg(${customers.id}::text || coalesce(${customers.nameEncrypted}, '') || coalesce(${customers.phoneEncrypted}, '') || coalesce(${customers.emailEncrypted}, '') || coalesce(${customers.addressEncrypted}, '') || coalesce(${customers.anonymizedAt}::text, ''), ',' order by ${customers.createdAt} desc, ${customers.id} desc), ''))`,
     })
     .from(customers)
-    .where(whereClause);
+    .where(and(whereClause, visibleRows(customers, vis)));
   const [fingerprintRows, propertyTypes] = await Promise.all([
     fingerprintPromise,
     typesPromise,
@@ -333,7 +347,7 @@ export async function getCustomers(
         addressEncrypted: customers.addressEncrypted,
       })
       .from(customers)
-      .where(whereClause)
+      .where(and(whereClause, visibleRows(customers, vis)))
       .orderBy(...listOrder)
       .limit(SEARCH_SCAN_LIMIT);
     searchScanCache.set(scanKey, fingerprint, scan);
@@ -362,8 +376,13 @@ export async function getCustomers(
     .select({ ...customerCols, ...aggCols })
     .from(customers)
     .leftJoin(customerEquipment, eq(customerEquipment.customerId, customers.id))
-    .leftJoin(serviceRequests, eq(serviceRequests.customerId, customers.id))
-    .where(withTenant(customers, organizationId, inArray(customers.id, pageIds)))
+    .leftJoin(
+      serviceRequests,
+      and(eq(serviceRequests.customerId, customers.id), visibleRows(serviceRequests, vis)),
+    )
+    .where(
+      withTenant(customers, organizationId, inArray(customers.id, pageIds), visibleRows(customers, vis)),
+    )
     .groupBy(customers.id);
   const byId = new Map(pageRows.map((row) => [row.id, row]));
   return {
@@ -379,14 +398,22 @@ export async function getCustomers(
 export async function getCustomerById(
   organizationId: string,
   customerId: string,
+  vis: Visibility,
 ): Promise<CustomerDetail | null> {
   const [row] = await db
     .select()
     .from(customers)
     .where(
-      withTenant(customers, organizationId, eq(customers.id, customerId)),
+      withTenant(
+        customers,
+        organizationId,
+        eq(customers.id, customerId),
+        // A hidden customer is "not found" for an org user (the routes 404).
+        visibleRows(customers, vis),
+      ),
     );
 
+  // Equipment and notes below are children of this row: read only once it passed.
   if (!row) return null;
 
   const [equipmentRows, noteRows, followUpRows, historyRows, requestCountRows, lastServiceRows] =
@@ -461,7 +488,10 @@ export async function getCustomerById(
         .from(serviceHistory)
         .leftJoin(
           serviceRequests,
-          eq(serviceHistory.serviceRequestId, serviceRequests.id),
+          and(
+            eq(serviceHistory.serviceRequestId, serviceRequests.id),
+            visibleRows(serviceRequests, vis),
+          ),
         )
         .where(
           withTenant(
@@ -481,6 +511,7 @@ export async function getCustomerById(
             serviceRequests,
             organizationId,
             eq(serviceRequests.customerId, customerId),
+            visibleRows(serviceRequests, vis),
           ),
         ),
 
@@ -493,6 +524,7 @@ export async function getCustomerById(
             serviceRequests,
             organizationId,
             eq(serviceRequests.customerId, customerId),
+            visibleRows(serviceRequests, vis),
           ),
         ),
     ]);
@@ -1240,6 +1272,7 @@ export async function archiveCustomer(
 export async function findNativeContactClash(
   organizationId: string,
   input: { readonly email: string | null; readonly phone: string | null },
+  vis: Visibility,
 ): Promise<{ readonly id: string; readonly archived: boolean } | null> {
   const { emailHash, phoneHash } = computeContactHashes(input);
   const matchers: SQL[] = [];
@@ -1262,6 +1295,8 @@ export async function findNativeContactClash(
         isNull(customers.fieldpulseCustomerId),
         isNull(customers.anonymizedAt),
         or(...matchers) ?? sql`false`,
+        // An org user's 409 never names or links a hidden customer.
+        visibleRows(customers, vis),
       ),
     )
     .limit(2);

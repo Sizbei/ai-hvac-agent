@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { searchAllEntities } from "@/lib/admin/search-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -9,10 +9,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:search:${session.userId}`,
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
       return successResponse({ results: [] });
     }
 
-    const results = await searchAllEntities(session.organizationId, q.trim());
+    const results = await searchAllEntities(session.organizationId, q.trim(), viewer);
     return successResponse({ results });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to execute admin search");

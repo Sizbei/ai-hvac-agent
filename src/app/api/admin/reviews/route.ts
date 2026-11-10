@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { listReviews, getReviewStats } from "@/lib/reviews/review-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -7,10 +7,11 @@ import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:reviews:${session.userId}`,
@@ -28,8 +29,8 @@ export async function GET(request: NextRequest) {
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 200) : 50;
 
     const [{ reviews, total }, stats] = await Promise.all([
-      listReviews(session.organizationId, { page, limit }),
-      getReviewStats(session.organizationId),
+      listReviews(session.organizationId, { page, limit }, viewer),
+      getReviewStats(session.organizationId, viewer),
     ]);
 
     return successResponse({ reviews, total, stats });

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { isSuperAdmin } from "@/lib/auth/authz";
 import { z } from "zod";
 import {
@@ -20,10 +21,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const { id } = await params;
 
@@ -31,7 +33,7 @@ export async function GET(
       return errorResponse("Invalid conversation ID format", "INVALID_ID", 400);
     }
 
-    const detail = await getConversationById(session.organizationId, id);
+    const detail = await getConversationById(session.organizationId, id, viewer);
     if (!detail) {
       return errorResponse("Conversation not found", "NOT_FOUND", 404);
     }

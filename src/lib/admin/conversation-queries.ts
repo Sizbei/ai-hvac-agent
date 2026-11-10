@@ -25,7 +25,7 @@ import {
   sessionChannelEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { SHOW_ALL, visibleRows, type Visibility } from "./visibility";
+import { visibleRows, visibleRowsSql, type Visibility } from "./visibility";
 import { decrypt } from "@/lib/crypto";
 import { ERASED_PLACEHOLDER } from "./report-format";
 import { notStandInSession } from "./stand-in-session";
@@ -210,6 +210,7 @@ const hasContentSql = sql`(
 export async function getConversations(
   organizationId: string,
   filters: ConversationFilters,
+  vis: Visibility,
 ): Promise<ConversationListResult> {
   const page = Math.max(1, filters.page ?? DEFAULT_PAGE);
   const limit = Math.min(
@@ -258,6 +259,7 @@ export async function getConversations(
           WHERE ${serviceRequests.sessionId} = ${customerSessions.id}
             AND ${serviceRequests.organizationId} = ${customerSessions.organizationId}
             AND ${serviceRequests.referenceNumber} ILIKE ${pattern}
+            AND ${visibleRowsSql("service_requests", vis)}
         )
         OR EXISTS (
           SELECT 1 FROM ${messages}
@@ -277,12 +279,13 @@ export async function getConversations(
   );
 
   // Stage 1: count, page and the org-wide needs-action count run concurrently
-  // in one round trip (neither depends on the other).
+  // in one round trip (neither depends on the other). A hidden session is out
+  // of all three, so the badge and the "Needs action" list agree.
   const [[countResult], sessionRows, [needsActionResult]] = await db.batch([
     db
       .select({ value: count() })
       .from(customerSessions)
-      .where(whereClause),
+      .where(and(whereClause, visibleRows(customerSessions, vis))),
     db
       .select({
         id: customerSessions.id,
@@ -299,13 +302,12 @@ export async function getConversations(
         updatedAt: customerSessions.updatedAt,
       })
       .from(customerSessions)
-      .where(whereClause)
+      .where(and(whereClause, visibleRows(customerSessions, vis)))
       // Inbox order: most recent activity first, not session creation.
       .orderBy(desc(lastActivitySql), desc(customerSessions.id))
       .limit(limit)
       .offset(offset),
-    // TODO(Task 11): pass vis
-    buildNeedsActionCountQuery(organizationId, SHOW_ALL),
+    buildNeedsActionCountQuery(organizationId, vis),
   ]);
 
   const total = countResult?.value ?? 0;
@@ -318,7 +320,9 @@ export async function getConversations(
   const sessionIds = sessionRows.map((row) => row.id);
 
   // Stage 2: aggregate stats, first-message previews, and service-request refs
-  // are all keyed on sessionIds — run them in parallel.
+  // are all keyed on sessionIds — run them in parallel. Messages are children
+  // of the visible sessions above; a hidden request or customer adds no
+  // reference number or name.
   const [aggregateRows, userMessageRows, requestRows] = await Promise.all([
     // Aggregate per-session message stats in a single grouped query.
     db
@@ -365,12 +369,13 @@ export async function getConversations(
         customerNameEncrypted: customers.nameEncrypted,
       })
       .from(serviceRequests)
-      .leftJoin(customers, requestCustomerJoin(organizationId))
+      .leftJoin(customers, and(requestCustomerJoin(organizationId), visibleRows(customers, vis)))
       .where(
         withTenant(
           serviceRequests,
           organizationId,
           inArray(serviceRequests.sessionId, sessionIds),
+          visibleRows(serviceRequests, vis),
         ),
       ),
   ]);
@@ -445,6 +450,7 @@ export async function getConversations(
 export async function getConversationById(
   organizationId: string,
   sessionId: string,
+  vis: Visibility,
 ): Promise<ConversationDetail | null> {
   const [sessionRow] = await db
     .select({
@@ -470,9 +476,12 @@ export async function getConversationById(
         customerSessions,
         organizationId,
         eq(customerSessions.id, sessionId),
+        // A hidden session is "not found" for an org user (the detail GET 404s).
+        visibleRows(customerSessions, vis),
       ),
     );
 
+  // The transcript below is a child of this row: read only once it passed.
   if (!sessionRow) {
     return null;
   }
@@ -510,12 +519,13 @@ export async function getConversationById(
         customerNameEncrypted: customers.nameEncrypted,
       })
       .from(serviceRequests)
-      .leftJoin(customers, requestCustomerJoin(organizationId))
+      .leftJoin(customers, and(requestCustomerJoin(organizationId), visibleRows(customers, vis)))
       .where(
         withTenant(
           serviceRequests,
           organizationId,
           eq(serviceRequests.sessionId, sessionId),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .limit(1),

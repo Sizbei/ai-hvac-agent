@@ -108,6 +108,7 @@ beforeEach(() => {
 });
 
 import { getCustomers } from './crm-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -146,7 +147,7 @@ describe('getCustomers', () => {
 
   it('excludes archived rows by default: an isNull(archivedAt) predicate is applied', async () => {
     queuePage();
-    await getCustomers(ORG);
+    await getCustomers(ORG, {}, VISIBLE_ONLY);
     const all = wheres();
     expect(
       all.some(
@@ -158,7 +159,7 @@ describe('getCustomers', () => {
 
   it('includes archived rows when includeArchived=true: no isNull(archivedAt) predicate', async () => {
     queuePage();
-    await getCustomers(ORG, { includeArchived: true });
+    await getCustomers(ORG, { includeArchived: true }, VISIBLE_ONLY);
     const all = wheres();
     // isNotNull(propertyType) on the distinct query is fine; the archived
     // isNull predicate must be absent.
@@ -168,18 +169,18 @@ describe('getCustomers', () => {
 
   it('paginates: applies a LIMIT on the page query (no-search path)', async () => {
     queuePage();
-    await getCustomers(ORG);
+    await getCustomers(ORG, {}, VISIBLE_ONLY);
     expect(captured.some((c) => c.hasLimit)).toBe(true);
   });
 
   it('hides erased rows by default and shows them with includeArchived', async () => {
     queuePage();
-    await getCustomers(ORG);
+    await getCustomers(ORG, {}, VISIBLE_ONLY);
     expect(wheres().some((w) => w.includes('customers.anonymized'))).toBe(true);
 
     captured.length = 0;
     queuePage();
-    await getCustomers(ORG, { includeArchived: true });
+    await getCustomers(ORG, { includeArchived: true }, VISIBLE_ONLY);
     expect(wheres().some((w) => w.includes('customers.anonymized'))).toBe(false);
   });
 
@@ -204,7 +205,7 @@ describe('getCustomers', () => {
         queueSearch(`fp-${q}`, [scanRow('a', '(423) 555-0187'), scanRow('b', '(423) 555-0144')], [
           makeRow({ id: 'a', phoneEncrypted: 'enc:(423) 555-0187' }),
         ]);
-        const res = await getCustomers(ORG, { search: q });
+        const res = await getCustomers(ORG, { search: q }, VISIBLE_ONLY);
         expect(res.total).toBe(1);
         expect(res.customers.map((c) => c.id)).toEqual(['a']);
       },
@@ -213,14 +214,14 @@ describe('getCustomers', () => {
     it('reuses the cached scan when the fingerprint is unchanged', async () => {
       const opts = { search: '0144', customerType: 'commercial' };
       queueSearch('fp-cache', [scanRow('b', '(423) 555-0144')], [makeRow({ id: 'b' })]);
-      await getCustomers(ORG, opts);
+      await getCustomers(ORG, opts, VISIBLE_ONLY);
       const firstQueries = captured.length;
 
       captured.length = 0;
       selectQueue.push([]); // types
       selectQueue.push([{ fp: 'fp-cache' }]); // same fingerprint → no scan
       selectQueue.push([makeRow({ id: 'b' })]); // page aggregate
-      const res = await getCustomers(ORG, opts);
+      const res = await getCustomers(ORG, opts, VISIBLE_ONLY);
       expect(captured.length).toBe(firstQueries - 1);
       expect(res.customers.map((c) => c.id)).toEqual(['b']);
     });
@@ -229,7 +230,7 @@ describe('getCustomers', () => {
       selectQueue.push([]);
       selectQueue.push([{ fp: 'fp-none' }]);
       selectQueue.push([scanRow('a', '(423) 555-0187')]);
-      const res = await getCustomers(ORG, { search: 'zzzzqqq' });
+      const res = await getCustomers(ORG, { search: 'zzzzqqq' }, VISIBLE_ONLY);
       expect(res).toEqual({ customers: [], total: 0, propertyTypes: [] });
       expect(captured.length).toBe(3);
     });

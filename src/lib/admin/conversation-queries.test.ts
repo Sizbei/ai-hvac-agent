@@ -99,6 +99,7 @@ import {
   getConversationById,
   setConversationHandled,
 } from './conversation-queries';
+import { VISIBLE_ONLY } from './visibility';
 import { auditLog } from '@/lib/db/schema';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
@@ -135,7 +136,7 @@ describe('getConversations', () => {
       { sessionId: 's1', content: 'again', createdAt: new Date(customerWroteAt) },
     ]); // customer messages, ascending
     selectQueue.push([{ sessionId: 's1', referenceNumber: 'HVAC-1', requestNameEncrypted: 'enc:Ada', customerNameEncrypted: null }]);
-    return (await getConversations(ORG, {})).conversations[0];
+    return (await getConversations(ORG, {}, VISIBLE_ONLY)).conversations[0];
   };
 
   it('flags needs action from handledAt and the LAST customer message', async () => {
@@ -172,7 +173,7 @@ describe('getConversationById', () => {
     selectQueue.push([]); // messages
     batchMock.mockResolvedValueOnce([[], []]); // service request + reply audit rows
 
-    const detail = await getConversationById(ORG, 's1');
+    const detail = await getConversationById(ORG, 's1', VISIBLE_ONLY);
     expect(detail).not.toBeNull();
     expect(detail?.channel).toBe('phone');
     expect(detail?.runningSummary).toBe('Caller reported no heat at 5 Oak St.');
@@ -202,7 +203,7 @@ describe('getConversationById', () => {
       [{ createdAt: new Date('2026-06-08T00:04:00Z') }],
     ]);
 
-    const detail = await getConversationById(ORG, 's1');
+    const detail = await getConversationById(ORG, 's1', VISIBLE_ONLY);
     expect(detail?.serviceRequestId).toBe('req-1');
     expect(detail?.referenceNumber).toBe('HVAC-1');
     expect(detail?.needsAction).toBe(true);
@@ -230,7 +231,7 @@ describe('getConversationById', () => {
         [{ id: 'req-1', referenceNumber: 'HVAC-1', requestNameEncrypted, customerNameEncrypted }],
         [],
       ]);
-      return (await getConversationById(ORG, 's1'))?.requestCustomerName;
+      return (await getConversationById(ORG, 's1', VISIBLE_ONLY))?.requestCustomerName;
     };
     expect(await run('enc:Watauga Storage', 'enc:Other')).toBe('Watauga Storage');
     expect(await run(null, 'enc:Watauga Storage')).toBe('Watauga Storage');
@@ -241,7 +242,7 @@ describe('getConversationById', () => {
 
   it('returns null when the session is not in the org', async () => {
     selectQueue.push([]); // session row missing
-    const detail = await getConversationById(ORG, 'nope');
+    const detail = await getConversationById(ORG, 'nope', VISIBLE_ONLY);
     expect(detail).toBeNull();
   });
 });

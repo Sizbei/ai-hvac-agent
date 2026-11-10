@@ -43,6 +43,7 @@ import {
   searchAllEntities,
   type SearchResult,
 } from "./search-queries";
+import { VISIBLE_ONLY } from "./visibility";
 
 // Helper: make a fluent drizzle chain stub that resolves to `rows`
 function makeChain(rows: unknown[]) {
@@ -69,7 +70,7 @@ beforeEach(() => {
 describe("searchCustomers", () => {
   it("returns empty array when no rows match", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    const results = await searchCustomers(ORG, "smith");
+    const results = await searchCustomers(ORG, "smith", VISIBLE_ONLY);
     expect(results).toEqual([]);
   });
 
@@ -85,7 +86,7 @@ describe("searchCustomers", () => {
     ];
     mockSelect.mockReturnValue(makeChain(rows));
     // decrypt returns "dec:SMITH"; "dec:smith" includes "smith"
-    const results = await searchCustomers(ORG, "smith");
+    const results = await searchCustomers(ORG, "smith", VISIBLE_ONLY);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe("customer");
     expect(results[0].id).toBe("c1");
@@ -104,7 +105,7 @@ describe("searchCustomers", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchCustomers(ORG, "5559999");
+    const results = await searchCustomers(ORG, "5559999", VISIBLE_ONLY);
     expect(results).toHaveLength(1);
     expect(results[0].subtitle).toBe("dec:5559999");
   });
@@ -120,7 +121,7 @@ describe("searchCustomers", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchCustomers(ORG, "example");
+    const results = await searchCustomers(ORG, "example", VISIBLE_ONLY);
     expect(results).toHaveLength(1);
     expect(results[0].subtitle).toBe("dec:doe@example.com");
   });
@@ -136,7 +137,7 @@ describe("searchCustomers", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchCustomers(ORG, "smith");
+    const results = await searchCustomers(ORG, "smith", VISIBLE_ONLY);
     expect(results).toHaveLength(0);
   });
 
@@ -151,13 +152,13 @@ describe("searchCustomers", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchCustomers(ORG, "smith");
+    const results = await searchCustomers(ORG, "smith", VISIBLE_ONLY);
     expect(results[0].syncedSource).toBe("fieldpulse");
   });
 
   it("uses the organizationId in the where clause (org-scoping)", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    await searchCustomers(ORG, "test");
+    await searchCustomers(ORG, "test", VISIBLE_ONLY);
     // The chain.where is called — we verify select was called (org scoping
     // is tested via withTenant mock which captures orgId)
     expect(mockSelect).toHaveBeenCalledOnce();
@@ -172,7 +173,7 @@ describe("searchCustomers", () => {
       fieldpulseCustomerId: null,
     }));
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchCustomers(ORG, "smith");
+    const results = await searchCustomers(ORG, "smith", VISIBLE_ONLY);
     expect(results.length).toBeLessThanOrEqual(8);
   });
 });
@@ -182,7 +183,7 @@ describe("searchCustomers", () => {
 describe("searchInvoices", () => {
   it("returns empty array when no rows match", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    const results = await searchInvoices(ORG, "zzz");
+    const results = await searchInvoices(ORG, "zzz", VISIBLE_ONLY);
     expect(results).toEqual([]);
   });
 
@@ -199,7 +200,7 @@ describe("searchInvoices", () => {
     ];
     mockSelect.mockReturnValue(makeChain(rows));
     // invoiceRef mock: #ABCDEF12 — query "abcdef" should match
-    const results = await searchInvoices(ORG, "abcdef");
+    const results = await searchInvoices(ORG, "abcdef", VISIBLE_ONLY);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe("invoice");
     expect(results[0].title).toBe("#ABCDEF12");
@@ -217,7 +218,7 @@ describe("searchInvoices", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchInvoices(ORG, "aabbccdd");
+    const results = await searchInvoices(ORG, "aabbccdd", VISIBLE_ONLY);
     expect(results[0].subtitle).toBe("Draft · $0.00");
   });
 
@@ -233,7 +234,7 @@ describe("searchInvoices", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchInvoices(ORG, "11223344");
+    const results = await searchInvoices(ORG, "11223344", VISIBLE_ONLY);
     expect(results[0].syncedSource).toBe("fieldpulse");
   });
 
@@ -249,7 +250,7 @@ describe("searchInvoices", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchInvoices(ORG, "55667788");
+    const results = await searchInvoices(ORG, "55667788", VISIBLE_ONLY);
     expect(results[0].syncedSource).toBe("hcp");
   });
 
@@ -263,7 +264,7 @@ describe("searchInvoices", () => {
     }));
     mockSelect.mockReturnValue(makeChain(rows));
     // all ids start with "aabb"
-    const results = await searchInvoices(ORG, "aabb");
+    const results = await searchInvoices(ORG, "aabb", VISIBLE_ONLY);
     expect(results.length).toBeLessThanOrEqual(8);
   });
 });
@@ -273,7 +274,7 @@ describe("searchInvoices", () => {
 describe("searchJobs", () => {
   it("returns empty array when no rows", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    const results = await searchJobs(ORG, "ac");
+    const results = await searchJobs(ORG, "ac", VISIBLE_ONLY);
     expect(results).toEqual([]);
   });
 
@@ -287,7 +288,7 @@ describe("searchJobs", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchJobs(ORG, "ac");
+    const results = await searchJobs(ORG, "ac", VISIBLE_ONLY);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe("job");
     expect(results[0].title).toBe("SR-001");
@@ -306,7 +307,7 @@ describe("searchJobs", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchJobs(ORG, "heat");
+    const results = await searchJobs(ORG, "heat", VISIBLE_ONLY);
     expect(results[0].title).toBe("Request ABCD1234");
   });
 
@@ -318,7 +319,7 @@ describe("searchJobs", () => {
         { id: "r3", referenceNumber: "HVAC-3", issueType: "no_heat", requestNameEncrypted: null, customerNameEncrypted: null },
       ]),
     );
-    const results = await searchJobs(ORG, "hvac");
+    const results = await searchJobs(ORG, "hvac", VISIBLE_ONLY);
     expect(results.map((r) => r.title)).toEqual(["dec:Ada", "dec:Watauga", "HVAC-3"]);
     expect(results[0].subtitle).toBe("HVAC-1 · No heat");
     expect(results[2].subtitle).toBe("No heat");
@@ -342,7 +343,7 @@ describe("searchConversations", () => {
     );
     mockSelect.mockReturnValueOnce(makeChain([])); // customer messages
     mockSelect.mockReturnValueOnce(makeChain([])); // linked requests
-    const results = await searchConversations(ORG, "rob");
+    const results = await searchConversations(ORG, "rob", VISIBLE_ONLY);
     expect(results[0]).toMatchObject({
       type: "conversation",
       title: "Robert Alvarez",
@@ -373,14 +374,14 @@ describe("searchConversations", () => {
       ]),
     );
     mockSelect.mockReturnValueOnce(makeChain([]));
-    const [result] = await searchConversations(ORG, "7d111fea");
+    const [result] = await searchConversations(ORG, "7d111fea", VISIBLE_ONLY);
     expect(result.title).toBe("Web chat · \u201cI smell gas in the\u2026\u201d");
     expect(result.subtitle).toBe("Needs action · 7d111fea");
   });
 
   it("returns [] without a second query when nothing matches", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    expect(await searchConversations(ORG, "zz")).toEqual([]);
+    expect(await searchConversations(ORG, "zz", VISIBLE_ONLY)).toEqual([]);
     expect(mockSelect).toHaveBeenCalledTimes(1);
   });
 });
@@ -408,7 +409,7 @@ describe("searchStaff", () => {
 describe("searchEstimates", () => {
   it("returns empty array when no rows match", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    const results = await searchEstimates(ORG, "zzz");
+    const results = await searchEstimates(ORG, "zzz", VISIBLE_ONLY);
     expect(results).toEqual([]);
   });
 
@@ -423,7 +424,7 @@ describe("searchEstimates", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchEstimates(ORG, "deadbeef");
+    const results = await searchEstimates(ORG, "deadbeef", VISIBLE_ONLY);
     expect(results).toHaveLength(1);
     expect(results[0].type).toBe("estimate");
     expect(results[0].title).toBe("EST-DEADBEEF");
@@ -440,7 +441,7 @@ describe("searchEstimates", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchEstimates(ORG, "cafebabe");
+    const results = await searchEstimates(ORG, "cafebabe", VISIBLE_ONLY);
     expect(results[0].subtitle).toBe("Approved");
     expect(results[0].syncedSource).toBe("fieldpulse");
   });
@@ -456,7 +457,7 @@ describe("searchEstimates", () => {
       },
     ];
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchEstimates(ORG, "00112233");
+    const results = await searchEstimates(ORG, "00112233", VISIBLE_ONLY);
     expect(results[0].subtitle).toBe("sent");
     expect(results[0].syncedSource).toBeNull();
   });
@@ -470,7 +471,7 @@ describe("searchEstimates", () => {
       fieldpulseStatusName: null,
     }));
     mockSelect.mockReturnValue(makeChain(rows));
-    const results = await searchEstimates(ORG, "test");
+    const results = await searchEstimates(ORG, "test", VISIBLE_ONLY);
     expect(results.length).toBeLessThanOrEqual(8);
   });
 });
@@ -511,7 +512,7 @@ describe("searchAllEntities", () => {
               [];
       return makeChain(rows);
     });
-    const results = await searchAllEntities(ORG, "foo");
+    const results = await searchAllEntities(ORG, "foo", VISIBLE_ONLY);
     // We expect customer result (name matches "foo") + invoice result (id starts with "id-")
     // exact count depends on matching; just verify it's an array
     expect(Array.isArray(results)).toBe(true);
@@ -519,7 +520,7 @@ describe("searchAllEntities", () => {
 
   it("returns a SearchResult array (type assertion via TS types)", async () => {
     mockSelect.mockReturnValue(makeChain([]));
-    const results: SearchResult[] = await searchAllEntities(ORG, "test");
+    const results: SearchResult[] = await searchAllEntities(ORG, "test", VISIBLE_ONLY);
     expect(results).toEqual([]);
   });
 });

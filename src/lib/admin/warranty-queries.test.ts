@@ -10,6 +10,7 @@ import {
   listExpiringWarranties,
   enqueueWarrantyReminders,
 } from "./warranty-queries";
+import { VISIBLE_ONLY } from "./visibility";
 import { queueCommunicationJob } from "@/lib/communication/job-queue";
 import { claimOutboundOnce } from "@/lib/communication/outbound-ledger";
 import { db } from "@/lib/db";
@@ -58,20 +59,20 @@ function mockSelectSequence(
   results: Array<{ kind: "single" | "list"; rows: Record<string, unknown>[] }>,
 ) {
   let i = 0;
-  vi.mocked(db.select).mockImplementation(
-    () =>
-      ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            const r = results[i++] ?? { kind: "single", rows: [] };
-            if (r.kind === "single") {
-              return { limit: vi.fn().mockResolvedValue(r.rows) };
-            }
-            return Promise.resolve(r.rows);
-          }),
-        }),
-      }) as never,
-  );
+  vi.mocked(db.select).mockImplementation(() => {
+    const chain = {
+      // The equipment list joins its customer (visibility) before .where().
+      innerJoin: vi.fn(() => chain),
+      where: vi.fn().mockImplementation(() => {
+        const r = results[i++] ?? { kind: "single", rows: [] };
+        if (r.kind === "single") {
+          return { limit: vi.fn().mockResolvedValue(r.rows) };
+        }
+        return Promise.resolve(r.rows);
+      }),
+    };
+    return { from: vi.fn().mockReturnValue(chain) } as never;
+  });
 }
 
 const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // 10 days out
@@ -84,7 +85,7 @@ beforeEach(() => {
 describe("listExpiringWarranties", () => {
   it("is tenant-scoped (org id passed to withTenant)", async () => {
     mockSelectSequence([{ kind: "list", rows: [] }]);
-    await listExpiringWarranties(ORG, 30);
+    await listExpiringWarranties(ORG, VISIBLE_ONLY, 30);
     expect(withTenantSpy).toHaveBeenCalledTimes(1);
     // First arg is the table, second is the org id.
     expect(withTenantSpy.mock.calls[0][1]).toBe(ORG);
@@ -111,7 +112,7 @@ describe("listExpiringWarranties", () => {
         ],
       },
     ]);
-    const out = await listExpiringWarranties(ORG, 30);
+    const out = await listExpiringWarranties(ORG, VISIBLE_ONLY, 30);
     expect(out).toHaveLength(1);
     expect(out[0].equipmentId).toBe("eq-1");
   });

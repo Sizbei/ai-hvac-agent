@@ -7,6 +7,13 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 const getConversationById = vi.fn();
 const deleteConversation = vi.fn();
@@ -77,6 +84,18 @@ describe("GET /api/admin/conversations/[id]", () => {
     getConversationById.mockResolvedValue({ id: SESSION_ID });
     const res = await GET(getReq(), ctx());
     expect(res.status).toBe(200);
+    expect(getConversationById).toHaveBeenCalledWith(
+      ADMIN_SESSION.organizationId,
+      SESSION_ID,
+      expect.objectContaining({ showHidden: false }),
+    );
+  });
+
+  it("404 when the conversation is hidden from the viewer (the lookup returns null)", async () => {
+    getAdminSession.mockResolvedValue(ADMIN_SESSION);
+    getConversationById.mockResolvedValue(null);
+    const res = await GET(getReq(), ctx());
+    expect(res.status).toBe(404);
   });
 });
 

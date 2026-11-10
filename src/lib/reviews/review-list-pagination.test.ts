@@ -106,6 +106,7 @@ beforeEach(() => {
 });
 
 import { listReviews } from './review-queries';
+import { VISIBLE_ONLY } from '@/lib/admin/visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -118,13 +119,13 @@ const queuePage = (rows: unknown[] = []) => {
 describe('listReviews', () => {
   it('paginates: page query carries a LIMIT', async () => {
     queuePage();
-    await listReviews(ORG);
+    await listReviews(ORG, {}, VISIBLE_ONLY);
     expect(captured.some((c) => c.hasLimit)).toBe(true);
   });
 
   it('is tenant-scoped: every WHERE includes the org id', async () => {
     queuePage();
-    await listReviews(ORG);
+    await listReviews(ORG, {}, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(wheres.every((w) => w.includes(ORG))).toBe(true);
   });
@@ -140,7 +141,7 @@ describe('listReviews', () => {
       respondedAt: null,
       createdAt: { toISOString: () => '2024-01-01T00:00:00.000Z' },
     }]);
-    const result = await listReviews(ORG);
+    const result = await listReviews(ORG, {}, VISIBLE_ONLY);
     expect(result).toHaveProperty('reviews');
     expect(result).toHaveProperty('total', 10);
     expect(Array.isArray(result.reviews)).toBe(true);
@@ -148,7 +149,7 @@ describe('listReviews', () => {
 
   it('count and rows queries share the same WHERE', async () => {
     queuePage();
-    await listReviews(ORG);
+    await listReviews(ORG, {}, VISIBLE_ONLY);
     // captured[0] = count query, captured[1] = rows query
     const countWhere = JSON.stringify(captured[0]?.where ?? '');
     const rowsWhere = JSON.stringify(captured[1]?.where ?? '');
@@ -169,7 +170,7 @@ describe('listReviews', () => {
       respondedAt: null,
       createdAt: { toISOString: () => '2024-01-01T00:00:00.000Z' },
     }]);
-    const { reviews } = await listReviews(ORG);
+    const { reviews } = await listReviews(ORG, {}, VISIBLE_ONLY);
     expect(reviews[0]).toMatchObject({
       referenceNumber: 'HVAC-1',
       customerId: 'c-1',

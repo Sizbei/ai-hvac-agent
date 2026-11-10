@@ -11,6 +11,13 @@ const { mockGetAdminSession, mockGetCustomerById, mockEnrollCustomer, mockCardPa
 }));
 
 vi.mock("@/lib/auth/session", () => ({ getAdminSession: () => mockGetAdminSession() }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 vi.mock("@/lib/admin/crm-queries", () => ({ getCustomerById: (...a: unknown[]) => mockGetCustomerById(...a) }));
 vi.mock("@/lib/admin/membership-queries", () => ({
   enrollCustomer: (...a: unknown[]) => mockEnrollCustomer(...a),

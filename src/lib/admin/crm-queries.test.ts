@@ -200,6 +200,7 @@ import {
   updateCustomerContact,
   completeFollowUp,
 } from './crm-queries';
+import { VISIBLE_ONLY } from './visibility';
 import { updateEquipment, deleteEquipment } from './crm-equipment-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
@@ -500,12 +501,12 @@ describe('deleteCustomer — search cache', () => {
 
   it("drops the org's cached scan, so the next search re-reads it", async () => {
     selectQueue.push([], [{ fp: 'F' }], [scanRow]);
-    await getCustomers(SEARCH_ORG, { search: 'nomatch' });
+    await getCustomers(SEARCH_ORG, { search: 'nomatch' }, VISIBLE_ONLY);
     expect(selectQueue).toHaveLength(0);
 
     // Same fingerprint: served from the cache, the scan slot is left unread.
     selectQueue.push([], [{ fp: 'F' }], SENTINEL);
-    await getCustomers(SEARCH_ORG, { search: 'nomatch' });
+    await getCustomers(SEARCH_ORG, { search: 'nomatch' }, VISIBLE_ONLY);
     expect(selectQueue).toEqual([SENTINEL]);
     selectQueue.length = 0;
 
@@ -514,7 +515,7 @@ describe('deleteCustomer — search cache', () => {
 
     // Same fingerprint again, but the cache was cleared: the scan is read.
     selectQueue.push([], [{ fp: 'F' }], SENTINEL);
-    await getCustomers(SEARCH_ORG, { search: 'nomatch' });
+    await getCustomers(SEARCH_ORG, { search: 'nomatch' }, VISIBLE_ONLY);
     expect(selectQueue).toHaveLength(0);
   });
 });
@@ -768,7 +769,7 @@ describe('getCustomers — customerType filter', () => {
       lastServiceDate: null,
     };
     pushFastPathQueue([fakeRow], 1);
-    const result = await getCustomers(ORG, { customerType: 'residential' });
+    const result = await getCustomers(ORG, { customerType: 'residential' }, VISIBLE_ONLY);
     expect(result.total).toBe(1);
     expect(result.customers[0].customerType).toBe('residential');
   });
@@ -776,7 +777,7 @@ describe('getCustomers — customerType filter', () => {
   it('ignores an invalid customerType (no crash, guard skips the condition)', async () => {
     pushFastPathQueue([], 0);
     // 'enterprise' is not in customerTypeEnum.enumValues — guard skips the condition
-    const result = await getCustomers(ORG, { customerType: 'enterprise' });
+    const result = await getCustomers(ORG, { customerType: 'enterprise' }, VISIBLE_ONLY);
     expect(result.customers).toHaveLength(0);
   });
 });
@@ -800,7 +801,7 @@ describe('getCustomers — membershipStatus filter', () => {
       lastServiceDate: null,
     };
     pushFastPathQueue([fakeRow], 1);
-    const result = await getCustomers(ORG, { membershipStatus: 'active' });
+    const result = await getCustomers(ORG, { membershipStatus: 'active' }, VISIBLE_ONLY);
     expect(result.total).toBe(1);
     expect(result.customers[0].membershipStatus).toBe('active');
   });
@@ -808,7 +809,7 @@ describe('getCustomers — membershipStatus filter', () => {
   it('ignores an invalid membershipStatus (no crash, guard skips the condition)', async () => {
     pushFastPathQueue([], 0);
     // 'pending' is NOT in membershipStatusEnum.enumValues — guard skips the condition
-    const result = await getCustomers(ORG, { membershipStatus: 'pending' });
+    const result = await getCustomers(ORG, { membershipStatus: 'pending' }, VISIBLE_ONLY);
     expect(result.customers).toHaveLength(0);
   });
 });
@@ -832,7 +833,7 @@ describe('getCustomers — fieldpulseSynced filter', () => {
       lastServiceDate: null,
     };
     pushFastPathQueue([fakeRow], 1);
-    const result = await getCustomers(ORG, { fieldpulseSynced: true });
+    const result = await getCustomers(ORG, { fieldpulseSynced: true }, VISIBLE_ONLY);
     expect(result.total).toBe(1);
     expect(result.customers[0].fieldpulseCustomerId).toBe('fp-abc');
   });
@@ -840,7 +841,7 @@ describe('getCustomers — fieldpulseSynced filter', () => {
   it('applies no isNotNull condition when fieldpulseSynced is false (default)', async () => {
     pushFastPathQueue([], 0);
     // No crash; guard skips the isNotNull condition
-    const result = await getCustomers(ORG, { fieldpulseSynced: false });
+    const result = await getCustomers(ORG, { fieldpulseSynced: false }, VISIBLE_ONLY);
     expect(result.customers).toHaveLength(0);
   });
 });

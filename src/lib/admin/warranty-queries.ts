@@ -23,6 +23,7 @@ import { and, eq, isNull, gte, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerEquipment, customers, communicationTemplates } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { SHOW_ALL, visibleRows, type Visibility } from "./visibility";
 import { decrypt } from "@/lib/crypto";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
 import { claimOutboundOnce } from "@/lib/communication/outbound-ledger";
@@ -58,6 +59,7 @@ export interface ExpiringWarranty {
  */
 export async function listExpiringWarranties(
   organizationId: string,
+  vis: Visibility,
   withinDays: number = DEFAULT_WARRANTY_WINDOW_DAYS,
   now: Date = new Date(),
 ): Promise<readonly ExpiringWarranty[]> {
@@ -71,6 +73,15 @@ export async function listExpiringWarranties(
       warrantyExpiration: customerEquipment.warrantyExpiration,
     })
     .from(customerEquipment)
+    // Equipment is a child of its customer: a hidden customer's units are out.
+    .innerJoin(
+      customers,
+      and(
+        eq(customers.id, customerEquipment.customerId),
+        eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
+      ),
+    )
     .where(
       withTenant(
         customerEquipment,
@@ -190,7 +201,8 @@ export async function enqueueWarrantyReminders(
   now: Date = new Date(),
   withinDays: number = DEFAULT_WARRANTY_WINDOW_DAYS,
 ): Promise<WarrantyReminderResult> {
-  const expiring = await listExpiringWarranties(organizationId, withinDays, now);
+  // A cron: it reminds every customer, hidden or not (spec P6 leaves crons unfiltered).
+  const expiring = await listExpiringWarranties(organizationId, SHOW_ALL, withinDays, now);
 
   let enqueued = 0;
   let skipped = 0;

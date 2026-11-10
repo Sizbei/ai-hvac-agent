@@ -16,6 +16,7 @@ import {
   recordReviewResponse,
   getReviewStats,
 } from "./review-queries";
+import { VISIBLE_ONLY } from "@/lib/admin/visibility";
 import { db } from "@/lib/db";
 import { claimOutboundOnce } from "@/lib/communication/outbound-ledger";
 import { queueCommunicationJob } from "@/lib/communication/job-queue";
@@ -60,11 +61,13 @@ function mockSelectLimit(rows: Record<string, unknown>[]) {
   } as never);
 }
 
-/** db.select(...).from(...).where() resolves `rows` (no .limit — aggregate). */
+/** db.select(...).from(...).innerJoin(...).where() resolves `rows` (no .limit — aggregate). */
 function mockSelectWhere(rows: Record<string, unknown>[]) {
+  const where = { where: vi.fn().mockResolvedValue(rows) };
   vi.mocked(db.select).mockReturnValue({
     from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue(rows),
+      ...where,
+      innerJoin: vi.fn().mockReturnValue(where),
     }),
   } as never);
 }
@@ -184,7 +187,7 @@ describe("recordReviewResponse", () => {
 describe("getReviewStats", () => {
   it("computes count, responded, and average rating", async () => {
     mockSelectWhere([{ count: 4, responded: 3, avgRating: "3.6667" }]);
-    const stats = await getReviewStats(ORG);
+    const stats = await getReviewStats(ORG, VISIBLE_ONLY);
     expect(stats.count).toBe(4);
     expect(stats.responded).toBe(3);
     expect(stats.avgRating).toBeCloseTo(3.6667, 3);
@@ -192,7 +195,7 @@ describe("getReviewStats", () => {
 
   it("returns null avg when nobody has responded", async () => {
     mockSelectWhere([{ count: 2, responded: 0, avgRating: null }]);
-    const stats = await getReviewStats(ORG);
+    const stats = await getReviewStats(ORG, VISIBLE_ONLY);
     expect(stats.avgRating).toBeNull();
     expect(stats.count).toBe(2);
   });

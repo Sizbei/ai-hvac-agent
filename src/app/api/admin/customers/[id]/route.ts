@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { isSuperAdmin } from "@/lib/auth/authz";
 import {
   getCustomerById,
@@ -34,16 +35,17 @@ const UUID_REGEX =
 
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const { id } = await params;
     if (!isUuid(id)) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
-    const customer = await getCustomerById(session.organizationId, id);
+    const customer = await getCustomerById(session.organizationId, id, viewer);
 
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
@@ -58,10 +60,11 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const { id } = await params;
     if (!UUID_REGEX.test(id)) {
@@ -86,7 +89,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // admin could POST to another tenant's customer id and create org-attributed
     // child rows (equipment/notes/follow-ups) referencing a customer they don't
     // own. GET already gates this way; make POST consistent.
-    const owned = await getCustomerById(session.organizationId, id);
+    const owned = await getCustomerById(session.organizationId, id, viewer);
     if (!owned) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }

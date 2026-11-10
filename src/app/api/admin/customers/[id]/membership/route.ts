@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getCustomerById } from "@/lib/admin/crm-queries";
 import { isUuid } from "@/lib/validation/uuid";
 import {
@@ -25,10 +25,11 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:membership-get:${session.userId}`,
@@ -43,7 +44,7 @@ export async function GET(
     if (!isUuid(id)) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
-    const customer = await getCustomerById(session.organizationId, id);
+    const customer = await getCustomerById(session.organizationId, id, viewer);
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }
@@ -66,10 +67,11 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:membership-enroll:${session.userId}`,
@@ -84,7 +86,7 @@ export async function POST(
     if (!isUuid(id)) {
       return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
     }
-    const customer = await getCustomerById(session.organizationId, id);
+    const customer = await getCustomerById(session.organizationId, id, viewer);
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }
@@ -145,10 +147,11 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:membership-cancel:${session.userId}`,
@@ -163,7 +166,7 @@ export async function DELETE(
     if (!isUuid(id)) {
       return errorResponse("Invalid ID", "VALIDATION_ERROR", 400);
     }
-    const customer = await getCustomerById(session.organizationId, id);
+    const customer = await getCustomerById(session.organizationId, id, viewer);
     if (!customer) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }

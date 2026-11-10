@@ -280,10 +280,6 @@
     "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
   },
   {
-    "id": "src/lib/admin/crm-queries.ts#findNativeContactClash",
-    "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
-  },
-  {
     "id": "src/lib/admin/crm-queries.ts#unarchiveCustomer",
     "reason": "Dedupe/match and customer writers must see hidden rows (a hidden duplicate is still a duplicate)."
   },

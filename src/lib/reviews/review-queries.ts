@@ -17,6 +17,7 @@ import { and, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customers, reviewRequests, serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "@/lib/admin/visibility";
 import { decrypt } from "@/lib/crypto";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
 import { claimOutboundOnce } from "@/lib/communication/outbound-ledger";
@@ -273,16 +274,28 @@ function safeName(ciphertext: string | null | undefined): string | null {
  */
 export async function listReviews(
   organizationId: string,
-  opts: { readonly page?: number; readonly limit?: number } = {},
+  opts: { readonly page?: number; readonly limit?: number },
+  vis: Visibility,
 ): Promise<{ reviews: ReviewRow[]; total: number }> {
   const page = Math.max(1, opts.page ?? 1);
   const limit = Math.max(1, opts.limit ?? REVIEW_PAGE_SIZE);
   const offset = (page - 1) * limit;
 
   const whereClause = withTenant(reviewRequests, organizationId);
+  // A review is a child of its request: a hidden request takes its review out
+  // of the list and the total (inner join; service_request_id is NOT NULL). A
+  // hidden customer only drops the name (left join ON).
+  const requestJoin = and(
+    eq(serviceRequests.id, reviewRequests.serviceRequestId),
+    eq(serviceRequests.organizationId, organizationId),
+  );
 
   const [countResult, rows] = await Promise.all([
-    db.select({ n: count() }).from(reviewRequests).where(whereClause),
+    db
+      .select({ n: count() })
+      .from(reviewRequests)
+      .innerJoin(serviceRequests, and(requestJoin, visibleRows(serviceRequests, vis)))
+      .where(whereClause),
     db
       .select({
         id: reviewRequests.id,
@@ -298,18 +311,13 @@ export async function listReviews(
         createdAt: reviewRequests.createdAt,
       })
       .from(reviewRequests)
-      .leftJoin(
-        serviceRequests,
-        and(
-          eq(serviceRequests.id, reviewRequests.serviceRequestId),
-          eq(serviceRequests.organizationId, organizationId),
-        ),
-      )
+      .innerJoin(serviceRequests, and(requestJoin, visibleRows(serviceRequests, vis)))
       .leftJoin(
         customers,
         and(
           eq(customers.id, reviewRequests.customerId),
           eq(customers.organizationId, organizationId),
+          visibleRows(customers, vis),
         ),
       )
       .where(whereClause)
@@ -348,6 +356,7 @@ export interface ReviewStats {
 /** Aggregate review KPIs for an org: total asks, responded count, avg rating. */
 export async function getReviewStats(
   organizationId: string,
+  vis: Visibility,
 ): Promise<ReviewStats> {
   const [row] = await db
     .select({
@@ -357,6 +366,15 @@ export async function getReviewStats(
       avgRating: sql<number | null>`avg(${reviewRequests.rating})`,
     })
     .from(reviewRequests)
+    // Same rule as listReviews: reviews of hidden requests don't count.
+    .innerJoin(
+      serviceRequests,
+      and(
+        eq(serviceRequests.id, reviewRequests.serviceRequestId),
+        eq(serviceRequests.organizationId, organizationId),
+        visibleRows(serviceRequests, vis),
+      ),
+    )
     .where(withTenant(reviewRequests, organizationId));
 
   const count = Number(row?.count ?? 0);
