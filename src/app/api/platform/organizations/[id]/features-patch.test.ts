@@ -80,6 +80,13 @@ describe("PATCH /api/platform/organizations/[id] (features)", () => {
     expect(updateOrgFeatures).not.toHaveBeenCalled();
   });
 
+  it("checks platform authority before origin and rate limit", async () => {
+    isPlatformAdmin.mockReturnValue(false);
+    await PATCH(req({ features: { map: true } }), ctx());
+    expect(isSameOriginRequest).not.toHaveBeenCalled();
+    expect(slidingWindow).not.toHaveBeenCalled();
+  });
+
   it("429 after the mutation rate limit, keyed per platform user", async () => {
     slidingWindow.mockReturnValue({ allowed: false });
     const res = await PATCH(req({ features: { map: true } }), ctx());
@@ -108,6 +115,7 @@ describe("PATCH /api/platform/organizations/[id] (features)", () => {
   it("400 VALIDATION_ERROR for a malformed JSON body", async () => {
     const res = await PATCH(req("{not json"), ctx());
     expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
   });
 
   it("404 when the org does not exist", async () => {

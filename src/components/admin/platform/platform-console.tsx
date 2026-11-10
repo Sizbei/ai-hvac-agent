@@ -31,7 +31,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { DEFAULT_FEATURES, type FeatureKey, type Features } from '@/lib/tenancy/feature-flags';
+import type { FeatureKey, Features } from '@/lib/tenancy/feature-flags';
+import {
+  initialSwitchRow,
+  saveFailed,
+  saveSucceeded,
+  startSave,
+  type SwitchRowState,
+} from '@/lib/admin/platform-switch-state';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 
 interface OrgRow {
@@ -78,14 +85,13 @@ const SWITCHES: readonly { readonly key: FeatureKey; readonly label: string }[] 
 
 /** One org's feature switches. Optimistic: a failed save reverts the switch. */
 function OrgSwitches({ org }: { readonly org: OrgRow }) {
-  const [features, setFeatures] = useState<Features>(org.features ?? DEFAULT_FEATURES);
-  const [saving, setSaving] = useState<FeatureKey | null>(null);
+  const [row, setRow] = useState<SwitchRowState>(() => initialSwitchRow(org.features));
   const [error, setError] = useState<string | null>(null);
 
   async function toggle(key: FeatureKey, next: boolean) {
-    const previous = features;
-    setFeatures({ ...features, [key]: next });
-    setSaving(key);
+    if (row.pending) return;
+    const previous = row.features[key];
+    setRow(startSave(row, key, next));
     setError(null);
     try {
       const res = await fetch(`/api/platform/organizations/${org.id}`, {
@@ -95,17 +101,14 @@ function OrgSwitches({ org }: { readonly org: OrgRow }) {
       });
       const json = await res.json().catch(() => ({ success: false }));
       if (res.ok && json.success) {
-        setFeatures(json.data.features as Features);
-      } else {
-        setFeatures(previous);
-        setError('Couldn’t save the switch. Please try again.');
+        setRow(saveSucceeded(json.data.features as Features));
+        return;
       }
     } catch {
-      setFeatures(previous);
-      setError('Couldn’t save the switch. Please try again.');
-    } finally {
-      setSaving(null);
+      // fall through to the revert below
     }
+    setRow((current) => saveFailed(current, key, previous));
+    setError('Couldn’t save the switch. Please try again.');
   }
 
   return (
@@ -119,8 +122,8 @@ function OrgSwitches({ org }: { readonly org: OrgRow }) {
               <Switch
                 id={id}
                 size="sm"
-                checked={features[key]}
-                disabled={saving === key}
+                checked={row.features[key]}
+                disabled={row.pending}
                 onCheckedChange={(next) => void toggle(key, next)}
               />
               <Label htmlFor={id} className="text-sm font-normal">
