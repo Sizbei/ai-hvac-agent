@@ -1,3 +1,4 @@
+import type { Features } from "@/lib/tenancy/feature-flags";
 import type { GuideState, StepId } from "./guide-state";
 
 /** Step table + pure derivation (spec §3/§4). Imports only types: safe for client code. */
@@ -73,18 +74,28 @@ const SIGNAL_KEY: Record<StepId, keyof Omit<Signals, "hasOpenJob" | "state">> = 
   build_invoice: "buildInvoice", collect_payment: "collectPayment",
 };
 
+const PAY_LINK_WHY = " A pay link lets the customer pay by phone.";
+const PAY_LINK_HOW = ", or tap Send pay link.";
+
+/** Drops the pay-link clauses from collect_payment when the org has pay links off. */
+function withFeatures(def: StepDef, features: Pick<Features, "payLinks">): StepDef {
+  if (def.id !== "collect_payment" || features.payLinks) return def;
+  return { ...def, why: def.why.replace(PAY_LINK_WHY, ""), how: def.how.replace(PAY_LINK_HOW, ".") };
+}
+
 /** First not-done required step, else first not-done optional step. */
 export function upNext(steps: readonly DerivedStep[]): StepId | null {
   return (steps.find((s) => s.required && !s.done) ?? steps.find((s) => !s.required && !s.done))?.id ?? null;
 }
 
-export function deriveGuide(s: Signals, now: Date): {
+export function deriveGuide(s: Signals, now: Date, features: Pick<Features, "payLinks">): {
   steps: DerivedStep[]; progress: GuideProgress; upNext: StepId | null; finished: boolean;
   newStamps: Partial<Record<StepId, string>>;
 } {
   const nowIso = now.toISOString();
   const newStamps: Partial<Record<StepId, string>> = {};
-  const steps = STEP_DEFS.map((def) => {
+  const steps = STEP_DEFS.map((rawDef) => {
+    const def = withFeatures(rawDef, features);
     const stamped = Boolean(s.state.firstCompleted[def.id]);
     const live = s[SIGNAL_KEY[def.id]];
     const done = stamped || live;

@@ -11,6 +11,7 @@ import { isSameOriginRequest } from "@/lib/session-csrf";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { logger, errorCode } from "@/lib/logger";
+import { getFeatures } from "@/lib/tenancy/features";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,12 @@ export async function GET() {
     if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     const rate = slidingWindow(`tech:guide-get:${session.userId}`, RATE_LIMITS.adminRead.maxRequests, RATE_LIMITS.adminRead.windowMs);
     if (!rate.allowed) return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
-    return successResponse(await getGuide(session.organizationId, session.userId));
+    // Copy only: a failed flag read must not break the guide, and "off" is the safe wording.
+    const features = await getFeatures(session.organizationId).catch((error) => {
+      logger.warn({ code: errorCode(error) }, "Feature read failed for the technician guide; using pay links off");
+      return { payLinks: false };
+    });
+    return successResponse(await getGuide(session.organizationId, session.userId, { features }));
   } catch (error) {
     logger.error({ code: errorCode(error) }, "Failed to load the technician guide");
     return errorResponse("Couldn't load the guide.", "INTERNAL_ERROR", 500);
