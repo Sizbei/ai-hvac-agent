@@ -112,6 +112,52 @@ export async function listThem(orgId: string) {
     expect(s.uncovered).toEqual([]);
   });
 
+  it("one filtered and one unfiltered drizzle read of the same table is uncovered", () => {
+    const src = `export async function twice(vis: Visibility) {
+  const a = await db.select().from(customers).where(visibleRows(customers, vis));
+  const b = await db.select({ n: count() }).from(customers);
+  return [a, b];
+}
+`;
+    expect(site(src, "twice").uncovered).toEqual(["customers"]);
+    const both = src.replace(".from(customers);", ".from(customers).where(visibleRows(customers, vis));");
+    expect(site(both, "twice").uncovered).toEqual([]);
+  });
+
+  it("one filtered and one unfiltered raw read under the same alias is uncovered", () => {
+    const src = `export const q = (vis: Visibility) => sql\`
+  SELECT (SELECT count(*) FROM invoices i WHERE \${visibleRowsSql("i", vis)}),
+         (SELECT sum(total_cents) FROM invoices i)
+\`;
+`;
+    expect(site(src, "q").uncovered).toEqual(["invoices"]);
+    const both = src.replace("FROM invoices i)", 'FROM invoices i WHERE ${visibleRowsSql("i", vis)})');
+    expect(site(both, "q").uncovered).toEqual([]);
+  });
+
+  it("a filter on a different alias does not cover a read", () => {
+    const src = `export const q = (vis: Visibility) => sql\`
+  SELECT 1 FROM customers c JOIN customers c2 ON c2.id = c.merged_into
+  WHERE \${visibleRowsSql("c", vis)} AND \${visibleRowsSql("c", vis)}
+\`;
+`;
+    expect(site(src, "q").uncovered).toEqual(["customers"]);
+    const fixed = src.replace('AND ${visibleRowsSql("c", vis)}', 'AND ${visibleRowsSql("c2", vis)}');
+    expect(site(fixed, "q").uncovered).toEqual([]);
+  });
+
+  it("child reads need as many filtered parent reads as there are children", () => {
+    const src = `export async function kids(vis: Visibility) {
+  const p = await db.select().from(payments).innerJoin(invoices, x).where(visibleRows(invoices, vis));
+  const r = await db.select().from(refunds);
+  return [p, r];
+}
+`;
+    expect(site(src, "kids").uncovered).toEqual(["payments", "refunds"]);
+    const second = src.replace(".from(refunds);", ".from(refunds).innerJoin(invoices, y).where(visibleRows(invoices, vis));");
+    expect(site(second, "kids").uncovered).toEqual([]);
+  });
+
   it("a child read with no filtered parent is uncovered", () => {
     const src = `export async function paid() {
   return db.select().from(payments);
@@ -120,15 +166,29 @@ export async function listThem(orgId: string) {
     expect(site(src, "paid").uncovered).toEqual(["payments"]);
   });
 
-  it("ignores tables that share a prefix (customer_locations, invoice_lines)", () => {
+  it("ignores tables that share a prefix (customer_tags, invoice_lines)", () => {
     const src = `export async function other() {
-  await db.select().from(customerLocations);
+  await db.select().from(customerTags);
   await db.select().from(invoiceLines);
   await db.select().from(customersArchive);
-  return sql\`SELECT 1 FROM customer_locations cl JOIN invoice_lines il ON true JOIN estimates_x e ON true\`;
+  await db.select().from(refundsLedger);
+  return sql\`SELECT 1 FROM customer_tags ct JOIN invoice_lines il ON true JOIN estimates_x e ON true JOIN customer_locations_old o ON true\`;
 }
 `;
     expect(scanSource(P, src)).toEqual([]);
+  });
+
+  it("refunds and customer_locations are child tables", () => {
+    for (const t of ["refunds", "customerLocations", "customer_locations"]) expect(CHILD_TABLES).toContain(t);
+    const src = `export function q() {
+  return sql\`SELECT 1 FROM refunds r JOIN customer_locations cl ON true\`;
+}
+`;
+    expect(site(src, "q").reads).toEqual([
+      { table: "refunds", alias: "r", kind: "child" },
+      { table: "customer_locations", alias: "cl", kind: "child" },
+    ]);
+    expect(site(src, "q").uncovered).toEqual(["refunds", "customer_locations"]);
   });
 
   it("matches raw keywords in any case and normalizes drizzle names to snake", () => {

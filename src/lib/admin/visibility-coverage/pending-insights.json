@@ -1,9 +1,5 @@
 [
   {
-    "id": "src/lib/admin/reporting-queries.ts#getSalesReport",
-    "reason": "Task 13 sweep D: reports."
-  },
-  {
     "id": "src/lib/admin/reporting-queries.ts#getLeadSourceBreakdown",
     "reason": "Task 13 sweep D: reports."
   },

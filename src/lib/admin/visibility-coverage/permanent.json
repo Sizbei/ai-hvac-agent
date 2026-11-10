@@ -181,7 +181,7 @@
   },
   {
     "id": "src/lib/admin/current-visit.ts#*",
-    "reason": "Writer: state changes must find the row whether or not it is hidden."
+    "reason": "Module-level SQL fragments (officeVisitSql, displayVisitIdSql, placedByVisitSql, activeVisitIdSql) correlated to the caller's outer request row; the caller applies the filter."
   },
   {
     "id": "src/lib/admin/appointment-queries.ts#*",
@@ -201,7 +201,7 @@
   },
   {
     "id": "src/lib/admin/export-queries.ts#*",
-    "reason": "Export: a complete export includes history (ruling 12 for accounting)."
+    "reason": "Full org data export; spec P6: /api/admin/export stays unfiltered. Super_admin-gated API with no org admin UI link; the platform console's per-org export is platform-admin only."
   },
   {
     "id": "src/lib/admin/accounting-export.ts#*",
@@ -438,5 +438,17 @@
   {
     "id": "src/app/api/admin/customers/[id]/bookings/route.ts#(top)",
     "reason": "Comment match only; the read itself lives in queries.ts#getCustomerBookings (pending-requests)."
+  },
+  {
+    "id": "src/lib/admin/location-queries.ts#upsertCustomerLocation",
+    "reason": "Intake writer (persist-job-location.ts): dedupes the customer's address whatever its flag."
+  },
+  {
+    "id": "src/lib/admin/location-queries.ts#locationBelongsToCustomer",
+    "reason": "Customer-keyed ownership guard for request/contact writers."
+  },
+  {
+    "id": "src/lib/admin/location-queries.ts#listCustomerLocations",
+    "reason": "Customer-keyed list behind customers/[id]/locations#GET (id-keyed, permanent); no cross-customer surface."
   }
 ]

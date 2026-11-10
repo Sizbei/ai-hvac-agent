@@ -28,6 +28,8 @@ const CHILD: Readonly<Record<string, string>> = {
   requestNotes: "request_notes",
   customerNotes: "customer_notes",
   attachments: "attachments",
+  refunds: "refunds",
+  customerLocations: "customer_locations",
 };
 
 function bothNames(map: Readonly<Record<string, string>>): readonly string[] {
@@ -120,10 +122,37 @@ function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isCovered(read: Read, text: string): boolean {
-  if (!read.raw) return new RegExp(`visibleRows\\(\\s*${escape(read.written)}\\s*,`).test(text);
-  const key = escape(read.alias ?? read.table);
-  return new RegExp(`visibleRowsSql\\(\\s*(["'])${key}\\1\\s*,`).test(text);
+/** Drizzle reads count `visibleRows(T,`; raw reads count `visibleRowsSql("<alias or table>",`. */
+function filterKey(read: Read): { key: string; pattern: RegExp } {
+  if (!read.raw) {
+    return { key: `d:${read.written}`, pattern: new RegExp(`visibleRows\\(\\s*${escape(read.written)}\\s*,`, "g") };
+  }
+  const name = read.alias ?? read.table;
+  return { key: `r:${name}`, pattern: new RegExp(`visibleRowsSql\\(\\s*(["'])${escape(name)}\\1\\s*,`, "g") };
+}
+
+/**
+ * Coverage is per read: a flagged read key read N times needs N filter calls
+ * naming it, and the chunk's child reads need as many filtered parent reads.
+ */
+function uncoveredTables(reads: readonly Read[], text: string): string[] {
+  const groups = new Map<string, { pattern: RegExp; reads: Read[] }>();
+  for (const read of reads.filter((r) => r.kind === "flagged")) {
+    const { key, pattern } = filterKey(read);
+    const group = groups.get(key) ?? { pattern, reads: [] };
+    group.reads.push(read);
+    groups.set(key, group);
+  }
+  const uncovered: string[] = [];
+  let filteredParents = 0;
+  for (const { pattern, reads: group } of groups.values()) {
+    const filters = text.match(pattern)?.length ?? 0;
+    filteredParents += Math.min(filters, group.length);
+    if (filters < group.length) uncovered.push(group[0].table);
+  }
+  const children = reads.filter((r) => r.kind === "child");
+  if (children.length > filteredParents) uncovered.push(...children.map((r) => r.table));
+  return uncovered;
 }
 
 export function scanSource(path: string, source: string): ReadSite[] {
@@ -131,15 +160,10 @@ export function scanSource(path: string, source: string): ReadSite[] {
   for (const chunk of chunks(source)) {
     const reads = findReads(chunk.text);
     if (reads.length === 0) continue;
-    const covered = reads.map((r) => r.kind === "flagged" && isCovered(r, chunk.text));
-    const parentFiltered = covered.some(Boolean);
-    const uncovered = reads
-      .filter((r, i) => (r.kind === "flagged" ? !covered[i] : !parentFiltered))
-      .map((r) => r.table);
     sites.push({
       id: `${path}#${chunk.name}`,
       reads: reads.map(({ table, alias, kind }) => ({ table, alias, kind })),
-      uncovered: [...new Set(uncovered)],
+      uncovered: [...new Set(uncoveredTables(reads, chunk.text))],
     });
   }
   return sites;
