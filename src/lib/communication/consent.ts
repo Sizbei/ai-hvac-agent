@@ -17,6 +17,8 @@ import { communicationPreferences } from "@/lib/db/schema";
 import { findCustomerMatchCandidates } from "@/lib/admin/crm-queries";
 import type { CustomerMatchCandidate } from "@/lib/admin/customer-match";
 import type { communicationTriggerTypeEnum } from "@/lib/db/schema";
+import { getFeatures } from "@/lib/tenancy/features";
+import { errorCode, logger } from "@/lib/logger";
 
 export type CommChannel = "sms" | "email" | "voice";
 export type CommTrigger = (typeof communicationTriggerTypeEnum.enumValues)[number];
@@ -113,28 +115,14 @@ export function isQuietHours(now: Date, timezone: string | null): boolean {
 }
 
 /**
- * The public portfolio demo org — the single seeded showcase tenant that
- * `admin@demo-hvac.com` (isDemoAccount, `@/lib/auth/authz.ts`) belongs to, and
- * the fallback org for the hosted /chat + voice demo. Mirrors
- * `DEMO_ORG_ID` in `@/lib/tenancy/organization.ts` / `src/lib/db/seed.ts` —
- * hardcoded (not imported) so this pure compliance module doesn't pull in
- * that file's "server-only" + DB/widget-key dependency chain.
+ * Trigger types that an org can switch off via `organizations.feature_flags`.
+ * Scoped narrowly to `review_request`: that pipeline (a technician marking a
+ * job complete -> createReviewRequest -> queueCommunicationJob) has no
+ * session/actor in the loop, so this is the one place downstream of it that
+ * knows the organizationId AND runs before every send. Appointment
+ * confirmations/reminders, receipts and dunning are not switchable.
  */
-const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
-
-/**
- * Trigger types blocked outright for the demo org, regardless of actor or
- * customer prefs. Scoped narrowly to `review_request`: that pipeline (a
- * technician marking a job complete -> createReviewRequest ->
- * queueCommunicationJob) has no session/actor in the loop, so the two
- * isDemoAccount admin-session checks (send-reminder, conversations message)
- * can never reach it — this is the one place downstream of it that both
- * knows the organizationId AND runs before every send. Deliberately NOT
- * every trigger type: appointment confirmations/reminders, receipts, and
- * dunning are relied on by the live, intentionally-real portfolio demo
- * (voice line + /chat) for this SAME organizationId and must keep sending.
- */
-const DEMO_ORG_BLOCKED_TRIGGERS: ReadonlySet<CommTrigger> = new Set([
+const FEATURE_GATED_TRIGGERS: ReadonlySet<CommTrigger> = new Set([
   "review_request",
 ]);
 
@@ -154,11 +142,20 @@ export async function checkSendAllowed(params: {
   const { organizationId, customerId, channel, triggerType } = params;
   const now = params.now ?? new Date();
 
-  if (
-    organizationId === DEMO_ORG_ID &&
-    DEMO_ORG_BLOCKED_TRIGGERS.has(triggerType)
-  ) {
-    return { allowed: false, reason: "demo_org_restricted" };
+  if (FEATURE_GATED_TRIGGERS.has(triggerType)) {
+    // Fail closed: a lookup error blocks the send rather than letting it through.
+    try {
+      const features = await getFeatures(organizationId);
+      if (!features.reviewRequests) {
+        return { allowed: false, reason: "review_requests_off" };
+      }
+    } catch (error) {
+      logger.error(
+        { code: errorCode(error), organizationId },
+        "Feature lookup failed; blocking review request",
+      );
+      return { allowed: false, reason: "review_requests_off" };
+    }
   }
 
   if (!customerId) {

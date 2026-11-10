@@ -31,13 +31,14 @@ vi.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => warn(...a)
 import { createTechSession, getTechSession } from "./tech-session";
 import { verifyTechToken } from "./tech-config";
 import { isSessionUserCurrent } from "./session-revocation";
-import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
+const DEMO_ORG_ID = "44444444-4444-4444-4444-444444444444";
 
 const ORG = "33333333-3333-3333-3333-333333333333";
 const payload = (organizationId: string) =>
   ({ userId: "u1", organizationId, role: "technician" }) as never;
 
 beforeEach(() => {
+  process.env.DEMO_MODE_ORG_IDS = DEMO_ORG_ID;
   execute.mockReset().mockResolvedValue({ rows: [] });
   cookieSet.mockClear();
   warn.mockClear();

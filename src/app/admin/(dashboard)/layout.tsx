@@ -6,7 +6,8 @@ import { getAdminSession } from '@/lib/auth/session';
 import { db } from '@/lib/db';
 import { organizations, organizationSettings } from '@/lib/db/schema';
 import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
-import { DEMO_ORG_ID } from '@/lib/tenancy/organization';
+import { isDemoOrg } from '@/lib/tenancy/demo-mode';
+import { loadOrgRow } from '@/lib/tenancy/org-row';
 import type { SetupPlacement } from '@/components/admin/nav-items';
 import { isOrgActive } from '@/lib/billing/entitlements';
 import { DashboardShell } from '@/components/admin/dashboard-shell';
@@ -62,11 +63,7 @@ const loadBillingState = cache(async function loadBillingState(
   organizationId: string,
 ): Promise<{ billingAttention: boolean; orgName: string | undefined }> {
   try {
-    const [org] = await db
-      .select({ status: organizations.status, name: organizations.name })
-      .from(organizations)
-      .where(eq(organizations.id, organizationId))
-      .limit(1);
+    const org = await loadOrgRow(organizationId);
     return {
       billingAttention: org ? !isOrgActive(org) : false,
       orgName: org?.name ?? undefined,
@@ -79,11 +76,11 @@ const loadBillingState = cache(async function loadBillingState(
 /**
  * Setup nav placement (spec §2, `placementFor`): second in Operations while
  * the guide is neither dismissed nor finished-and-seen, else last in
- * Integrations; the demo org is always Operations. Degrades to the quieter
+ * Integrations; a demo-mode org is always Operations. Degrades to the quieter
  * Integrations slot on error.
  */
 async function loadSetupPlacement(organizationId: string): Promise<SetupPlacement> {
-  if (organizationId === DEMO_ORG_ID) return 'operations';
+  if (isDemoOrg(organizationId)) return 'operations';
   try {
     const [row] = await db
       .select({ onboardingState: organizationSettings.onboardingState })

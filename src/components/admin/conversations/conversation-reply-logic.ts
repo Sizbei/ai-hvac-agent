@@ -47,14 +47,14 @@ export function getReplyLengthError(message: string): string | null {
 // into its error message (`Cannot message this customer: ${decision.reason}`,
 // `message/route.ts:101-105`). Reachable reasons for this route's
 // `triggerType: "escalation"` (toggle: null, quietHours: false) are
-// `do_not_contact`, `channel_disabled:sms`, and `demo_org_restricted`; the
+// `do_not_contact`, `channel_disabled:sms`, and `review_requests_off`; the
 // prefix-matched fallbacks below keep this correct if that rule ever changes.
 const CONSENT_MESSAGE_PREFIX = 'Cannot message this customer: ';
 
 const CONSENT_REASON_COPY: Record<string, string> = {
   do_not_contact: 'This customer has asked not to be contacted.',
   'channel_disabled:sms': 'This customer has turned off text message notifications.',
-  demo_org_restricted: 'Sending is disabled for this demo organization.',
+  review_requests_off: 'Review requests are turned off for this account.',
 };
 
 /** Extracts the raw consent reason embedded in a CONSENT_BLOCKED message, or

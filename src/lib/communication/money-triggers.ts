@@ -25,16 +25,12 @@ import { generatePortalToken } from "@/lib/portal/portal-queries";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { queueCommunicationJob } from "./job-queue";
 import { errorCode, logger } from "@/lib/logger";
+import { getFeatures } from "@/lib/tenancy/features";
 import { stillLeadSql } from "@/lib/admin/invoice-field-writes";
 import { isCollectible, invoiceRef, REMINDER_COOLDOWN_MS } from "@/lib/admin/invoice-collectible";
 export { invoiceRef } from "@/lib/admin/invoice-collectible";
 
 const DEFAULT_COMPANY_NAME = "Spears Services";
-
-/** Mirrors `DEMO_ORG_ID` in `@/lib/tenancy/organization` (asserted equal in
- *  money-triggers.test.ts), hardcoded like consent.ts does so this module does
- *  not pull that file's "server-only" + widget-key chain into every importer. */
-export const PAY_LINK_DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
 interface CustomerContact {
   readonly phone: string | null;
@@ -378,7 +374,7 @@ export type PayLinkResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason:
       | "invoice_not_found" | "synced_read_only" | "invoice_not_chargeable" | "no_contact"
-      | "no_template" | "demo_restricted" | "cooldown" | "not_lead" | "send_failed" };
+      | "no_template" | "pay_links_off" | "cooldown" | "not_lead" | "send_failed" };
 
 /**
  * Text the customer the portal link for an open invoice (tech pay link, spec
@@ -417,7 +413,13 @@ export async function sendInvoicePayLink(
     return { ok: false, reason: "invoice_not_chargeable" };
   }
   if (!inv.customerId) return { ok: false, reason: "no_contact" };
-  if (organizationId === PAY_LINK_DEMO_ORG_ID) return { ok: false, reason: "demo_restricted" };
+  try {
+    if (!(await getFeatures(organizationId)).payLinks) return { ok: false, reason: "pay_links_off" };
+  } catch (error) {
+    // Fail closed: a lookup error must not let a pay link out.
+    logger.error({ code: errorCode(error), organizationId }, "Feature lookup failed; pay link blocked");
+    return { ok: false, reason: "pay_links_off" };
+  }
 
   const contact = await getCustomerContact(organizationId, inv.customerId);
   if (!contact?.phone) return { ok: false, reason: "no_contact" };

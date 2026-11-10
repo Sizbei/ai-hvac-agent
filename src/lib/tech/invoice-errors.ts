@@ -5,7 +5,7 @@
 import type { FieldReason } from "@/lib/admin/invoice-field-writes";
 import type { RunResult } from "@/lib/http/idempotency";
 
-export type RouteReason = FieldReason | "not_on_site" | "no_contact" | "no_template" | "cooldown" | "demo_restricted";
+export type RouteReason = FieldReason | "not_on_site" | "no_contact" | "no_template" | "cooldown" | "pay_links_off";
 
 type FieldErrorShape = { status: number; code: string; message: string };
 
@@ -28,7 +28,7 @@ const MAP: Record<RouteReason, FieldErrorShape> = {
   no_contact: { status: 409, code: "NO_CONTACT", message: "No phone (or email) on file for this customer." },
   no_template: { status: 409, code: "NO_TEMPLATE", message: "Pay link messages aren't set up. Ask the office." },
   cooldown: { status: 409, code: "COOLDOWN", message: "A link went out a moment ago." },
-  demo_restricted: { status: 403, code: "DEMO_RESTRICTED", message: "Messages are off on the demo account." },
+  pay_links_off: { status: 403, code: "PAY_LINKS_OFF", message: "Pay links are turned off for this account." },
   payment_id_conflict: ID_CONFLICT,
   refund_id_conflict: ID_CONFLICT,
   stale: { status: 409, code: "STALE", message: "This job changed. Refresh and try again." },

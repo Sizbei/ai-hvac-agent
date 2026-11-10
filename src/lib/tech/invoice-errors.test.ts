@@ -19,7 +19,7 @@ const TABLE: [RouteReason, number, string, string][] = [
   ["no_contact", 409, "NO_CONTACT", "No phone (or email) on file for this customer."],
   ["no_template", 409, "NO_TEMPLATE", "Pay link messages aren't set up. Ask the office."],
   ["cooldown", 409, "COOLDOWN", "A link went out a moment ago."],
-  ["demo_restricted", 403, "DEMO_RESTRICTED", "Messages are off on the demo account."],
+  ["pay_links_off", 403, "PAY_LINKS_OFF", "Pay links are turned off for this account."],
   ["payment_id_conflict", 409, "ID_CONFLICT", "That payment token was already used. Try again."],
   ["refund_id_conflict", 409, "ID_CONFLICT", "That payment token was already used. Try again."],
   ["stale", 409, "STALE", "This job changed. Refresh and try again."],

@@ -11,6 +11,8 @@ import {
   setDoNotContactByPhone,
 } from "./consent";
 import { db } from "@/lib/db";
+import { getFeatures } from "@/lib/tenancy/features";
+import { DEFAULT_FEATURES } from "@/lib/tenancy/feature-flags";
 import { findCustomerMatchCandidates } from "@/lib/admin/crm-queries";
 import type { CustomerMatchCandidate } from "@/lib/admin/customer-match";
 
@@ -20,6 +22,9 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/admin/crm-queries", () => ({
   findCustomerMatchCandidates: vi.fn(),
 }));
+
+vi.mock("@/lib/tenancy/features", () => ({ getFeatures: vi.fn() }));
+vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }, errorCode: () => "E" }));
 
 const ORG = "org-1";
 const CUST = "cust-1";
@@ -135,50 +140,43 @@ describe("checkSendAllowed", () => {
     expect(d).toEqual({ allowed: true });
   });
 
-  describe("demo org restriction (review_request pipeline)", () => {
-    const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
+  describe("review_requests feature switch", () => {
+    const reviewArgs = {
+      organizationId: "00000000-0000-0000-0000-000000000001",
+      customerId: CUST,
+      channel: "sms" as const,
+      triggerType: "review_request" as const,
+      now: daytime,
+    };
 
-    it("blocks a review_request for the demo org, even with no customerId and no DB lookup", async () => {
-      const d = await checkSendAllowed({
-        organizationId: DEMO_ORG_ID,
-        customerId: null,
-        channel: "sms",
-        triggerType: "review_request",
-        now: daytime,
-      });
-      expect(d).toEqual({ allowed: false, reason: "demo_org_restricted" });
-      // Short-circuits before any preference lookup.
+    it("blocks review_request when reviewRequests is off (no DB lookup)", async () => {
+      vi.mocked(getFeatures).mockResolvedValue({ ...DEFAULT_FEATURES, reviewRequests: false });
+      const d = await checkSendAllowed({ ...reviewArgs, customerId: null });
+      expect(d).toEqual({ allowed: false, reason: "review_requests_off" });
       expect(db.select).not.toHaveBeenCalled();
     });
 
-    it("blocks a review_request for the demo org even when the customer's own prefs allow it", async () => {
+    it("allows review_request when reviewRequests is on, for DEMO_ORG_ID too", async () => {
+      vi.mocked(getFeatures).mockResolvedValue(DEFAULT_FEATURES);
       mockPrefs(FULL_PREFS);
-      const d = await checkSendAllowed({
-        organizationId: DEMO_ORG_ID,
-        customerId: CUST,
-        channel: "sms",
-        triggerType: "review_request",
-        now: daytime,
-      });
-      expect(d).toEqual({ allowed: false, reason: "demo_org_restricted" });
+      const d = await checkSendAllowed(reviewArgs);
+      expect(d).toEqual({ allowed: true });
+      expect(getFeatures).toHaveBeenCalledWith(reviewArgs.organizationId);
     });
 
-    it("does NOT block other trigger types for the demo org (live voice/chat demo must keep sending)", async () => {
+    it("blocks review_request when getFeatures throws", async () => {
+      vi.mocked(getFeatures).mockRejectedValue(new Error("db down"));
       mockPrefs(FULL_PREFS);
-      const d = await checkSendAllowed({
-        organizationId: DEMO_ORG_ID,
-        customerId: CUST,
-        channel: "sms",
-        triggerType: "appointment_scheduled",
-        now: daytime,
-      });
-      expect(d).toEqual({ allowed: true });
+      const d = await checkSendAllowed(reviewArgs);
+      expect(d).toEqual({ allowed: false, reason: "review_requests_off" });
     });
 
-    it("does NOT block review_request for a non-demo org", async () => {
+    it("never consults features for other triggers", async () => {
+      vi.mocked(getFeatures).mockRejectedValue(new Error("db down"));
       mockPrefs(FULL_PREFS);
-      const d = await checkSendAllowed({ ...base, triggerType: "review_request", now: daytime });
+      const d = await checkSendAllowed({ ...reviewArgs, triggerType: "appointment_scheduled" });
       expect(d).toEqual({ allowed: true });
+      expect(getFeatures).not.toHaveBeenCalled();
     });
   });
 });

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { after } from "next/server";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
+import { isDemoOrg } from "@/lib/tenancy/demo-mode";
 import { flagsStatementSql } from "@/lib/admin/onboarding-sql";
 import { signTechToken, verifyTechToken } from "./tech-config";
 import { isSessionUserCurrent } from "./session-revocation";
@@ -37,7 +37,7 @@ export async function createTechSession(
 
   // Setup guide: stamp the first technician sign-in (set-once, guarded in SQL).
   after(async () => {
-    if (payload.organizationId === DEMO_ORG_ID) return;
+    if (isDemoOrg(payload.organizationId)) return;
     try {
       await db.execute(
         flagsStatementSql({

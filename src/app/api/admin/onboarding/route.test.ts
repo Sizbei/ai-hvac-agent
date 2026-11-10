@@ -39,7 +39,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { NextRequest } from "next/server";
 import { GET, PATCH } from "./route";
-import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
+const DEMO_ORG_ID = "33333333-3333-3333-3333-333333333333";
 
 const ORG = "22222222-2222-2222-2222-222222222222";
 const SESSION = {
@@ -60,6 +60,7 @@ function patchReq(body: unknown) {
 }
 
 beforeEach(() => {
+  process.env.DEMO_MODE_ORG_IDS = DEMO_ORG_ID;
   getAdminSession.mockReset();
   getOnboarding.mockReset().mockResolvedValue(PAYLOAD);
   patchOnboarding.mockReset().mockResolvedValue({ flags: {} });
@@ -97,7 +98,17 @@ describe("GET /api/admin/onboarding", () => {
     );
   });
 
-  it("passes demo: true for the demo org", async () => {
+  it("passes demo:true only when DEMO_MODE_ORG_IDS lists the org", async () => {
+    delete process.env.DEMO_MODE_ORG_IDS;
+    getAdminSession.mockResolvedValue({ ...SESSION, organizationId: DEMO_ORG_ID });
+    await GET();
+    expect(getOnboarding).toHaveBeenCalledWith(
+      DEMO_ORG_ID,
+      expect.objectContaining({ demo: false }),
+    );
+  });
+
+  it("passes demo: true for a demo-mode org", async () => {
     getAdminSession.mockResolvedValue({ ...SESSION, organizationId: DEMO_ORG_ID });
     await GET();
     expect(getOnboarding).toHaveBeenCalledWith(

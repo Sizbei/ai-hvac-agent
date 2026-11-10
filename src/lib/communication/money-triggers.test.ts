@@ -11,7 +11,6 @@ import {
   triggerPaymentReceipt,
   sendOverdueInvoiceReminders,
   sendInvoicePayLink,
-  PAY_LINK_DEMO_ORG_ID,
   invoiceRef,
 } from "./money-triggers";
 import { generatePortalToken } from "@/lib/portal/portal-queries";
@@ -21,12 +20,16 @@ import { queueCommunicationJob } from "./job-queue";
 import { db } from "@/lib/db";
 import { claimOutboundOnce } from "./outbound-ledger";
 import { TRIGGER_RULES } from "./consent";
+import * as moneyTriggers from "./money-triggers";
+import { getFeatures } from "@/lib/tenancy/features";
+import { DEFAULT_FEATURES } from "@/lib/tenancy/feature-flags";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 // server-only throws at import in a non-server env (vitest is not a React
 // Server Component host). Stub it so the transitive import from portal-queries
 // doesn't abort the entire test suite before any mocks apply.
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/tenancy/features", () => ({ getFeatures: vi.fn() }));
 vi.mock("@/lib/portal/portal-queries", () => ({
   generatePortalToken: vi.fn().mockResolvedValue("tok-portal"),
 }));
@@ -96,7 +99,10 @@ function mockSelectSequence(
   );
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getFeatures).mockResolvedValue(DEFAULT_FEATURES);
+});
 
 describe("invoiceRef", () => {
   it("derives a short uppercase reference from the invoice id", () => {
@@ -400,16 +406,24 @@ describe("sendInvoicePayLink", () => {
     expect(db.execute).not.toHaveBeenCalled();
   });
 
-  it("the local demo-org id mirrors DEMO_ORG_ID", async () => {
-    const { DEMO_ORG_ID } = await vi.importActual<typeof import("@/lib/tenancy/organization")>("@/lib/tenancy/organization");
-    expect(PAY_LINK_DEMO_ORG_ID).toBe(DEMO_ORG_ID);
+  it("PAY_LINK_DEMO_ORG_ID is no longer exported", () => {
+    expect("PAY_LINK_DEMO_ORG_ID" in moneyTriggers).toBe(false);
   });
 
-  it("demo_restricted for the demo org, before the contact read", async () => {
+  it("pay_links_off when payLinks is off, before the contact read", async () => {
     arrange(openInvoice);
-    const r = await sendInvoicePayLink("00000000-0000-0000-0000-000000000001", INV, ACTOR);
-    expect(r).toEqual({ ok: false, reason: "demo_restricted" });
+    vi.mocked(getFeatures).mockResolvedValue({ ...DEFAULT_FEATURES, payLinks: false });
+    const r = await sendInvoicePayLink(ORG, INV, ACTOR);
+    expect(r).toEqual({ ok: false, reason: "pay_links_off" });
     expect(db.select).toHaveBeenCalledTimes(1); // the invoice read only
+    expect(db.execute).not.toHaveBeenCalled();
+  });
+
+  it("pay_links_off when getFeatures throws (fail closed)", async () => {
+    arrange(openInvoice);
+    vi.mocked(getFeatures).mockRejectedValue(new Error("db down"));
+    const r = await sendInvoicePayLink(ORG, INV, ACTOR);
+    expect(r).toEqual({ ok: false, reason: "pay_links_off" });
     expect(db.execute).not.toHaveBeenCalled();
   });
 

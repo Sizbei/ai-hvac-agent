@@ -4,7 +4,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import { getGoogleOidcConfig } from "@/lib/auth/google-oidc";
 import { getOnboarding, patchOnboarding } from "@/lib/admin/onboarding-queries";
 import { logAudit } from "@/lib/admin/audit";
-import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
+import { isDemoOrg } from "@/lib/tenancy/demo-mode";
 import {
   successResponse,
   errorResponse,
@@ -31,7 +31,7 @@ export async function GET() {
     }
 
     const payload = await getOnboarding(session.organizationId, {
-      demo: session.organizationId === DEMO_ORG_ID,
+      demo: isDemoOrg(session.organizationId),
       googleEnabled: getGoogleOidcConfig() !== null,
       appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
     });
@@ -95,7 +95,7 @@ export async function PATCH(request: NextRequest) {
 
     const body = parsed.data;
     const orgId = session.organizationId;
-    const demo = orgId === DEMO_ORG_ID;
+    const demo = isDemoOrg(orgId);
     const state = await patchOnboarding(orgId, body, { demo });
 
     if (!demo) {
