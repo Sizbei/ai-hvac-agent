@@ -18,16 +18,23 @@ pure-helper vitest only; test component logic by extracting pure functions.
 
 ## Deploy
 
-`git push` does NOT reliably trigger Vercel builds. Deploy with
-`vercel deploy --prod --yes`, then `bash scripts/agent/prod-smoke.sh`.
-Migrations auto-run in the build. Vercel Hobby caps crons at daily.
+`git push` does NOT reliably trigger Vercel builds. First
+`npx tsx scripts/agent/predeploy-check.mjs` (must exit 0), deploy with
+`vercel deploy --prod --yes`, then
+`BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`
+(read-only; `SMOKE_WRITES=1` adds the chat probe and is refused on the prod
+alias). Migrations auto-run in the build; the migrator refuses the prod host
+outside `VERCEL_ENV=production`. Vercel Hobby caps crons at daily.
 
 ## Agent scripts (`scripts/agent/`)
 
 - `mint-admin-session.mjs` — dev admin JWT (payload requires `name`).
 - `screenshot-page.mjs <path> [width]` — screenshot with minted session
   (dev server must already be running). Look at the image yourself.
-- `prod-smoke.sh` — post-deploy probe pack (pages, demo guards, streaming).
+- `prod-smoke.sh` — post-deploy probe pack (pages, demo guards; streaming
+  only with `SMOKE_WRITES=1`). `BASE` is required.
+- `predeploy-check.mjs [--env production|preview]` — env var names, migration
+  journal, and (production) clean `main` at `origin/main`. Never prints values.
 - `verify-skills.mjs` — every path cited in `.claude/skills` must exist.
 - `seed-org.mjs --name "…" [--customers N] [--invoices N]` — seed a fictional
   demo org (dev only; `--force` reseeds that org).

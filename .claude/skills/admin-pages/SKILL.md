@@ -41,8 +41,11 @@ description: Use when working on ANY admin page — shared recipes (session mint
 ## Deploy
 
 `git push` does NOT reliably trigger builds — always
-`vercel deploy --prod --yes`, then `bash scripts/agent/prod-smoke.sh`.
-Migrations run in the Vercel build.
+`npx tsx scripts/agent/predeploy-check.mjs` (exit 0), then
+`vercel deploy --prod --yes`, then
+`BASE=https://ai-hvac-agent-lovat.vercel.app bash scripts/agent/prod-smoke.sh`
+(read-only; `SMOKE_WRITES=1` adds the chat probe). Migrations run in the
+Vercel build.
 
 ## Design system (compose, don't hand-roll)
 

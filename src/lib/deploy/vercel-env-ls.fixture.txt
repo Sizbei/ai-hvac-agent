@@ -1,0 +1,14 @@
+Vercel CLI 50.1.3
+Retrieving project…
+> Environment Variables found for example-team/ai-hvac-agent [312ms]
+
+ name                     value               environments                         created
+ DATABASE_URL             Encrypted           Production                           2d ago
+ AUTH_SECRET              Encrypted           Production, Preview, Development     41d ago
+ ENCRYPTION_KEY           Encrypted           Production, Preview                  41d ago
+ CRON_SECRET              Encrypted           Production                           30d ago
+ NEXT_PUBLIC_APP_URL      Encrypted           Production                           30d ago
+ PLATFORM_ADMIN_EMAILS    Encrypted           Production                           1h ago
+ PLATFORM_ORG_ID          Encrypted           Production                           1h ago
+ AI_API_KEY               Encrypted           Production, Preview (feat/x)         12d ago
+

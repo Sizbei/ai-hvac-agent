@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# Standing prod smoke probes — run after every deploy.
-#   bash scripts/agent/prod-smoke.sh
+# Standing smoke probes — run after every deploy. Read-only by default.
+#   BASE=https://<deployment> bash scripts/agent/prod-smoke.sh
+#   BASE=https://<deployment> SMOKE_WRITES=1 bash scripts/agent/prod-smoke.sh
+# SMOKE_WRITES=1 adds the chat-streaming probe, which creates a chat session
+# (a fake chat in that org's inbox). It is refused on the prod alias unless
+# SMOKE_PROD_WRITES=1 is also set (controller only, once; then hide the chat).
 # Exits non-zero on any failed expectation.
 set -u
-BASE="${BASE:-https://ai-hvac-agent-lovat.vercel.app}"
+PROD_ALIAS="ai-hvac-agent-lovat.vercel.app"
+if [ -z "${BASE:-}" ]; then
+  echo "usage: BASE=https://<deployment> [SMOKE_WRITES=1] bash scripts/agent/prod-smoke.sh" >&2
+  exit 1
+fi
+BASE="${BASE%/}"
 fail=0
 
 check() { # label expected actual
@@ -32,6 +41,18 @@ check "SMS unauthenticated" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POS
 check "mapkit-token unauthenticated" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/mapkit-token")"
 
 # Chat streaming: ttfb must be meaningfully earlier than total on a long reply.
+# Writes (creates a session + chat), so opt-in only.
+if [ "${SMOKE_WRITES:-}" != "1" ]; then
+  echo "skip chat streams: skipped (writes off)"
+  exit $fail
+fi
+case "$BASE" in
+  *"://$PROD_ALIAS"*)
+    if [ "${SMOKE_PROD_WRITES:-}" != "1" ]; then
+      echo "FAIL chat streams: refused (writes against the prod alias need SMOKE_PROD_WRITES=1)"
+      exit 1
+    fi ;;
+esac
 SESS=$(mktemp)
 curl -s -c "$SESS" -X POST "$BASE/api/session" -H "origin: $BASE" \
   -H 'content-type: application/json' -d '{}' -o /dev/null

@@ -147,6 +147,11 @@ const REQUIRED_ENV_VARS: readonly EnvVarSpec[] = [
   },
 ] as const;
 
+/** Names of the variables a deploy cannot boot without. */
+export function requiredEnvNames(): string[] {
+  return REQUIRED_ENV_VARS.filter((spec) => spec.required).map((spec) => spec.name);
+}
+
 /**
  * Validates that all required environment variables are present.
  *

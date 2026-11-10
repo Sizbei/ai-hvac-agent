@@ -2,10 +2,22 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { migrate } from "drizzle-orm/neon-http/migrator";
 import * as dotenv from "dotenv";
+import { prodMigrationRefusal } from "./migrate-guard";
 
 dotenv.config({ path: ".env.local" });
 
 async function runMigrations(): Promise<void> {
+  // Before anything else (and before connecting): only the production build may
+  // migrate the production host.
+  const refusal = prodMigrationRefusal({
+    databaseUrl: process.env.DATABASE_URL,
+    vercelEnv: process.env.VERCEL_ENV,
+  });
+  if (refusal) {
+    console.error(refusal);
+    process.exit(1);
+  }
+
   // Guard against Vercel PREVIEW/DEVELOPMENT builds migrating a database they
   // shouldn't. The deploy build command runs this on every deployment; without
   // a separate preview DB, Vercel previews inherit the production DATABASE_URL,
