@@ -28,7 +28,7 @@ import {
   ESTIMATE_STATUS_DEFAULT,
 } from '@/lib/admin/status-colors';
 import { SyncPill } from '@/components/admin/sync-pill';
-import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { LazyFieldpulseDetails } from '@/components/admin/lazy-fieldpulse-details';
 import { cn } from '@/lib/utils';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
 
@@ -436,10 +436,11 @@ export default function EstimatesPage() {
                               )}
                             </dl>
 
-                            {/* FieldPulse details */}
-                            {est.fieldpulseData && (
+                            {/* FieldPulse details: only FieldPulse mirrors carry them; read
+                                on expand from the detail endpoint (the list omits the blob). */}
+                            {est.syncedSource === 'fieldpulse' && (
                               <div className="flex-1 min-w-48">
-                                <FieldpulseDetails data={est.fieldpulseData} />
+                                <LazyFieldpulseDetails record="estimate" id={est.id} />
                               </div>
                             )}
                           </div>

@@ -11,15 +11,15 @@ import {
 } from '@/components/admin/ui/data-table-shell';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { AdminRequest } from '@/lib/admin/types';
+import type { AdminRequestListRow } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { ClipboardList } from 'lucide-react';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface RequestTableProps {
-  readonly requests: readonly AdminRequest[];
+  readonly requests: readonly AdminRequestListRow[];
   readonly isLoading: boolean;
-  readonly onRowClick: (request: AdminRequest) => void;
+  readonly onRowClick: (request: AdminRequestListRow) => void;
   /** True when any filter (status/urgency/search/assignedTo) is active. */
   readonly hasActiveFilters?: boolean;
   /** Called when the user clicks "Clear filters" in the empty state. */
@@ -31,7 +31,7 @@ function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleDateString('en-US', { timeZone: BUSINESS_TIME_ZONE });
 }
 
-const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequest>> = [
+const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequestListRow>> = [
   {
     key: 'reference',
     header: 'Reference #',
@@ -95,9 +95,9 @@ function RequestCards({
   onRowClick,
   emptyState,
 }: {
-  readonly requests: readonly AdminRequest[];
+  readonly requests: readonly AdminRequestListRow[];
   readonly isLoading: boolean;
-  readonly onRowClick: (request: AdminRequest) => void;
+  readonly onRowClick: (request: AdminRequestListRow) => void;
   readonly emptyState: React.ReactNode;
 }) {
   if (isLoading && requests.length === 0) {
@@ -188,7 +188,7 @@ export function RequestTable({
           emptyState={emptyState}
         />
       </div>
-      <DataTableShell<AdminRequest>
+      <DataTableShell<AdminRequestListRow>
         className="hidden sm:flex"
         columns={COLUMNS}
         rows={requests}

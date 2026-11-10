@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { AdminRequest, RequestSortKey } from '@/lib/admin/types';
+import type { AdminRequestListRow, RequestSortKey } from '@/lib/admin/types';
 import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
@@ -19,7 +19,7 @@ interface UseAdminRequestsOptions {
 }
 
 interface UseAdminRequestsResult {
-  readonly requests: readonly AdminRequest[];
+  readonly requests: readonly AdminRequestListRow[];
   readonly total: number;
   readonly isLoading: boolean;
   readonly error: string | null;
@@ -27,7 +27,7 @@ interface UseAdminRequestsResult {
 }
 
 interface RequestsPayload {
-  readonly requests: readonly AdminRequest[];
+  readonly requests: readonly AdminRequestListRow[];
   readonly total: number;
 }
 
@@ -46,7 +46,7 @@ export function useAdminRequests(
 
   const key = `requests:${status ?? ''}:${search ?? ''}:${page}:${limit}:${urgency ?? ''}:${assignedTo ?? ''}:${isAfterHours ? '1' : '0'}:${sort ?? ''}`;
 
-  const [requests, setRequests] = useState<readonly AdminRequest[]>(
+  const [requests, setRequests] = useState<readonly AdminRequestListRow[]>(
     () => requestsCache.get(key)?.data.requests ?? [],
   );
   const [total, setTotal] = useState(() => requestsCache.get(key)?.data.total ?? 0);
@@ -114,7 +114,7 @@ export function useAdminRequests(
       const body = (await res.json()) as {
         success: boolean;
         data: {
-          requests: AdminRequest[];
+          requests: AdminRequestListRow[];
           total: number;
           page: number;
           limit: number;

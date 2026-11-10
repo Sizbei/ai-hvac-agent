@@ -169,7 +169,7 @@ beforeEach(() => {
   updateCaptured.length = 0;
 });
 
-import { listEstimates, getEstimatePipelineStats, expireOverdueEstimates } from './estimate-queries';
+import { listEstimates, getEstimatePipelineStats, expireOverdueEstimates, LIST_ESTIMATE_FIELDS } from './estimate-queries';
 import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
@@ -469,5 +469,52 @@ describe('getEstimatePipelineStats — bucket classification', () => {
     const staleCase = findBucketCase(cols.staleCents);
     expect(openCase).toBe(lostCase);
     expect(staleCase).toBe(lostCase);
+  });
+});
+
+describe('listEstimates payload contract', () => {
+  // DB-faithful page rows (non-search and search paths): the row has exactly
+  // the keys the SELECT asked for, so a column still selected would leak out.
+  const SAMPLE: Record<string, unknown> = {
+    id: 'est-1',
+    status: 'sent',
+    totalCents: 5000,
+    customerId: 'cust-1',
+    serviceRequestId: 'sr-1',
+    createdAt: new Date('2024-01-01'),
+    expiresAt: null,
+    signedAt: null,
+    fieldpulseEstimateId: 'fp-1',
+    fieldpulseStatusName: 'Sent',
+    title: 'AC tune-up',
+    fieldpulseData: { notes: 'x'.repeat(2000) },
+    nameEncrypted: 'Pat Doe',
+    effectiveCreatedAt: new Date('2024-01-01'),
+    soldOptionId: null,
+    optionCount: 1,
+  };
+
+  it('listEstimates row keys equal LIST_ESTIMATE_FIELDS and contain no fieldpulseData', async () => {
+    for (const search of [undefined, 'pat']) {
+      selectQueue.length = 0;
+      captured.length = 0;
+      // First pass: learn the page SELECT's columns.
+      if (!search) selectQueue.push([{ n: 1 }]);
+      await listEstimates(ORG, { search }, VISIBLE_ONLY);
+      const cols = captured[search ? 0 : 1]!.selectCols as Record<string, unknown>;
+      // The blob is never read from the DB for a list page.
+      expect(Object.keys(cols)).not.toContain('fieldpulseData');
+      const row = Object.fromEntries(Object.keys(cols).map((k) => [k, k in SAMPLE ? SAMPLE[k] : null]));
+      // Second pass: answer with a row shaped like those columns.
+      selectQueue.length = 0;
+      captured.length = 0;
+      if (!search) selectQueue.push([{ n: 1 }]);
+      selectQueue.push([row]);
+      const result = await listEstimates(ORG, { search }, VISIBLE_ONLY);
+      const out = result.estimates[0]!;
+      expect(Object.keys(out).sort()).toEqual([...LIST_ESTIMATE_FIELDS].sort());
+      expect(out).not.toHaveProperty('fieldpulseData');
+      expect(out).toMatchObject({ syncedSource: 'fieldpulse', customerName: 'Pat Doe' });
+    }
   });
 });

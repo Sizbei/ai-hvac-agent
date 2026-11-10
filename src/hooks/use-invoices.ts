@@ -10,7 +10,6 @@ export interface InvoiceListItem {
   readonly totalCents: number;
   readonly amountPaidCents: number;
   readonly customerId: string | null;
-  readonly serviceRequestId: string | null;
   readonly createdAt: string;
   /** Issue date in the source system (FP/HCP mirrors); null for native
    * invoices — age falls back to createdAt. */
@@ -21,8 +20,6 @@ export interface InvoiceListItem {
   readonly syncedSource: "fieldpulse" | "housecall" | null;
   readonly customerName: string | null;
   readonly lastReminderSentAt: string | null;
-  /** Spillover FP data — needed by Task 11 click-to-expand. */
-  readonly fieldpulseData: Record<string, unknown> | null;
 }
 
 export interface InvoiceStats {

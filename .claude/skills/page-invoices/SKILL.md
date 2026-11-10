@@ -41,6 +41,10 @@ the browser never replays a pre-payment body). PER_PAGE=50. Default filter=overd
 polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 
 **Invariants (violate = bug):**
+- List rows carry only `LIST_INVOICE_FIELDS` (`src/lib/admin/invoice-queries.ts`;
+  contract test in `invoice-queries.test.ts`). No `fieldpulseData` in the list
+  (it was ~75% of a page): an expanded FieldPulse row reads it on expand via
+  `src/components/admin/lazy-fieldpulse-details.tsx` from the detail endpoint.
 - Multi-source money guard: `fieldpulseInvoiceId IS NOT NULL` → source=fieldpulse;
   `hcpInvoiceId IS NOT NULL` → source=housecall. Synced invoices are READ-ONLY
   in money flows — void, payment capture, refund, AND `sendInvoiceReminder`

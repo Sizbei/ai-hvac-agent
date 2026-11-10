@@ -75,6 +75,7 @@ import {
 import type {
   AdminRequest,
   AdminRequestDetail,
+  AdminRequestListRow,
   FieldpulseJobMetrics,
   TechnicianRecord,
   DashboardStats,
@@ -139,11 +140,25 @@ function resolveRequestOrderBy(sort?: RequestSortKey) {
   return [desc(serviceRequests.createdAt)] as const;
 }
 
+/** The keys of a requests-list row (speed S3): only what the list renders. */
+export const LIST_REQUEST_FIELDS = [
+  "id",
+  "status",
+  "issueType",
+  "urgency",
+  "referenceNumber",
+  "customerName",
+  "assignedToName",
+  "isAfterHours",
+  "createdAt",
+  "syncedSource",
+] as const satisfies readonly (keyof AdminRequestListRow)[];
+
 export async function getRequests(
   organizationId: string,
   filters: RequestFilters,
   vis: Visibility,
-): Promise<{ readonly requests: readonly AdminRequest[]; readonly total: number }> {
+): Promise<{ readonly requests: readonly AdminRequestListRow[]; readonly total: number }> {
   const page = filters.page ?? 1;
   const limit = filters.limit ?? 50;
   const offset = (page - 1) * limit;
@@ -210,7 +225,6 @@ export async function getRequests(
       status: serviceRequests.status,
       issueType: serviceRequests.issueType,
       urgency: serviceRequests.urgency,
-      description: serviceRequests.description,
       referenceNumber: serviceRequests.referenceNumber,
       customerNameEncrypted: serviceRequests.customerNameEncrypted,
       customerNameFromCustomer: customers.nameEncrypted,
@@ -219,7 +233,6 @@ export async function getRequests(
       assignedToName: users.name,
       isAfterHours: serviceRequests.isAfterHours,
       createdAt: serviceRequests.createdAt,
-      updatedAt: serviceRequests.updatedAt,
       officeVisit: officeVisitSql(),
     })
     .from(serviceRequests)
@@ -239,12 +252,11 @@ export async function getRequests(
     .limit(limit)
     .offset(offset);
 
-  const requests: readonly AdminRequest[] = rows.map((row) => ({
+  const requests: readonly AdminRequestListRow[] = rows.map((row) => ({
     id: row.id,
     status: row.status,
     issueType: row.issueType,
     urgency: row.urgency,
-    description: row.description,
     referenceNumber: row.referenceNumber,
     // FP-imported jobs have null customerNameEncrypted; fall back to the
     // name on the linked customers row.
@@ -265,7 +277,6 @@ export async function getRequests(
     ).job.assignedToName,
     isAfterHours: row.isAfterHours,
     createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
   }));
 
   return { requests, total };

@@ -15,7 +15,7 @@ import {
 import { AgeChip, daysBetween } from './age-chip';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { InvoiceStateBadge } from './invoice-state-badge';
-import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { LazyFieldpulseDetails } from '@/components/admin/lazy-fieldpulse-details';
 import { canSendReminder, invoiceLinkAction } from '@/lib/admin/invoice-payment-copy';
 import { shortIssuedDate } from '@/lib/admin/invoice-dates';
 
@@ -248,10 +248,11 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, cardPayment
               <dd className={`text-right font-mono font-medium tabular-nums ${balance === 0 ? 'text-muted-foreground' : ''}`}>{formatCentsExact(balance)}</dd>
             </dl>
 
-            {/* FieldPulse details */}
-            {invoice.fieldpulseData && (
+            {/* FieldPulse details: only FieldPulse mirrors carry them; read
+                on expand from the detail endpoint (the list omits the blob). */}
+            {invoice.syncedSource === 'fieldpulse' && (
               <div className="flex-1 min-w-48">
-                <FieldpulseDetails data={invoice.fieldpulseData} />
+                <LazyFieldpulseDetails record="invoice" id={invoice.id} />
               </div>
             )}
           </div>

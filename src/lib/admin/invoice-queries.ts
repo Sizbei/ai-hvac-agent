@@ -1007,7 +1007,6 @@ export interface InvoiceListRow {
   readonly totalCents: number;
   readonly amountPaidCents: number;
   readonly customerId: string | null;
-  readonly serviceRequestId: string | null;
   readonly createdAt: Date;
   /** When the invoice was issued: the source-system date for FP/HCP mirrors,
    * set for field-finalized native invoices; otherwise null — age math falls
@@ -1019,9 +1018,26 @@ export interface InvoiceListRow {
   readonly lastReminderSentAt: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
-  /** Spillover FP data — needed by Task 11 click-to-expand. */
-  readonly fieldpulseData: Record<string, unknown> | null;
 }
+
+/**
+ * The keys of a list row: only what the list renders (speed S3). The
+ * FieldPulse blob and the request link live on the detail endpoint; an
+ * expanded FieldPulse row fetches its details from there.
+ */
+export const LIST_INVOICE_FIELDS = [
+  "id",
+  "state",
+  "totalCents",
+  "amountPaidCents",
+  "customerId",
+  "createdAt",
+  "issuedAt",
+  "dueDate",
+  "customerName",
+  "lastReminderSentAt",
+  "syncedSource",
+] as const satisfies readonly (keyof InvoiceListRow)[];
 
 export interface InvoiceSummaryStats {
   readonly outstandingCents: number;
@@ -1264,14 +1280,12 @@ export async function listInvoices(
     totalCents: invoices.totalCents,
     amountPaidCents: invoices.amountPaidCents,
     customerId: invoices.customerId,
-    serviceRequestId: invoices.serviceRequestId,
     createdAt: invoices.createdAt,
     issuedAt: invoices.issuedAt,
     dueDate: invoices.dueDate,
     lastReminderSentAt: invoices.lastReminderSentAt,
     fieldpulseInvoiceId: invoices.fieldpulseInvoiceId,
     hcpInvoiceId: invoices.hcpInvoiceId,
-    fieldpulseData: invoices.fieldpulseData,
     nameEncrypted: customers.nameEncrypted,
   };
 
@@ -1348,7 +1362,6 @@ export async function listInvoices(
       ...r,
       customerName: safeDecryptName(nameEncrypted),
       syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
-      fieldpulseData: r.fieldpulseData as Record<string, unknown> | null,
     }));
 
     return {
@@ -1368,7 +1381,6 @@ export async function listInvoices(
     ...r,
     customerName: safeDecryptName(nameEncrypted),
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
-    fieldpulseData: r.fieldpulseData as Record<string, unknown> | null,
   }));
 
   return {
