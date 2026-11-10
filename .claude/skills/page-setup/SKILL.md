@@ -102,6 +102,21 @@ the next focusable in the card or the page `h1`. The sidebar footer (drawer and
 rail) has a "Quick tour" link to `/admin/setup#learn` for admin-tier users.
 Client code takes the lesson list from `src/lib/admin/lesson-ids.ts` (no zod).
 
+**Quick tour (onboarding spec D3):** `src/components/admin/setup/quick-tour-section.tsx`
+(`id="learn"`), state in `src/hooks/use-quick-tour.ts`, pure logic in
+`src/lib/admin/tour-view.ts` (`readTourMount`, `seedTour`, `tourSearch`) and
+`src/lib/admin/tour-lessons.ts` (`buildLessons`, conservative context when
+`guide` is null). `SetupPageClient` renders ONE tree for loading/error/data;
+the tour sits in one of two fixed slots (above the hero for a valid
+`?lesson`, else below), chosen once from `useSearchParams` on the first
+render, so it never remounts. Stop/completed are local, seeded once from the
+first onboarding response that settles after mount (`shouldSeedTour`), never a
+cached snapshot; each stored lesson calls `invalidateOnboarding()`. Stop
+changes use `history.replaceState`, never router navigation; during a replay
+"Show me" carries `replay=1`. The hero action is `outline` whenever the tour is
+expanded. Writes (`lesson`,
+`tourCompleted`) are skipped when `readOnly` or `guide` is null.
+
 **Client store contract:** fetches are sequence-tagged (older responses dropped);
 `refreshOnboarding({ force: true })` during an in-flight fetch chains another;
 `invalidateOnboarding()` forces a refresh when there are subscribers, else marks
