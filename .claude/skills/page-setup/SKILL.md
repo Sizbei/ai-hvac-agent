@@ -89,6 +89,17 @@ preview: none, never due); it never writes. `PATCH /api/admin/guide`
 the session user's own active admin-tier row, is refused while previewing and is
 not audited. Tests: `tests/integration/admin-guide-state.test.ts`.
 
+**Quick tour (onboarding spec D3):** `src/components/admin/setup/quick-tour-section.tsx`
+(`id="learn"`), state in `src/hooks/use-quick-tour.ts`, pure logic in
+`src/lib/admin/tour-view.ts` (`readTourMount`, `seedTour`, `tourSearch`) and
+`src/lib/admin/tour-lessons.ts` (`buildLessons`, conservative context when
+`guide` is null). `SetupPageClient` renders ONE tree for loading/error/data;
+the tour sits in one of two fixed slots (above the hero for a valid
+`?lesson`, else below), chosen once from the URL after mount, so it never
+remounts. Stop/completed are local, seeded once; stop changes use
+`history.replaceState`, never router navigation. Writes (`lesson`,
+`tourCompleted`) are skipped when `readOnly` or `guide` is null.
+
 **Client store contract:** fetches are sequence-tagged (older responses dropped);
 `refreshOnboarding({ force: true })` during an in-flight fetch chains another;
 `invalidateOnboarding()` forces a refresh when there are subscribers, else marks

@@ -9,6 +9,7 @@ interface CopySignInLinkProps {
   readonly url: string;
   /** The step's instruction line. */
   readonly instruction: string;
+  readonly variant?: 'default' | 'outline';
 }
 
 const COPIED_MS = 1_500;
@@ -19,7 +20,7 @@ const COPIED_MS = 1_500;
  * failed copy shows no confirmation. The bare URL stays selectable below the
  * button so it can be read aloud or copied by hand.
  */
-export function CopySignInLink({ url, instruction }: CopySignInLinkProps) {
+export function CopySignInLink({ url, instruction, variant = 'default' }: CopySignInLinkProps) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -45,7 +46,7 @@ export function CopySignInLink({ url, instruction }: CopySignInLinkProps) {
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <Button type="button" onClick={() => void copy()} className="w-full sm:w-auto">
+        <Button type="button" variant={variant} onClick={() => void copy()} className="w-full sm:w-auto">
           {copied && <Check aria-hidden="true" className="size-[14px]" />}
           <span aria-live="polite">{copied ? 'Copied' : 'Copy sign-in link'}</span>
         </Button>

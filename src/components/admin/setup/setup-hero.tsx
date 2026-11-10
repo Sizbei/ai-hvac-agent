@@ -12,25 +12,27 @@ interface SetupHeroProps {
   readonly number: number;
   /** The step re-opened: warning glyph and a "Needs attention" header. */
   readonly attention?: boolean;
+  /** `outline` while the quick tour sits expanded above the hero: one primary per screen. */
+  readonly actionVariant?: 'default' | 'outline';
 }
 
-function HeroAction({ step }: { step: DerivedStep }) {
+function HeroAction({ step, variant }: { step: DerivedStep; variant: 'default' | 'outline' }) {
   if (step.action === 'copy_sign_in_link' && step.copyValue) {
-    return <CopySignInLink url={step.copyValue} instruction={step.instruction ?? ''} />;
+    return <CopySignInLink url={step.copyValue} instruction={step.instruction ?? ''} variant={variant} />;
   }
   if (step.instruction) {
     return <p className="text-[13px] leading-5 text-muted-foreground">{step.instruction}</p>;
   }
   if (!step.href) return null;
   return (
-    <Button className="w-full sm:w-auto" render={<Link href={step.href} />}>
+    <Button variant={variant} className="w-full sm:w-auto" render={<Link href={step.href} />}>
       {step.hrefLabel}
     </Button>
   );
 }
 
 /** Hero slot (spec §8): the Up-next step, or the step that needs attention. */
-export function SetupHero({ step, number, attention = false }: SetupHeroProps) {
+export function SetupHero({ step, number, attention = false, actionVariant = 'default' }: SetupHeroProps) {
   return (
     <SectionCard title={attention ? 'Needs attention' : 'Up next'} meta={step.estimateLabel}>
       <div className="flex gap-3">
@@ -45,7 +47,7 @@ export function SetupHero({ step, number, attention = false }: SetupHeroProps) {
               </p>
             )}
           </div>
-          <HeroAction step={step} />
+          <HeroAction step={step} variant={actionVariant} />
         </div>
       </div>
     </SectionCard>
