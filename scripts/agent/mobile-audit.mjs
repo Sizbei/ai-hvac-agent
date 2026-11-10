@@ -89,9 +89,12 @@ const measure = (viewport) => {
     if (cs.visibility === "hidden" || cs.display === "none") continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
-    // A positioned ::after hit-area (the Switch pattern) enlarges the tap area.
+    // The Switch's positioned ::after is its real hit area; nothing else counts.
     const after = getComputedStyle(el, "::after");
-    const pad = after.position === "absolute" && after.content !== "none";
+    const pad =
+      el.getAttribute("data-slot") === "switch" &&
+      after.position === "absolute" &&
+      after.content !== "none";
     const w = pad ? Math.max(r.width, parseFloat(after.width) || 0) : r.width;
     const h = pad ? Math.max(r.height, parseFloat(after.height) || 0) : r.height;
     const key = `${describe(el)}|${Math.round(w)}x${Math.round(h)}`;
@@ -105,7 +108,13 @@ const measure = (viewport) => {
 async function auditPage(ctx, path) {
   const page = await ctx.newPage();
   try {
-    await page.goto(`${base}${path}`, { waitUntil: "load", timeout: 90_000 });
+    const response = await page.goto(`${base}${path}`, { waitUntil: "load", timeout: 90_000 });
+    if (!response?.ok()) throw new Error(`HTTP ${response?.status()}`);
+    const target = new URL(path, base);
+    const landed = new URL(page.url());
+    if (landed.pathname !== target.pathname) {
+      throw new Error(`redirected to ${landed.pathname}`);
+    }
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await page.waitForTimeout(1_500);
     const m = await page.evaluate(measure, VIEWPORT);
@@ -125,7 +134,7 @@ async function run(label, ctx, list) {
       // A cold dev compile can time out once; retry before calling it a failure.
       findings = await auditPage(ctx, path).catch(() => auditPage(ctx, path));
     } catch (e) {
-      findings = [{ kind: "overflow", detail: `page failed to load (${e.name})` }];
+      findings = [{ kind: "load", detail: `page failed to load (${e.message})` }];
     }
     total += findings.length;
     console.log(`${label2}  ${findings.length ? `${findings.length} finding(s)` : "ok"}`);

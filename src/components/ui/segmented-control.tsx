@@ -69,7 +69,7 @@ export function SegmentedControl<T extends string = string>({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex h-[34px] items-center overflow-hidden rounded-md border border-border-strong bg-surface-raised max-md:h-[46px]",
+        "inline-flex h-[34px] items-center overflow-hidden rounded-md border border-border-strong bg-surface-raised max-sm:box-content max-sm:h-11",
         className,
       )}
     >
@@ -85,7 +85,7 @@ export function SegmentedControl<T extends string = string>({
             onClick={() => onChange(opt.value)}
             onKeyDown={(e) => handleKeyDown(e, index)}
             className={cn(
-              "inline-flex h-full min-w-11 items-center justify-center gap-1.5 border-l border-border px-3 text-[13px] font-medium transition-colors duration-[var(--dur-hover)] first:border-l-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "inline-flex h-full items-center gap-1.5 max-sm:min-w-11 max-sm:justify-center border-l border-border px-3 text-[13px] font-medium transition-colors duration-[var(--dur-hover)] first:border-l-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               isActive
                 ? "bg-primary font-semibold text-primary-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-foreground",
