@@ -10,13 +10,23 @@ import { GlobalSearch } from '@/components/admin/global-search';
 import { navLabelFor, type SetupPlacement } from '@/components/admin/nav-items';
 import { SetupPlacementProvider } from '@/components/admin/setup-placement-context';
 import { OrgNameProvider } from '@/components/admin/org-name-context';
+import { PreviewBanner } from '@/components/admin/preview-banner';
+import { usePreviewSync } from '@/hooks/use-preview-sync';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
   readonly orgName?: string;
   readonly adminName: string;
   readonly adminEmail: string;
-  readonly role: AdminRole;
+  /** The role the UI renders for: the "View as" target's while previewing. */
+  readonly role: AdminRole | 'technician';
+  /** Set only while a "View as" preview is on: the banner line, the active
+   * target (null when stale) and the cookie's expiry (unix seconds). */
+  readonly preview?: {
+    readonly line: string;
+    readonly targetUserId: string | null;
+    readonly exp: number;
+  } | null;
   /** When true, the org's subscription is past_due/suspended — render the
    * non-dismissable billing banner above the content. */
   readonly billingAttention?: boolean;
@@ -37,6 +47,7 @@ export function DashboardShell({
   adminName,
   adminEmail,
   role,
+  preview = null,
   billingAttention = false,
   setupPlacement,
   mapEnabled,
@@ -44,6 +55,7 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const mobileTitle = useMobileTitle(setupPlacement, mapEnabled);
+  usePreviewSync(preview !== null, preview?.targetUserId ?? null, preview?.exp ?? null);
 
   const handleMobileClose = useCallback(() => {
     setIsMobileOpen(false);
@@ -68,6 +80,7 @@ export function DashboardShell({
             onMobileClose={handleMobileClose}
           />
           <div className="flex flex-1 flex-col overflow-hidden">
+            {preview && <PreviewBanner line={preview.line} />}
             <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} orgName={orgName} />
             {billingAttention && (
               <div

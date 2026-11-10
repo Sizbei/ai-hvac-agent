@@ -23,7 +23,7 @@ type StateJson = {
   flags: { embedCopied?: boolean; techSignedInAt?: string };
 };
 
-const OPTS = { demo: false, googleEnabled: false, appUrl: "http://x" };
+const OPTS = { demo: false, write: true, googleEnabled: false, appUrl: "http://x" };
 const REQUIRED = ["phone_hours", "add_technician", "book_first_request", "tech_sign_in"];
 
 let q: Q;

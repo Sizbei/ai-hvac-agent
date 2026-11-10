@@ -3,6 +3,9 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { getAdminSession } from '@/lib/auth/session';
+import { getViewerContext } from '@/lib/auth/viewer';
+import { previewBannerLine } from '@/lib/admin/preview-banner-copy';
+import { shownPreview } from '@/lib/admin/preview-sync';
 import { db } from '@/lib/db';
 import { organizations, organizationSettings } from '@/lib/db/schema';
 import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
@@ -27,11 +30,12 @@ export default async function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await getAdminSession();
+  const viewer = await getViewerContext();
 
-  if (!session) {
+  if (!viewer) {
     redirect('/admin/login');
   }
+  const { session } = viewer;
 
   // The two lookups run concurrently and fail independently: a miss on one
   // never changes what the other decides.
@@ -45,7 +49,16 @@ export default async function DashboardLayout({
       orgName={orgName}
       adminName={session.name}
       adminEmail={session.email}
-      role={session.role}
+      role={viewer.uiRole}
+      preview={
+        viewer.preview
+          ? {
+              line: previewBannerLine(viewer.preview),
+              targetUserId: shownPreview(viewer.preview).targetUserId,
+              exp: viewer.preview.exp,
+            }
+          : null
+      }
       billingAttention={billingAttention}
       setupPlacement={setupPlacement}
       mapEnabled={mapEnabled}

@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
+import { PREVIEW_COOKIE } from "@/lib/auth/preview-cookie";
 import { getGoogleOidcConfig } from "@/lib/auth/google-oidc";
 import { getOnboarding, patchOnboarding } from "@/lib/admin/onboarding-queries";
 import { logAudit } from "@/lib/admin/audit";
@@ -13,13 +15,19 @@ import {
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
-/** GET — the setup guide payload for the session's org. */
-export async function GET() {
+/**
+ * GET — the setup guide payload for the session's org. Read-only while a
+ * "View as" preview is on: no stamp, grandfathering or `firstSeenAt` write.
+ * Any preview cookie on the request counts, even one the viewer could not
+ * resolve, so a lookup error can never turn a preview read into a write.
+ */
+export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:onboarding-get:${session.userId}`,
@@ -30,8 +38,11 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
+    const demo = isDemoOrg(session.organizationId);
+    const previewing = viewer.preview !== null || request.cookies.has(PREVIEW_COOKIE);
     const payload = await getOnboarding(session.organizationId, {
-      demo: isDemoOrg(session.organizationId),
+      demo,
+      write: !demo && !previewing,
       googleEnabled: getGoogleOidcConfig() !== null,
       appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
     });

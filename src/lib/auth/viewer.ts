@@ -1,8 +1,11 @@
 import "server-only";
 
 import * as React from "react";
+import { cookies } from "next/headers";
 import { getAdminSession } from "@/lib/auth/session";
 import { isPlatformAdmin } from "@/lib/auth/authz";
+import { PREVIEW_COOKIE, verifyPreviewCookie } from "@/lib/auth/preview-cookie";
+import { findPreviewTarget } from "@/lib/admin/preview-targets";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
 import { computeShowHidden, type Visibility } from "@/lib/admin/visibility";
 import { getFeatures } from "@/lib/tenancy/features";
@@ -15,15 +18,17 @@ export type PreviewState =
       readonly targetUserId: string;
       readonly targetName: string;
       readonly targetRole: AdminRole | "technician";
+      /** The cookie's expiry, unix seconds (the banner reloads then). */
+      readonly exp: number;
     }
-  | { readonly status: "stale" };
+  | { readonly status: "stale"; readonly exp: number };
 
 /** Who is looking, and whether they see hidden (imported) history. */
 export interface ViewerContext extends Visibility {
   readonly session: AdminSessionPayload;
   readonly isPlatformAdmin: boolean;
   readonly features: Features;
-  /** Platform-admin "view as" state; null until the preview cookie lands (Task 15). */
+  /** Platform-admin "view as" state (spec P7); null when not previewing. */
   readonly preview: PreviewState | null;
   readonly uiRole: AdminRole | "technician";
 }
@@ -59,19 +64,67 @@ async function safeFeatures(organizationId: string): Promise<Features> {
   }
 }
 
+/**
+ * "View as" (spec P7). Only a platform admin's request is looked at. A cookie
+ * with a valid signature, bound to THIS session, resolves to the target when
+ * it is still an active user of the session org, else `stale` (plan ruling 9:
+ * the proxy keeps refusing writes, so the banner must still show). A failed
+ * target lookup behind such a cookie is `stale` too, for the same reason.
+ * Anything else — no cookie, bad signature, another admin's cookie, a cookie
+ * read error — is "not previewing" (the proxy clears a cookie it would ignore).
+ */
+async function resolvePreview(
+  session: AdminSessionPayload,
+  platform: boolean,
+): Promise<PreviewState | null> {
+  if (!platform) return null;
+  let value: string | undefined;
+  try {
+    value = (await cookies()).get(PREVIEW_COOKIE)?.value;
+  } catch (error) {
+    logger.error(
+      { code: errorCode(error), organizationId: session.organizationId },
+      "Preview cookie read failed; rendering as the signed-in admin",
+    );
+    return null;
+  }
+  if (!value) return null;
+  const claims = await verifyPreviewCookie(value, process.env.AUTH_SECRET ?? "");
+  if (!claims || claims.adminUserId !== session.userId) return null;
+  try {
+    const target = await findPreviewTarget(session.organizationId, claims.targetUserId);
+    if (!target) return { status: "stale", exp: claims.exp };
+    return {
+      status: "active",
+      targetUserId: target.userId,
+      targetName: target.name,
+      targetRole: target.role,
+      exp: claims.exp,
+    };
+  } catch (error) {
+    logger.error(
+      { code: errorCode(error), organizationId: session.organizationId },
+      "Preview target lookup failed; staying read-only",
+    );
+    return { status: "stale", exp: claims.exp };
+  }
+}
+
 /** One viewer per request (React cache). Null without an admin session. */
 export const getViewerContext = cache(async function getViewerContext(): Promise<ViewerContext | null> {
   const session = await getAdminSession();
   if (!session) return null;
   const platform = safeIsPlatformAdmin(session);
-  const features = await safeFeatures(session.organizationId);
-  const preview: PreviewState | null = null;
+  const [features, preview] = await Promise.all([
+    safeFeatures(session.organizationId),
+    resolvePreview(session, platform),
+  ]);
   return {
     session,
     isPlatformAdmin: platform,
     features,
     preview,
-    uiRole: session.role,
+    uiRole: preview?.status === "active" ? preview.targetRole : session.role,
     showHidden: computeShowHidden({
       isPlatformAdmin: platform,
       previewing: preview !== null,

@@ -38,7 +38,7 @@ interface SidebarProps {
   readonly orgName?: string;
   readonly adminName: string;
   readonly adminEmail: string;
-  readonly role: AdminRole;
+  readonly role: AdminRole | 'technician';
   /** Server-decided position of the Setup item (fixed for this page load). */
   readonly setupPlacement: SetupPlacement;
   /** The org's Map switch. */
