@@ -42,6 +42,7 @@ import { overdueWhere } from "./invoice-queries";
 import { buildNeedsActionCountQuery } from "./conversation-queries";
 import { referenceSearchPatterns } from "./request-search";
 import { normalizeEmail } from "./staff-queries";
+import { assertMayMutateUser, type MutationActor } from "@/lib/auth/authz";
 import { decrypt } from "@/lib/crypto";
 import {
   canTransition,
@@ -89,7 +90,9 @@ import type {
   RequestFilters,
   RequestSortKey,
   CreateTechnicianInput,
+  CreateTechnicianResult,
   UpdateTechnicianInput,
+  UpdateTechnicianResult,
   TranscriptMessage,
   RequestNote,
 } from "./types";
@@ -1093,7 +1096,12 @@ export async function getTechnicians(
 export async function createTechnician(
   organizationId: string,
   input: CreateTechnicianInput,
-): Promise<TechnicianRecord> {
+  actor: MutationActor,
+): Promise<CreateTechnicianResult> {
+  if (!assertMayMutateUser(actor, { newEmail: input.email }).ok) {
+    return { ok: false, reason: "forbidden" };
+  }
+
   const passwordHash = await hash(input.password, 12);
 
   const [created] = await db
@@ -1115,11 +1123,14 @@ export async function createTechnician(
   }
 
   return {
-    id: created.id,
-    name: created.name,
-    email: created.email,
-    isActive: created.isActive,
-    createdAt: created.createdAt.toISOString(),
+    ok: true,
+    technician: {
+      id: created.id,
+      name: created.name,
+      email: created.email,
+      isActive: created.isActive,
+      createdAt: created.createdAt.toISOString(),
+    },
   };
 }
 
@@ -1127,7 +1138,33 @@ export async function updateTechnician(
   organizationId: string,
   technicianId: string,
   input: UpdateTechnicianInput,
-): Promise<TechnicianRecord | null> {
+  actor: MutationActor,
+): Promise<UpdateTechnicianResult> {
+  const technicianScope = withTenant(
+    users,
+    organizationId,
+    and(eq(users.id, technicianId), eq(users.role, "technician"))!,
+  );
+
+  // Pre-read the current email so a platform admin's row (or a change TO a
+  // platform admin's email) is refused before any write.
+  const [current] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(technicianScope)
+    .limit(1);
+  if (!current) {
+    return { ok: false, reason: "not_found" };
+  }
+  if (
+    !assertMayMutateUser(actor, {
+      email: current.email,
+      newEmail: input.email,
+    }).ok
+  ) {
+    return { ok: false, reason: "forbidden" };
+  }
+
   const updates: Record<string, unknown> = {
     updatedAt: new Date(),
   };
@@ -1145,25 +1182,22 @@ export async function updateTechnician(
   const [updated] = await db
     .update(users)
     .set(updates)
-    .where(
-      withTenant(
-        users,
-        organizationId,
-        and(eq(users.id, technicianId), eq(users.role, "technician"))!,
-      ),
-    )
+    .where(technicianScope)
     .returning();
 
   if (!updated) {
-    return null;
+    return { ok: false, reason: "not_found" };
   }
 
   return {
-    id: updated.id,
-    name: updated.name,
-    email: updated.email,
-    isActive: updated.isActive,
-    createdAt: updated.createdAt.toISOString(),
+    ok: true,
+    technician: {
+      id: updated.id,
+      name: updated.name,
+      email: updated.email,
+      isActive: updated.isActive,
+      createdAt: updated.createdAt.toISOString(),
+    },
   };
 }
 

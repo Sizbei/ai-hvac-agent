@@ -67,8 +67,7 @@ export async function POST(request: NextRequest) {
     const result = await createInvite(
       session.organizationId,
       parsed.data,
-      session.role,
-      session.userId,
+      session,
     );
 
     if (!result.ok) {

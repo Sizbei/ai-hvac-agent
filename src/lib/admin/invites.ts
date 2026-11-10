@@ -5,7 +5,11 @@ import { and, eq, asc, gt, isNull, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { canAssignRole } from "@/lib/auth/authz";
+import {
+  canAssignRole,
+  assertMayMutateUser,
+  type MutationActor,
+} from "@/lib/auth/authz";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
 import { isRetiredDemoEmail } from "@/lib/auth/retired-demo";
 import { normalizeEmail, createStaff, claimPasswordlessStaff } from "./staff-queries";
@@ -77,12 +81,6 @@ function toInviteRecord(row: {
   };
 }
 
-/** Project a (wider) session role onto the AdminRole the authz policy uses.
- * Only super_admin is privileged; anything else is confined to technicians. */
-function toActorRole(role: AdminSessionPayload["role"]): AdminRole {
-  return role === "super_admin" ? "super_admin" : "admin";
-}
-
 export type CreateInviteResult =
   | { ok: true; invite: InviteRecord; token: string }
   | {
@@ -93,19 +91,23 @@ export type CreateInviteResult =
 /**
  * Create an invite for `email` to join `organizationId` as `role`.
  *
- * @param actorRole role of the admin creating the invite (authz gate)
- * @param invitedByUserId id of that admin (trace)
+ * @param actor the admin creating the invite (authz gate). Recorded as the
+ *   invite's inviter, whose authority is re-checked when the invite is accepted.
  */
 export async function createInvite(
   organizationId: string,
   input: { email: string; role: InvitableRole },
-  actorRole: AdminSessionPayload["role"],
-  invitedByUserId: string,
+  actor: MutationActor,
 ): Promise<CreateInviteResult> {
   // Privilege-escalation guard (policy in authz.ts). canAssignRole also rejects
   // "super_admin" for a super_admin actor, but the column enum already makes
   // super_admin un-storable; we never accept it as input.
-  if (!canAssignRole(toActorRole(actorRole), input.role)) {
+  if (!canAssignRole(actor.role, input.role)) {
+    return { ok: false, reason: "forbidden" };
+  }
+  // An invite can claim or create a row for its email, so a platform admin's
+  // email is never invitable by anyone but a platform admin.
+  if (!assertMayMutateUser(actor, { newEmail: input.email }).ok) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -179,7 +181,7 @@ export async function createInvite(
       email,
       role: input.role,
       tokenHash,
-      invitedByUserId,
+      invitedByUserId: actor.userId,
       expiresAt,
     })
     .returning({
@@ -268,6 +270,7 @@ export type ResolveInviteResult =
         readonly organizationId: string;
         readonly email: string;
         readonly role: InvitableRole;
+        readonly invitedByUserId: string | null;
       };
     }
   | { ok: false; reason: "not_found" | "expired" | "used" | "revoked" };
@@ -289,6 +292,7 @@ export async function resolveInviteByToken(
       organizationId: staffInvites.organizationId,
       email: staffInvites.email,
       role: staffInvites.role,
+      invitedByUserId: staffInvites.invitedByUserId,
       expiresAt: staffInvites.expiresAt,
       acceptedAt: staffInvites.acceptedAt,
       revokedAt: staffInvites.revokedAt,
@@ -317,7 +321,40 @@ export async function resolveInviteByToken(
       organizationId: row.organizationId,
       email: row.email,
       role: row.role,
+      invitedByUserId: row.invitedByUserId,
     },
+  };
+}
+
+/**
+ * Load an invite's inviter as a MutationActor (plan ruling 6). Looks in ANY org:
+ * a provisioned org's owner invite is created by the platform admin, whose row
+ * lives in the platform org. Returns null unless the user exists, is active, and
+ * is still admin-tier — an invite from someone who has since left or been
+ * demoted to technician carries no authority.
+ */
+export async function loadInviter(
+  userId: string | null,
+): Promise<MutationActor | null> {
+  if (!userId) return null;
+  const [row] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      role: users.role,
+      organizationId: users.organizationId,
+      isActive: users.isActive,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row || !row.isActive) return null;
+  if (row.role !== "super_admin" && row.role !== "admin") return null;
+  return {
+    userId: row.id,
+    email: row.email,
+    role: row.role,
+    organizationId: row.organizationId,
   };
 }
 
@@ -374,17 +411,34 @@ export async function acceptInvite(
     return { ok: false, reason: "invalid" };
   }
 
+  // The actor is the inviter, re-loaded NOW (plan ruling 6): an invite from
+  // someone who has left, been deactivated, or lost the authority to grant this
+  // role (e.g. a super_admin since demoted to admin) is no longer valid.
+  const inviter = await loadInviter(invite.invitedByUserId);
+  if (!inviter || !canAssignRole(inviter.role, invite.role)) {
+    return { ok: false, reason: "invalid" };
+  }
+
   // Create the user in the invite's OWN org, with the invite's role, BEFORE
-  // claiming the invite. Internal call: actorRole defaults to super_admin (the
-  // inviting admin's authority was checked at create time; the role is fixed by
-  // the trusted invite row, never by request input). The unique email index
-  // makes this the race arbiter — a duplicate create returns email_conflict.
-  const created = await createStaff(invite.organizationId, {
-    name: input.name,
-    email: invite.email,
-    password: input.password,
-    role: invite.role,
-  });
+  // claiming the invite. The role is fixed by the trusted invite row, never by
+  // request input; the inviter's current authority is the actor. The unique
+  // email index makes this the race arbiter — a duplicate create returns
+  // email_conflict.
+  const created = await createStaff(
+    invite.organizationId,
+    {
+      name: input.name,
+      email: invite.email,
+      password: input.password,
+      role: invite.role,
+    },
+    inviter,
+  );
+  // A refusal (e.g. a platform admin's email invited by an org admin) never
+  // falls through to claiming the existing row.
+  if (!created.ok && created.reason === "forbidden") {
+    return { ok: false, reason: "invalid" };
+  }
 
   // The accepted identity: a NEWLY created user, or — when the email already
   // belongs to an ACTIVE PASSWORD-LESS user with the invite's role (e.g. a
@@ -395,11 +449,18 @@ export async function acceptInvite(
   if (created.ok) {
     staff = created.staff;
   } else {
-    const claimed = await claimPasswordlessStaff(invite.organizationId, {
-      email: invite.email,
-      role: invite.role,
-      password: input.password,
-    });
+    const claimed = await claimPasswordlessStaff(
+      invite.organizationId,
+      {
+        email: invite.email,
+        role: invite.role,
+        password: input.password,
+      },
+      inviter,
+    );
+    if (!claimed.ok && claimed.reason === "forbidden") {
+      return { ok: false, reason: "invalid" };
+    }
     if (!claimed.ok) {
       // email_conflict: a user with this email already exists in the org and is
       // not claimable (has a password / inactive / different role). The invite

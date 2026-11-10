@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     const result = await createStaff(
       session.organizationId,
       parsed.data,
-      session.role,
+      session,
     );
     if (!result.ok) {
       if (result.reason === "forbidden") {

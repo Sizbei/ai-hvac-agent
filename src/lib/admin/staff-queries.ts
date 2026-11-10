@@ -32,8 +32,12 @@ import { hash } from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { canManageRole, canAssignRole } from "@/lib/auth/authz";
-import type { AdminRole } from "@/lib/auth/types";
+import {
+  canManageRole,
+  canAssignRole,
+  assertMayMutateUser,
+  type MutationActor,
+} from "@/lib/auth/authz";
 import {
   ADMIN_TIER_ROLES,
   type StaffRecord,
@@ -49,16 +53,6 @@ const ADMIN_TIER = [...ADMIN_TIER_ROLES] as StaffRole[];
  * "keep one active admin" lockout guard. */
 function isAdminTier(role: StaffRole): boolean {
   return role === "super_admin" || role === "admin";
-}
-
-/** Project a (possibly wider) StaffRole onto the AdminRole used by the authz
- * policy helpers. Only `super_admin` is privileged; every other tier (admin or
- * the never-a-session technician) is treated as a normal `admin` for the
- * policy, which confines it to managing technicians. This keeps the single
- * source of truth in authz.ts while accepting the wider StaffRole at the call
- * sites here. */
-function toActorRole(role: StaffRole): AdminRole {
-  return role === "super_admin" ? "super_admin" : "admin";
 }
 
 export const BCRYPT_COST = 12;
@@ -183,15 +177,17 @@ export type CreateStaffResult =
 export async function createStaff(
   organizationId: string,
   input: CreateStaffInput,
-  /** Role of the admin creating the user. Only a super_admin may create an
-   * admin-tier user; a normal admin may only create technicians. Defaults to
-   * "super_admin" for internal/seed callers — route handlers MUST pass the
-   * real session role. */
-  actorRole: StaffRole = "super_admin",
+  /** Who is creating the user (the session, or an invite's inviter). Only a
+   * super_admin may create an admin-tier user; a normal admin may only create
+   * technicians; nobody but a platform admin may create a platform-admin email. */
+  actor: MutationActor,
 ): Promise<CreateStaffResult> {
   // Privilege-escalation guard (policy in authz.ts): only a super_admin may
   // assign an admin-tier role; a normal admin may only ever mint a technician.
-  if (!canAssignRole(toActorRole(actorRole), input.role)) {
+  if (!canAssignRole(actor.role, input.role)) {
+    return { ok: false, reason: "forbidden" };
+  }
+  if (!assertMayMutateUser(actor, { newEmail: input.email }).ok) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -268,12 +264,10 @@ export async function updateStaff(
   organizationId: string,
   userId: string,
   input: UpdateStaffInput,
-  /** Role of the admin performing the update. Only a super_admin may manage an
-   * admin-tier target or assign an admin-tier role; a normal admin is confined
-   * to technicians. Defaults to "super_admin" only for internal/seed callers
-   * that have already authorized themselves — route handlers MUST pass the real
-   * session role. */
-  actorRole: StaffRole = "super_admin",
+  /** Who is performing the update. Only a super_admin may manage an admin-tier
+   * target or assign an admin-tier role; a normal admin is confined to
+   * technicians; only a platform admin may change a platform admin's row. */
+  actor: MutationActor,
 ): Promise<UpdateStaffResult> {
   const hasChange =
     input.name !== undefined ||
@@ -300,12 +294,15 @@ export async function updateStaff(
   // admin-tier user (admin or super_admin) OR promote anyone INTO an admin-tier
   // role. A normal admin can only touch technicians. This is the
   // privilege-escalation guard — it stops an admin from editing/demoting another
-  // admin or minting a new admin.
-  const actor = toActorRole(actorRole);
-  const cannotManageTarget = !canManageRole(actor, current.role);
+  // admin or minting a new admin. The platform operator's row is off limits to
+  // everyone but a platform admin, whatever the change.
+  const cannotManageTarget = !canManageRole(actor.role, current.role);
   const cannotAssignRole =
-    input.role !== undefined && !canAssignRole(actor, input.role);
-  if (cannotManageTarget || cannotAssignRole) {
+    input.role !== undefined && !canAssignRole(actor.role, input.role);
+  const platformProtected = !assertMayMutateUser(actor, {
+    email: current.email,
+  }).ok;
+  if (cannotManageTarget || cannotAssignRole || platformProtected) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -368,18 +365,18 @@ export type ResetPasswordResult =
  * (passwordHash NULL → set) and then authenticate as that super_admin via the
  * password-login route — a privilege-escalation path. We therefore load the
  * target's role first and refuse the reset unless the actor is a super_admin or
- * the target is a technician. */
+ * the target is a technician. A platform admin's password can only be reset by
+ * a platform admin. */
 export async function resetStaffPassword(
   organizationId: string,
   userId: string,
   newPassword: string,
-  /** Role of the admin performing the reset. Defaults to "super_admin" for
-   * internal callers; route handlers MUST pass the real session role. */
-  actorRole: StaffRole = "super_admin",
+  /** Who is performing the reset (the session). */
+  actor: MutationActor,
 ): Promise<ResetPasswordResult> {
-  // Load the target's role (org-scoped) so we can authorize against it.
+  // Load the target's role + email (org-scoped) so we can authorize against it.
   const [current] = await db
-    .select({ id: users.id, role: users.role })
+    .select({ id: users.id, role: users.role, email: users.email })
     .from(users)
     .where(withTenant(users, organizationId, eq(users.id, userId)))
     .limit(1);
@@ -391,7 +388,10 @@ export async function resetStaffPassword(
   // Policy in authz.ts: managing an admin-tier target's credentials requires
   // super_admin. Without this a normal admin could plant a password on a
   // Google-only super_admin and then log in as them.
-  if (!canManageRole(toActorRole(actorRole), current.role)) {
+  if (
+    !canManageRole(actor.role, current.role) ||
+    !assertMayMutateUser(actor, { email: current.email }).ok
+  ) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -412,7 +412,7 @@ export async function resetStaffPassword(
 
 export type ClaimPasswordlessStaffResult =
   | { ok: true; staff: { id: string; email: string; name: string } }
-  | { ok: false; reason: "not_claimable" };
+  | { ok: false; reason: "not_claimable" | "forbidden" };
 
 /**
  * Set a first password on an EXISTING password-less user — the invite-accept
@@ -426,10 +426,15 @@ export type ClaimPasswordlessStaffResult =
  *    password on an admin).
  * The UPDATE re-asserts password_hash IS NULL so two concurrent accepts can't
  * both claim; the loser reports not_claimable.
+ *
+ * `actor` is the invite's inviter (plan ruling 6). It must be allowed to manage
+ * the user's role, and only a platform admin may claim a platform admin's row
+ * (otherwise "forbidden").
  */
 export async function claimPasswordlessStaff(
   organizationId: string,
   input: { email: string; role: StaffRole; password: string },
+  actor: MutationActor,
 ): Promise<ClaimPasswordlessStaffResult> {
   const email = normalizeEmail(input.email);
   const [user] = await db
@@ -445,8 +450,16 @@ export async function claimPasswordlessStaff(
     .where(withTenant(users, organizationId, eq(users.email, email)))
     .limit(1);
 
+  if (!user) {
+    return { ok: false, reason: "not_claimable" };
+  }
   if (
-    !user ||
+    !canManageRole(actor.role, user.role) ||
+    !assertMayMutateUser(actor, { email: user.email }).ok
+  ) {
+    return { ok: false, reason: "forbidden" };
+  }
+  if (
     !user.isActive ||
     user.passwordHash !== null ||
     user.role !== input.role

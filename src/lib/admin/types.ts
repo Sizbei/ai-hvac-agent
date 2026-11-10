@@ -515,3 +515,15 @@ export interface UpdateTechnicianInput {
   readonly email?: string;
   readonly isActive?: boolean;
 }
+
+/** createTechnician outcome. "forbidden": the actor may not create this email
+ * (a platform admin's email, see assertMayMutateUser). */
+export type CreateTechnicianResult =
+  | { ok: true; technician: TechnicianRecord }
+  | { ok: false; reason: "forbidden" };
+
+/** updateTechnician outcome. "not_found": no technician with that id in the org;
+ * "forbidden": the row or the new email belongs to a platform admin. */
+export type UpdateTechnicianResult =
+  | { ok: true; technician: TechnicianRecord }
+  | { ok: false; reason: "not_found" | "forbidden" };

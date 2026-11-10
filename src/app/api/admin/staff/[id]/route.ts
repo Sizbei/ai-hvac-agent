@@ -112,7 +112,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       session.organizationId,
       id,
       parsed.data,
-      session.role,
+      session,
     );
     if (!result.ok) {
       switch (result.reason) {

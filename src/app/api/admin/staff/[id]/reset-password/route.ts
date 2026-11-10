@@ -54,7 +54,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       session.organizationId,
       id,
       parsed.data.password,
-      session.role,
+      session,
     );
     if (!result.ok) {
       if (result.reason === "forbidden") {

@@ -1,14 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MutationActor } from '@/lib/auth/authz';
 
-// authz.ts imports "server-only"; make it a no-op in tests. The real policy is
-// re-implemented inline below so these stay pure unit tests of staff-queries.
+// authz.ts imports "server-only"; make it a no-op in tests. The REAL policy
+// (role rules + platform-admin protection) is used, driven by env per test.
 vi.mock('server-only', () => ({}));
-vi.mock('@/lib/auth/authz', () => ({
-  canManageRole: (actor: string, target: string) =>
-    actor === 'super_admin' ? true : target === 'technician',
-  canAssignRole: (actor: string, desired: string) =>
-    actor === 'super_admin' ? true : desired === 'technician',
-}));
 
 // bcrypt hash is mocked so tests don't pay the real cost and we can assert the
 // plaintext is hashed, never persisted raw.
@@ -30,6 +25,7 @@ vi.mock('drizzle-orm', () => ({
   inArray: (...a: unknown[]) => ['inArray', ...a],
   count: () => 'count',
   asc: (c: unknown) => c,
+  isNull: (c: unknown) => ['isNull', c],
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -86,12 +82,38 @@ import {
   createStaff,
   updateStaff,
   resetStaffPassword,
+  claimPasswordlessStaff,
   normalizeEmail,
   BCRYPT_COST,
 } from './staff-queries';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 const USER = '00000000-0000-0000-0000-0000000000aa';
+const PORG = '00000000-0000-0000-0000-0000000000ff';
+const PLATFORM_EMAIL = 'r@x.com';
+
+const SUPER: MutationActor = {
+  userId: 'actor-super',
+  email: 'boss@org.com',
+  role: 'super_admin',
+  organizationId: ORG,
+};
+const ADMIN: MutationActor = { ...SUPER, userId: 'actor-admin', role: 'admin' };
+const PLATFORM: MutationActor = {
+  userId: 'actor-platform',
+  email: PLATFORM_EMAIL,
+  role: 'super_admin',
+  organizationId: PORG,
+};
+
+const ORIGINAL_EMAILS = process.env.PLATFORM_ADMIN_EMAILS;
+const ORIGINAL_PORG = process.env.PLATFORM_ORG_ID;
+afterEach(() => {
+  if (ORIGINAL_EMAILS === undefined) delete process.env.PLATFORM_ADMIN_EMAILS;
+  else process.env.PLATFORM_ADMIN_EMAILS = ORIGINAL_EMAILS;
+  if (ORIGINAL_PORG === undefined) delete process.env.PLATFORM_ORG_ID;
+  else process.env.PLATFORM_ORG_ID = ORIGINAL_PORG;
+});
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -113,6 +135,8 @@ beforeEach(() => {
   insertQueue.length = 0;
   updateQueue.length = 0;
   mockHash.mockClear();
+  process.env.PLATFORM_ADMIN_EMAILS = PLATFORM_EMAIL;
+  process.env.PLATFORM_ORG_ID = PORG;
 });
 
 describe('normalizeEmail', () => {
@@ -170,7 +194,7 @@ describe('createStaff', () => {
       email: 'Dup@Example.com',
       password: 'password123',
       role: 'admin',
-    });
+    }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'email_conflict' });
     expect(mockHash).not.toHaveBeenCalled();
   });
@@ -185,7 +209,7 @@ describe('createStaff', () => {
       email: '  New@Example.com ',
       password: 'password123',
       role: 'technician',
-    });
+    }, SUPER);
     expect(mockHash).toHaveBeenCalledWith('password123', BCRYPT_COST);
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -203,7 +227,7 @@ describe('createStaff', () => {
         email: 'x@example.com',
         password: 'password123',
         role: 'admin',
-      }),
+      }, SUPER),
     ).rejects.toThrow('Failed to create staff member');
   });
 
@@ -219,7 +243,7 @@ describe('createStaff', () => {
       email: 'dup@example.com',
       password: 'password123',
       role: 'admin',
-    });
+    }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'email_conflict' });
   });
 
@@ -237,34 +261,34 @@ describe('createStaff', () => {
       email: 'crossorg@example.com',
       password: 'password123',
       role: 'admin',
-    });
+    }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'email_conflict' });
   });
 });
 
 describe('updateStaff', () => {
   it('is a no-op when the patch is empty', async () => {
-    const r = await updateStaff(ORG, USER, {});
+    const r = await updateStaff(ORG, USER, {}, SUPER);
     expect(r).toEqual({ ok: false, reason: 'no_changes' });
   });
 
   it('returns not_found when the user is absent in this org', async () => {
     selectQueue.push([]); // current-row load returns nothing
-    const r = await updateStaff(ORG, USER, { name: 'X' });
+    const r = await updateStaff(ORG, USER, { name: 'X' }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'not_found' });
   });
 
   it('blocks demoting the last active admin', async () => {
     selectQueue.push([row({ role: 'admin', isActive: true })]); // current
     selectQueue.push([{ value: '0' }]); // zero OTHER active admins
-    const r = await updateStaff(ORG, USER, { role: 'technician' });
+    const r = await updateStaff(ORG, USER, { role: 'technician' }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'last_admin' });
   });
 
   it('blocks deactivating the last active admin', async () => {
     selectQueue.push([row({ role: 'admin', isActive: true })]);
     selectQueue.push([{ value: '0' }]);
-    const r = await updateStaff(ORG, USER, { isActive: false });
+    const r = await updateStaff(ORG, USER, { isActive: false }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'last_admin' });
   });
 
@@ -272,7 +296,7 @@ describe('updateStaff', () => {
     selectQueue.push([row({ role: 'admin', isActive: true })]);
     selectQueue.push([{ value: '2' }]); // two other active admins
     updateQueue.push([row({ role: 'technician' })]);
-    const r = await updateStaff(ORG, USER, { role: 'technician' });
+    const r = await updateStaff(ORG, USER, { role: 'technician' }, SUPER);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.staff.role).toBe('technician');
   });
@@ -282,7 +306,7 @@ describe('updateStaff', () => {
     // No count() row queued — if the guard ran it would read [] → 0 and could
     // wrongly block. A name change must skip the guard entirely.
     updateQueue.push([row({ name: 'Renamed' })]);
-    const r = await updateStaff(ORG, USER, { name: 'Renamed' });
+    const r = await updateStaff(ORG, USER, { name: 'Renamed' }, SUPER);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.staff.name).toBe('Renamed');
   });
@@ -290,7 +314,7 @@ describe('updateStaff', () => {
   it('allows deactivating a technician without touching the admin guard', async () => {
     selectQueue.push([row({ role: 'technician', isActive: true })]);
     updateQueue.push([row({ role: 'technician', isActive: false })]);
-    const r = await updateStaff(ORG, USER, { isActive: false });
+    const r = await updateStaff(ORG, USER, { isActive: false }, SUPER);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.staff.isActive).toBe(false);
   });
@@ -305,14 +329,14 @@ describe('updateStaff', () => {
         'last_active_admin: organization X must retain at least one active admin',
       ),
     );
-    const r = await updateStaff(ORG, USER, { role: 'technician' });
+    const r = await updateStaff(ORG, USER, { role: 'technician' }, SUPER);
     expect(r).toEqual({ ok: false, reason: 'last_admin' });
   });
 
   it('rethrows non-trigger DB errors', async () => {
     selectQueue.push([row({ role: 'technician', isActive: true })]);
     updateQueue.push(new Error('connection reset'));
-    await expect(updateStaff(ORG, USER, { name: 'X' })).rejects.toThrow(
+    await expect(updateStaff(ORG, USER, { name: 'X' }, SUPER)).rejects.toThrow(
       'connection reset',
     );
   });
@@ -322,41 +346,135 @@ describe('resetStaffPassword', () => {
   it('hashes the new password and never returns it', async () => {
     selectQueue.push([{ id: USER, role: 'technician' }]); // target lookup
     updateQueue.push([{ id: USER }]);
-    const r = await resetStaffPassword(ORG, USER, 'brandnewpass');
+    const r = await resetStaffPassword(ORG, USER, 'brandnewpass', SUPER);
     expect(mockHash).toHaveBeenCalledWith('brandnewpass', BCRYPT_COST);
     expect(r).toEqual({ ok: true });
   });
 
   it('returns not_found when the user is absent', async () => {
     selectQueue.push([]); // no target row
-    const r = await resetStaffPassword(ORG, USER, 'brandnewpass');
+    const r = await resetStaffPassword(ORG, USER, 'brandnewpass', SUPER);
     expect(r).toEqual({ ok: false, reason: 'not_found' });
   });
 
   it('forbids a normal admin from resetting an admin-tier password (priv-esc guard)', async () => {
     selectQueue.push([{ id: USER, role: 'super_admin' }]); // target is super_admin
-    const r = await resetStaffPassword(ORG, USER, 'planted-pass', 'admin');
+    const r = await resetStaffPassword(ORG, USER, 'planted-pass', ADMIN);
     expect(r).toEqual({ ok: false, reason: 'forbidden' });
     expect(mockHash).not.toHaveBeenCalledWith('planted-pass', BCRYPT_COST);
   });
 
   it('forbids a normal admin from resetting another admin password', async () => {
     selectQueue.push([{ id: USER, role: 'admin' }]);
-    const r = await resetStaffPassword(ORG, USER, 'x', 'admin');
+    const r = await resetStaffPassword(ORG, USER, 'x', ADMIN);
     expect(r).toEqual({ ok: false, reason: 'forbidden' });
   });
 
   it('allows a super_admin to reset an admin-tier password', async () => {
     selectQueue.push([{ id: USER, role: 'admin' }]);
     updateQueue.push([{ id: USER }]);
-    const r = await resetStaffPassword(ORG, USER, 'newpass', 'super_admin');
+    const r = await resetStaffPassword(ORG, USER, 'newpass', SUPER);
     expect(r).toEqual({ ok: true });
   });
 
   it('allows a normal admin to reset a technician password', async () => {
     selectQueue.push([{ id: USER, role: 'technician' }]);
     updateQueue.push([{ id: USER }]);
-    const r = await resetStaffPassword(ORG, USER, 'newpass', 'admin');
+    const r = await resetStaffPassword(ORG, USER, 'newpass', ADMIN);
     expect(r).toEqual({ ok: true });
+  });
+});
+
+describe('platform-admin protection', () => {
+  const platformRow = () =>
+    row({ email: PLATFORM_EMAIL, role: 'super_admin', isActive: true });
+
+  it('resetStaffPassword refuses a platform-admin target for a non-platform actor', async () => {
+    selectQueue.push([{ id: USER, role: 'super_admin', email: PLATFORM_EMAIL }]);
+    const r = await resetStaffPassword(ORG, USER, 'takeover-pass', SUPER);
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(mockHash).not.toHaveBeenCalled();
+  });
+
+  it('resetStaffPassword lets the platform admin reset their own row', async () => {
+    selectQueue.push([{ id: USER, role: 'super_admin', email: PLATFORM_EMAIL }]);
+    updateQueue.push([{ id: USER }]);
+    const r = await resetStaffPassword(PORG, USER, 'mine-pass', PLATFORM);
+    expect(r).toEqual({ ok: true });
+  });
+
+  it('updateStaff refuses a role change on a platform admin', async () => {
+    selectQueue.push([platformRow()]);
+    const r = await updateStaff(ORG, USER, { role: 'admin' }, SUPER);
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(updateQueue.length).toBe(0);
+  });
+
+  it('updateStaff refuses deactivating a platform admin for a non-platform actor', async () => {
+    selectQueue.push([platformRow()]);
+    selectQueue.push([{ value: '3' }]); // other admins exist — not a last-admin case
+    updateQueue.push([platformRow()]);
+    const r = await updateStaff(ORG, USER, { isActive: false }, SUPER);
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('updateStaff still lets a super_admin edit an ordinary admin', async () => {
+    selectQueue.push([row({ role: 'admin', email: 'alice@example.com' })]);
+    updateQueue.push([row({ name: 'Alice B' })]);
+    const r = await updateStaff(ORG, USER, { name: 'Alice B' }, SUPER);
+    expect(r.ok).toBe(true);
+  });
+
+  it('createStaff refuses a platform-admin email for a non-platform actor', async () => {
+    const r = await createStaff(
+      ORG,
+      { name: 'Fake', email: ' R@X.com ', password: 'password123', role: 'admin' },
+      SUPER,
+    );
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(mockHash).not.toHaveBeenCalled();
+  });
+
+  it('claimPasswordlessStaff refuses a platform-admin email when the actor is not a platform admin', async () => {
+    selectQueue.push([
+      {
+        id: USER,
+        email: PLATFORM_EMAIL,
+        name: 'R',
+        role: 'admin',
+        isActive: true,
+        passwordHash: null,
+      },
+    ]);
+    const r = await claimPasswordlessStaff(
+      ORG,
+      { email: PLATFORM_EMAIL, role: 'admin', password: 'password123' },
+      SUPER,
+    );
+    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(mockHash).not.toHaveBeenCalled();
+  });
+
+  it('claimPasswordlessStaff sets a first password on an ordinary password-less technician', async () => {
+    selectQueue.push([
+      {
+        id: USER,
+        email: 'tech@x.com',
+        name: 'Tech',
+        role: 'technician',
+        isActive: true,
+        passwordHash: null,
+      },
+    ]);
+    updateQueue.push([{ id: USER }]);
+    const r = await claimPasswordlessStaff(
+      ORG,
+      { email: 'tech@x.com', role: 'technician', password: 'password123' },
+      ADMIN,
+    );
+    expect(r).toEqual({
+      ok: true,
+      staff: { id: USER, email: 'tech@x.com', name: 'Tech' },
+    });
   });
 });

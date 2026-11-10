@@ -72,6 +72,27 @@ describe("POST /api/admin/staff seat gate", () => {
   });
 });
 
+describe("POST /api/admin/staff actor", () => {
+  it("passes the whole session as the actor", async () => {
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    createStaff.mockResolvedValue({ ok: true, staff: { id: "u1", role: "technician" } });
+    await POST(postReq());
+    expect(createStaff).toHaveBeenCalledWith(
+      SESSION.organizationId,
+      expect.objectContaining({ email: "new@x.com" }),
+      SESSION,
+    );
+  });
+
+  it("maps a refusal (e.g. a platform-admin email) to 403 FORBIDDEN", async () => {
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    createStaff.mockResolvedValue({ ok: false, reason: "forbidden" });
+    const res = await POST(postReq());
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+});
+
 describe("GET /api/admin/staff", () => {
   it("returns seat usage for the session org", async () => {
     listStaff.mockResolvedValue([]);

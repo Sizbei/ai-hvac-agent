@@ -124,7 +124,7 @@ describe('POST /api/admin/technicians', () => {
       isActive: true,
       createdAt: '2026-01-01T00:00:00Z',
     };
-    mockCreateTechnician.mockResolvedValue(mockCreated);
+    mockCreateTechnician.mockResolvedValue({ ok: true, technician: mockCreated });
 
     const request = createMockRequest({
       method: 'POST',
@@ -189,7 +189,7 @@ describe('PATCH /api/admin/technicians/[id]', () => {
       isActive: true,
       createdAt: '2026-01-01T00:00:00Z',
     };
-    mockUpdateTechnician.mockResolvedValue(mockUpdated);
+    mockUpdateTechnician.mockResolvedValue({ ok: true, technician: mockUpdated });
 
     const request = createMockRequest({
       method: 'PATCH',
@@ -224,7 +224,7 @@ describe('PATCH /api/admin/technicians/[id]', () => {
 
   it('should return 404 when technician not found', async () => {
     mockGetAdminSession.mockResolvedValue(mockSession);
-    mockUpdateTechnician.mockResolvedValue(null);
+    mockUpdateTechnician.mockResolvedValue({ ok: false, reason: 'not_found' });
 
     const request = createMockRequest({
       method: 'PATCH',

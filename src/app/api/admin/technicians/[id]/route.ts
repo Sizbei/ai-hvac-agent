@@ -54,14 +54,19 @@ export async function PATCH(
       );
     }
 
-    const technician = await updateTechnician(
+    const result = await updateTechnician(
       session.organizationId,
       id,
       parsed.data,
+      session,
     );
-    if (!technician) {
+    if (!result.ok) {
+      if (result.reason === "forbidden") {
+        return errorResponse("Forbidden", "FORBIDDEN", 403);
+      }
       return errorResponse("Technician not found", "NOT_FOUND", 404);
     }
+    const { technician } = result;
 
     await logAudit({
       organizationId: session.organizationId,

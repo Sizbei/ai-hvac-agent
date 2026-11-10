@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MutationActor } from '@/lib/auth/authz';
 
 // server-only is a no-op in tests (module is server-only by import).
 vi.mock('server-only', () => ({}));
@@ -31,7 +32,13 @@ vi.mock('@/lib/db/schema', () => ({
     revokedAt: 'i.revokedAt',
     createdAt: 'i.createdAt',
   },
-  users: { id: 'u.id', email: 'u.email', organizationId: 'u.org' },
+  users: {
+    id: 'u.id',
+    email: 'u.email',
+    organizationId: 'u.org',
+    role: 'u.role',
+    isActive: 'u.isActive',
+  },
   organizations: { id: 'o.id', ownerEmail: 'o.ownerEmail' },
 }));
 
@@ -45,11 +52,8 @@ vi.mock('./staff-queries', () => ({
   claimPasswordlessStaff: (...a: unknown[]) => mockClaimPasswordlessStaff(...a),
 }));
 
-// authz: real policy (admin ⇒ technician only; super_admin ⇒ anything).
-vi.mock('@/lib/auth/authz', () => ({
-  canAssignRole: (actor: string, desired: string) =>
-    actor === 'super_admin' ? true : desired === 'technician',
-}));
+// authz: the REAL policy (admin ⇒ technician only; super_admin ⇒ anything;
+// platform-admin emails protected), driven by env per test.
 
 // entitlements: seat cap is configurable per test (default high so the seat gate
 // is a no-op for the pre-existing happy-path tests).
@@ -106,12 +110,51 @@ import {
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 const ACTOR = '11111111-1111-1111-1111-111111111111';
+const PORG = '00000000-0000-0000-0000-0000000000ff';
+const PLATFORM_EMAIL = 'r@x.com';
+
+const SUPER_ACTOR: MutationActor = {
+  userId: ACTOR,
+  email: 'boss@org.com',
+  role: 'super_admin',
+  organizationId: ORG,
+};
+const ADMIN_ACTOR: MutationActor = { ...SUPER_ACTOR, role: 'admin' };
+const PLATFORM_ACTOR: MutationActor = {
+  userId: '99999999-9999-9999-9999-999999999999',
+  email: PLATFORM_EMAIL,
+  role: 'super_admin',
+  organizationId: PORG,
+};
+
+/** The users row loadInviter reads for ACTOR (an active super_admin). */
+function inviterRow(over: Record<string, unknown> = {}) {
+  return {
+    id: ACTOR,
+    email: 'boss@org.com',
+    role: 'super_admin',
+    organizationId: ORG,
+    isActive: true,
+    ...over,
+  };
+}
+
+const ORIGINAL_EMAILS = process.env.PLATFORM_ADMIN_EMAILS;
+const ORIGINAL_PORG = process.env.PLATFORM_ORG_ID;
+afterEach(() => {
+  if (ORIGINAL_EMAILS === undefined) delete process.env.PLATFORM_ADMIN_EMAILS;
+  else process.env.PLATFORM_ADMIN_EMAILS = ORIGINAL_EMAILS;
+  if (ORIGINAL_PORG === undefined) delete process.env.PLATFORM_ORG_ID;
+  else process.env.PLATFORM_ORG_ID = ORIGINAL_PORG;
+});
 
 beforeEach(() => {
   selectQueue.length = 0;
   insertQueue.length = 0;
   updateQueue.length = 0;
   mockMaxStaff = 1000;
+  process.env.PLATFORM_ADMIN_EMAILS = PLATFORM_EMAIL;
+  process.env.PLATFORM_ORG_ID = PORG;
   mockCreateStaff.mockReset();
   mockClaimPasswordlessStaff.mockReset();
   // Default: the existing user is NOT claimable, so pre-existing conflict tests
@@ -142,8 +185,7 @@ describe('createInvite — authorization', () => {
     const res = await createInvite(
       ORG,
       { email: 'a@x.com', role: 'admin' },
-      'admin',
-      ACTOR,
+      ADMIN_ACTOR,
     );
     expect(res).toEqual({ ok: false, reason: 'forbidden' });
   });
@@ -164,8 +206,7 @@ describe('createInvite — authorization', () => {
     const res = await createInvite(
       ORG,
       { email: 'tech@x.com', role: 'technician' },
-      'admin',
-      ACTOR,
+      ADMIN_ACTOR,
     );
     expect(res.ok).toBe(true);
     if (res.ok) {
@@ -190,8 +231,7 @@ describe('createInvite — authorization', () => {
     const res = await createInvite(
       ORG,
       { email: 'admin@x.com', role: 'admin' },
-      'super_admin',
-      ACTOR,
+      SUPER_ACTOR,
     );
     expect(res.ok).toBe(true);
   });
@@ -203,8 +243,7 @@ describe('createInvite — conflicts', () => {
     const res = await createInvite(
       ORG,
       { email: 'taken@x.com', role: 'technician' },
-      'super_admin',
-      ACTOR,
+      SUPER_ACTOR,
     );
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
   });
@@ -215,8 +254,7 @@ describe('createInvite — conflicts', () => {
     const res = await createInvite(
       ORG,
       { email: 'pending@x.com', role: 'technician' },
-      'super_admin',
-      ACTOR,
+      SUPER_ACTOR,
     );
     expect(res).toEqual({ ok: false, reason: 'invite_exists' });
   });
@@ -226,8 +264,7 @@ describe('createInvite — conflicts', () => {
     const res = await createInvite(
       ORG,
       { email: '  Mixed@CASE.com ', role: 'technician' },
-      'super_admin',
-      ACTOR,
+      SUPER_ACTOR,
     );
     // It hit the user-conflict branch using the normalized email.
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
@@ -241,8 +278,7 @@ describe('createInvite — conflicts', () => {
     const res = await createInvite(
       ORG,
       { email: 'new@x.com', role: 'technician' },
-      'super_admin',
-      ACTOR,
+      SUPER_ACTOR,
     );
     expect(res).toEqual({ ok: false, reason: 'seat_limit' });
     // No insert should have been attempted.
@@ -266,8 +302,7 @@ describe('createInvite — conflicts', () => {
     const res = await createInvite(
       ORG,
       { email: 'new@x.com', role: 'technician' },
-      'super_admin',
-      ACTOR,
+      SUPER_ACTOR,
     );
     expect(res.ok).toBe(true);
   });
@@ -320,6 +355,7 @@ describe('resolveInviteByToken', () => {
       organizationId: ORG,
       email: 'a@x.com',
       role: 'technician',
+      invitedByUserId: ACTOR,
       expiresAt: new Date(Date.now() + 60_000),
       acceptedAt: null,
       revokedAt: null,
@@ -369,6 +405,7 @@ describe('resolveInviteByToken', () => {
         organizationId: ORG,
         email: 'a@x.com',
         role: 'technician',
+        invitedByUserId: ACTOR,
       });
     }
   });
@@ -381,6 +418,7 @@ describe('acceptInvite', () => {
       organizationId: ORG,
       email: 'new@x.com',
       role,
+      invitedByUserId: ACTOR,
       expiresAt: new Date(Date.now() + 60_000),
       acceptedAt: null,
       revokedAt: null,
@@ -404,6 +442,7 @@ describe('acceptInvite', () => {
 
   it('creates the user with the role FROM THE INVITE, not request input', async () => {
     selectQueue.push([liveRow('technician')]); // resolve
+    selectQueue.push([inviterRow()]); // loadInviter
     selectQueue.push([{ ownerEmail: null }]); // org has no pending owner
     mockCreateStaff.mockResolvedValue({
       ok: true,
@@ -426,7 +465,7 @@ describe('acceptInvite', () => {
       email: 'new@x.com',
       password: 'password1',
       role: 'technician',
-    });
+    }, SUPER_ACTOR);
     if (res.ok) {
       expect(res.accepted.role).toBe('technician');
       // technician → no admin session
@@ -436,6 +475,7 @@ describe('acceptInvite', () => {
 
   it('mints an admin session for an admin-role invite', async () => {
     selectQueue.push([liveRow('admin')]);
+    selectQueue.push([inviterRow()]); // loadInviter
     selectQueue.push([{ ownerEmail: null }]); // not a provisioned-owner accept
     mockCreateStaff.mockResolvedValue({
       ok: true,
@@ -463,6 +503,7 @@ describe('acceptInvite', () => {
 
   it('promotes the provisioned owner to super_admin and clears ownerEmail (FIX 2a)', async () => {
     selectQueue.push([liveRow('admin')]); // resolve: admin invite to new@x.com
+    selectQueue.push([inviterRow()]); // loadInviter
     selectQueue.push([{ ownerEmail: 'NEW@x.com' }]); // org owner matches (case-insensitive)
     mockCreateStaff.mockResolvedValue({
       ok: true,
@@ -493,6 +534,7 @@ describe('acceptInvite', () => {
 
   it('does NOT promote a different admin invite for the same org (FIX 2b)', async () => {
     selectQueue.push([liveRow('admin')]); // admin invite to new@x.com
+    selectQueue.push([inviterRow()]); // loadInviter
     selectQueue.push([{ ownerEmail: 'someone-else@x.com' }]); // owner is a different email
     mockCreateStaff.mockResolvedValue({
       ok: true,
@@ -517,6 +559,7 @@ describe('acceptInvite', () => {
 
   it('handles a NULL ownerEmail (legacy org) without promotion or crash (FIX 2c)', async () => {
     selectQueue.push([liveRow('admin')]);
+    selectQueue.push([inviterRow()]); // loadInviter
     selectQueue.push([{ ownerEmail: null }]); // legacy org: no owner recorded
     mockCreateStaff.mockResolvedValue({
       ok: true,
@@ -543,6 +586,7 @@ describe('acceptInvite', () => {
     // create-first ordering: a colliding create means the email is taken, so the
     // invite is left un-claimed (nothing to roll back) and the user is NOT made.
     selectQueue.push([liveRow('technician')]);
+    selectQueue.push([inviterRow()]); // loadInviter
     mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
@@ -568,7 +612,7 @@ describe('createInvite — credential-setup for existing password-less users', (
       },
     ]);
     const res = await createInvite(
-      ORG, { email: 'tech@x.com', role: 'technician' }, 'admin', ACTOR,
+      ORG, { email: 'tech@x.com', role: 'technician' }, ADMIN_ACTOR,
     );
     expect(res.ok).toBe(true);
   });
@@ -576,7 +620,7 @@ describe('createInvite — credential-setup for existing password-less users', (
   it('still refuses when the existing user already has a password', async () => {
     selectQueue.push([{ ...passwordlessTech, passwordHash: 'x' }]);
     const res = await createInvite(
-      ORG, { email: 'tech@x.com', role: 'technician' }, 'admin', ACTOR,
+      ORG, { email: 'tech@x.com', role: 'technician' }, ADMIN_ACTOR,
     );
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
   });
@@ -584,11 +628,11 @@ describe('createInvite — credential-setup for existing password-less users', (
   it('still refuses on role mismatch or inactive user', async () => {
     selectQueue.push([{ ...passwordlessTech, role: 'admin' }]);
     expect(
-      await createInvite(ORG, { email: 't@x.com', role: 'technician' }, 'super_admin', ACTOR),
+      await createInvite(ORG, { email: 't@x.com', role: 'technician' }, SUPER_ACTOR),
     ).toEqual({ ok: false, reason: 'email_conflict' });
     selectQueue.push([{ ...passwordlessTech, isActive: false }]);
     expect(
-      await createInvite(ORG, { email: 't@x.com', role: 'technician' }, 'super_admin', ACTOR),
+      await createInvite(ORG, { email: 't@x.com', role: 'technician' }, SUPER_ACTOR),
     ).toEqual({ ok: false, reason: 'email_conflict' });
   });
 });
@@ -597,12 +641,14 @@ describe('acceptInvite — claims an existing password-less user', () => {
   function liveTechRow() {
     return {
       id: 'inv1', organizationId: ORG, email: 'tech@x.com', role: 'technician',
+      invitedByUserId: ACTOR,
       expiresAt: new Date(Date.now() + 60_000), acceptedAt: null, revokedAt: null,
     };
   }
 
   it('sets the password on the existing user when createStaff hits email_conflict', async () => {
     selectQueue.push([liveTechRow()]); // resolve token
+    selectQueue.push([inviterRow()]); // loadInviter
     mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
     mockClaimPasswordlessStaff.mockResolvedValue({
       ok: true,
@@ -612,7 +658,7 @@ describe('acceptInvite — claims an existing password-less user', () => {
     const res = await acceptInvite('t', { name: 'Ignored', password: 'password1' });
     expect(mockClaimPasswordlessStaff).toHaveBeenCalledWith(ORG, {
       email: 'tech@x.com', role: 'technician', password: 'password1',
-    });
+    }, SUPER_ACTOR);
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.accepted.userId).toBe('u9');
@@ -624,8 +670,130 @@ describe('acceptInvite — claims an existing password-less user', () => {
 
   it('keeps email_conflict when the existing user is not claimable', async () => {
     selectQueue.push([liveTechRow()]);
+    selectQueue.push([inviterRow()]); // loadInviter
     mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res).toEqual({ ok: false, reason: 'email_conflict' });
+  });
+});
+
+describe('platform-admin protection and the inviter as actor', () => {
+  function liveRow(role: 'admin' | 'technician', email = 'new@x.com') {
+    return {
+      id: 'inv1',
+      organizationId: ORG,
+      email,
+      role,
+      invitedByUserId: ACTOR,
+      expiresAt: new Date(Date.now() + 60_000),
+      acceptedAt: null,
+      revokedAt: null,
+    };
+  }
+
+  it('createInvite refuses a platform-admin email', async () => {
+    const res = await createInvite(
+      ORG,
+      { email: ' R@X.com ', role: 'technician' },
+      SUPER_ACTOR,
+    );
+    expect(res).toEqual({ ok: false, reason: 'forbidden' });
+    expect(insertQueue.length).toBe(0);
+  });
+
+  it('createInvite records the actor as the inviter', async () => {
+    selectQueue.push([]); // no existing user
+    selectQueue.push([]); // no live invite
+    selectQueue.push([{ value: 0 }]); // seat count
+    insertQueue.push([
+      {
+        id: 'inv1',
+        email: 'new@x.com',
+        role: 'technician',
+        expiresAt: new Date('2026-06-13T00:00:00Z'),
+        createdAt: new Date('2026-06-10T00:00:00Z'),
+      },
+    ]);
+    const res = await createInvite(
+      ORG,
+      { email: 'new@x.com', role: 'technician' },
+      PLATFORM_ACTOR,
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it('acceptInvite returns invalid when the inviter is inactive or no longer admin-tier', async () => {
+    selectQueue.push([liveRow('technician')]);
+    selectQueue.push([inviterRow({ isActive: false })]);
+    expect(
+      await acceptInvite('t', { name: 'N', password: 'password1' }),
+    ).toEqual({ ok: false, reason: 'invalid' });
+
+    selectQueue.push([liveRow('technician')]);
+    selectQueue.push([inviterRow({ role: 'technician' })]);
+    expect(
+      await acceptInvite('t', { name: 'N', password: 'password1' }),
+    ).toEqual({ ok: false, reason: 'invalid' });
+
+    selectQueue.push([liveRow('technician')]);
+    selectQueue.push([]); // inviter row gone
+    expect(
+      await acceptInvite('t', { name: 'N', password: 'password1' }),
+    ).toEqual({ ok: false, reason: 'invalid' });
+
+    expect(mockCreateStaff).not.toHaveBeenCalled();
+    expect(mockClaimPasswordlessStaff).not.toHaveBeenCalled();
+  });
+
+  it('acceptInvite returns invalid for an admin invite whose inviter was demoted from super_admin to admin', async () => {
+    selectQueue.push([liveRow('admin')]);
+    selectQueue.push([inviterRow({ role: 'admin' })]);
+    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
+    expect(res).toEqual({ ok: false, reason: 'invalid' });
+    expect(mockCreateStaff).not.toHaveBeenCalled();
+  });
+
+  it('acceptInvite passes the inviter (loaded from any org) as the actor', async () => {
+    selectQueue.push([liveRow('admin')]);
+    selectQueue.push([
+      inviterRow({
+        id: PLATFORM_ACTOR.userId,
+        email: PLATFORM_EMAIL,
+        organizationId: PORG,
+      }),
+    ]);
+    selectQueue.push([{ ownerEmail: null }]);
+    mockCreateStaff.mockResolvedValue({
+      ok: true,
+      staff: { id: 'u1', name: 'N', email: 'new@x.com', role: 'admin' },
+    });
+    updateQueue.push([{ id: 'inv1' }]);
+    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
+    expect(res.ok).toBe(true);
+    expect(mockCreateStaff).toHaveBeenCalledWith(
+      ORG,
+      expect.objectContaining({ email: 'new@x.com', role: 'admin' }),
+      PLATFORM_ACTOR,
+    );
+  });
+
+  it('acceptInvite returns invalid when createStaff refuses (platform-protected email)', async () => {
+    selectQueue.push([liveRow('admin', PLATFORM_EMAIL)]);
+    selectQueue.push([inviterRow()]);
+    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
+    expect(res).toEqual({ ok: false, reason: 'invalid' });
+    // A refusal never falls through to claiming the existing row.
+    expect(mockClaimPasswordlessStaff).not.toHaveBeenCalled();
+    expect(updateQueue.length).toBe(0);
+  });
+
+  it('acceptInvite returns invalid when the claim of an existing row is refused', async () => {
+    selectQueue.push([liveRow('admin', PLATFORM_EMAIL)]);
+    selectQueue.push([inviterRow()]);
+    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
+    mockClaimPasswordlessStaff.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
+    expect(res).toEqual({ ok: false, reason: 'invalid' });
   });
 });

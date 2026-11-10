@@ -33,6 +33,27 @@ export function isSuperAdmin(
 }
 
 /**
+ * Whether `email` is on the platform-admin allowlist (PLATFORM_ADMIN_EMAILS,
+ * comma-separated, compared trimmed + lowercased). This says nothing about
+ * WHO is acting — it identifies the rows that belong to the platform operator,
+ * so they can be protected from org admins. Use `isPlatformAdmin` to decide
+ * whether an actor holds platform authority.
+ *
+ * Returns false when the env var is unset/empty or the email is blank.
+ */
+export function isPlatformAdminEmail(email: string | null | undefined): boolean {
+  const allow = process.env.PLATFORM_ADMIN_EMAILS;
+  if (!allow || !email) return false;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return false;
+  return allow
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0)
+    .includes(normalized);
+}
+
+/**
  * Whether `session` belongs to a PLATFORM admin — the cross-org operator who may
  * provision new tenants. This is deliberately SEPARATE from `super_admin`: a
  * super_admin is the top role WITHIN one org and must NOT be able to create
@@ -45,7 +66,6 @@ export function isSuperAdmin(
 export function isPlatformAdmin(
   session: Pick<AdminSessionPayload, "email" | "organizationId">,
 ): boolean {
-  const allow = process.env.PLATFORM_ADMIN_EMAILS;
   const platformOrgId = process.env.PLATFORM_ORG_ID?.trim();
   // Fail CLOSED unless BOTH are configured. Email alone was tenant-forgeable: a
   // tenant super_admin can mint a user with an allowlisted email in THEIR org
@@ -53,17 +73,42 @@ export function isPlatformAdmin(
   // in, and self-escalate to all-tenant platform access (list/export ANY org).
   // Binding to the designated platform org closes that — an attacker can't
   // place their user in an org they don't control.
-  if (!allow || !platformOrgId) return false;
+  if (!platformOrgId) return false;
   if (session.organizationId !== platformOrgId) return false;
+  return isPlatformAdminEmail(session.email);
+}
 
-  const sessionEmail = session.email.trim().toLowerCase();
-  if (!sessionEmail) return false;
+/**
+ * Who is changing a user row. `AdminSessionPayload` satisfies it; the invite
+ * accept flow builds one from the inviter's CURRENT users row.
+ */
+export interface MutationActor {
+  readonly userId: string;
+  readonly email: string;
+  readonly role: AdminRole;
+  readonly organizationId: string;
+}
 
-  return allow
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter((e) => e.length > 0)
-    .includes(sessionEmail);
+/**
+ * Whether `actor` may change a user row (create, edit, role, active flag,
+ * password, email, invite/claim). The platform operator's rows are protected:
+ * only a platform admin may touch a row whose CURRENT email (`target.email`) or
+ * requested email (`target.newEmail`) is on the platform allowlist. Without
+ * this, an org super_admin sharing the platform org could reset the operator's
+ * password, re-email the account, or claim it through an invite.
+ *
+ * Role rules (canManageRole / canAssignRole) are separate and still apply.
+ */
+export function assertMayMutateUser(
+  actor: MutationActor,
+  target: { readonly email?: string | null; readonly newEmail?: string | null },
+): { ok: true } | { ok: false; reason: "platform_protected" } {
+  const touchesPlatformRow =
+    isPlatformAdminEmail(target.email) || isPlatformAdminEmail(target.newEmail);
+  if (touchesPlatformRow && !isPlatformAdmin(actor)) {
+    return { ok: false, reason: "platform_protected" };
+  }
+  return { ok: true };
 }
 
 /**

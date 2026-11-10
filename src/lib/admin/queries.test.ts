@@ -949,6 +949,13 @@ describe('getTechnicians', () => {
 });
 
 describe('createTechnician', () => {
+  const ACTOR = {
+    userId: 'actor-1',
+    email: 'chick@spears.com',
+    role: 'super_admin' as const,
+    organizationId: ORG_ID,
+  };
+
   it('should hash password with bcrypt using salt rounds 12', async () => {
     const now = new Date();
     insertResolution = [
@@ -965,7 +972,7 @@ describe('createTechnician', () => {
       name: 'New Tech',
       email: 'new@example.com',
       password: 'securePassword123',
-    });
+    }, ACTOR);
 
     expect(mockHash).toHaveBeenCalledWith('securePassword123', 12);
   });
@@ -986,24 +993,108 @@ describe('createTechnician', () => {
       name: 'Another Tech',
       email: 'another@example.com',
       password: 'password1234',
-    });
+    }, ACTOR);
 
     expect(result).toEqual({
-      id: 'new-tech-2',
-      name: 'Another Tech',
-      email: 'another@example.com',
-      isActive: true,
-      createdAt: now.toISOString(),
+      ok: true,
+      technician: {
+        id: 'new-tech-2',
+        name: 'Another Tech',
+        email: 'another@example.com',
+        isActive: true,
+        createdAt: now.toISOString(),
+      },
     });
+  });
+
+  it('refuses a platform-admin email for a non-platform actor, before hashing', async () => {
+    vi.stubEnv('PLATFORM_ADMIN_EMAILS', 'r@x.com');
+    vi.stubEnv('PLATFORM_ORG_ID', 'platform-org');
+    try {
+      const result = await createTechnician(ORG_ID, {
+        name: 'Fake',
+        email: ' R@X.com',
+        password: 'password1234',
+      }, ACTOR);
+      expect(result).toEqual({ ok: false, reason: 'forbidden' });
+      expect(mockHash).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
 describe('updateTechnician', () => {
-  it('should return null when technician not found', async () => {
-    updateResolution = []; // empty = no row updated
+  const ACTOR = {
+    userId: 'actor-1',
+    email: 'chick@spears.com',
+    role: 'super_admin' as const,
+    organizationId: ORG_ID,
+  };
+  const updatedRow = {
+    id: 'tech-1',
+    name: 'New Name',
+    email: 't@x.com',
+    isActive: true,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+  };
 
-    const result = await updateTechnician(ORG_ID, 'nonexistent', { name: 'New Name' });
-    expect(result).toBeNull();
+  it('returns not_found when the technician does not exist', async () => {
+    selectResolutions = [[]]; // pre-read finds no technician
+
+    const result = await updateTechnician(ORG_ID, 'nonexistent', { name: 'New Name' }, ACTOR);
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('returns not_found when the row vanishes between read and write', async () => {
+    selectResolutions = [[{ email: 't@x.com' }]];
+    updateResolution = [];
+
+    const result = await updateTechnician(ORG_ID, 'tech-1', { name: 'New Name' }, ACTOR);
+    expect(result).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  it('returns the updated technician', async () => {
+    selectResolutions = [[{ email: 't@x.com' }]];
+    updateResolution = [updatedRow];
+
+    const result = await updateTechnician(ORG_ID, 'tech-1', { name: 'New Name' }, ACTOR);
+    expect(result).toEqual({
+      ok: true,
+      technician: {
+        id: 'tech-1',
+        name: 'New Name',
+        email: 't@x.com',
+        isActive: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('refuses changing an email to a platform-admin email', async () => {
+    vi.stubEnv('PLATFORM_ADMIN_EMAILS', 'r@x.com');
+    vi.stubEnv('PLATFORM_ORG_ID', 'platform-org');
+    try {
+      selectResolutions = [[{ email: 't@x.com' }]];
+      updateResolution = [updatedRow];
+      const result = await updateTechnician(ORG_ID, 'tech-1', { email: 'R@x.com' }, ACTOR);
+      expect(result).toEqual({ ok: false, reason: 'forbidden' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('refuses editing a technician row that holds a platform-admin email', async () => {
+    vi.stubEnv('PLATFORM_ADMIN_EMAILS', 'r@x.com');
+    vi.stubEnv('PLATFORM_ORG_ID', 'platform-org');
+    try {
+      selectResolutions = [[{ email: 'r@x.com' }]];
+      updateResolution = [updatedRow];
+      const result = await updateTechnician(ORG_ID, 'tech-1', { isActive: false }, ACTOR);
+      expect(result).toEqual({ ok: false, reason: 'forbidden' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

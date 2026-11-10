@@ -64,7 +64,7 @@ describe("POST /api/admin/invites", () => {
     expect(createInvite).not.toHaveBeenCalled();
   });
 
-  it("passes the REAL session.role + userId as actor (no escalation via default)", async () => {
+  it("passes the REAL session as the actor (no escalation via default)", async () => {
     getAdminSession.mockResolvedValue(SESSION);
     createInvite.mockResolvedValue({
       ok: true,
@@ -83,8 +83,7 @@ describe("POST /api/admin/invites", () => {
     expect(createInvite).toHaveBeenCalledWith(
       SESSION.organizationId,
       { email: "a@x.com", role: "technician" },
-      "admin", // session.role, NOT the defaulted super_admin
-      SESSION.userId,
+      SESSION, // the whole session is the actor (role, userId, email, org)
     );
   });
 

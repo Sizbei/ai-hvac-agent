@@ -88,3 +88,22 @@ describe("PATCH /api/admin/staff/[id] reactivation seat gate", () => {
     expect(getSeatUsage).not.toHaveBeenCalled();
   });
 });
+
+describe("PATCH /api/admin/staff/[id] actor", () => {
+  it("passes the whole session as the actor", async () => {
+    await patch({ name: "Renamed" });
+    expect(updateStaff).toHaveBeenCalledWith(
+      SESSION.organizationId,
+      TARGET,
+      { name: "Renamed" },
+      SESSION,
+    );
+  });
+
+  it("maps a refusal on a protected user to 403 FORBIDDEN", async () => {
+    updateStaff.mockResolvedValue({ ok: false, reason: "forbidden" });
+    const res = await patch({ name: "Renamed" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+});

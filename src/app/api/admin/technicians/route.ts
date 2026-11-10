@@ -62,10 +62,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const technician = await createTechnician(
+    const result = await createTechnician(
       session.organizationId,
       parsed.data,
+      session,
     );
+    if (!result.ok) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
+    }
+    const { technician } = result;
 
     await logAudit({
       organizationId: session.organizationId,
