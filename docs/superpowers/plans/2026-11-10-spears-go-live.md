@@ -1616,6 +1616,20 @@ These 20 tasks don't repeat any of Tasks 1â€“23. HEAD is `a6f18ee`, so Tasks 1â€
 
 ---
 
+7. **User authorization, 2026-11-10 (supersedes the prod restrictions above for the controller only).**
+   - The user said: "yes we want it to touch live production. no one is using it yet". Production is not yet in real use.
+   - **Who:** the controller, not implementer subagents, may:
+     - deploy to prod without waiting for after-hours;
+     - let migrations 0059/0060 run in the prod build;
+     - run authenticated prod checks as rchen;
+     - run the handover's prod steps itself. These are: the org rename and flags, the marking script with `--prod` (after a dry run, mode `history` unless the user says otherwise), the onboarding reset, and the platform env vars, set via `vercel env add` by name and with values the user supplies.
+   - **Still requires an explicit user yes:**
+     - sending Chick's owner invite email, because it reaches a third party;
+     - any DELETE of prod rows;
+     - `vercel rollback`;
+     - pushing to or merging into `main`.
+   - **Implementer subagents** remain DEV-only. Every guard from override 6 stays, as defence against accidents. Smoke writes stay opt-in (`SMOKE_WRITES=1`) because they leave a fake chat in the inbox. The controller may enable them once and then hide that session.
+
 ### Controller execution order (supersedes the drafted order below)
 1. Task 6.
 2. Task 39 (now includes the smoke and migrator guards).
