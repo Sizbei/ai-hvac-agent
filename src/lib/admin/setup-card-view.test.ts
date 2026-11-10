@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BANNER_DONE, bannerText, cardFinished, cardHidden, cardTitle, cardView } from "./setup-card-view";
+import { BANNER_DONE, bannerText, cardFinished, cardHidden, cardTitle, cardView, upNextAction } from "./setup-card-view";
 import type { AdminGuidePayload } from "./admin-guide-state";
 import { STEP_DEFS, type DerivedStep, type OnboardingPayload } from "./onboarding-steps";
 
@@ -162,6 +162,19 @@ describe("cardView", () => {
     expect(cardView({ ...base, data })).toEqual({ view: "welcome-only", welcome: true });
   });
 
+  it("welcome due, demo org dismissed via session flag: welcome-only", () => {
+    const data = payload({ guide: guide(true), demo: true });
+    expect(cardView({ ...base, data, demoFlags: { dismissed: true } })).toEqual({
+      view: "welcome-only",
+      welcome: true,
+    });
+  });
+
+  it("welcome due, finished card already acknowledged (completedSeenAt): welcome-only", () => {
+    const data = payload({ guide: guide(true), completedSeenAt: "2026-11-04T00:00:00Z" }, 4);
+    expect(cardView({ ...base, data })).toEqual({ view: "welcome-only", welcome: true });
+  });
+
   it("guide still loading or failed: as today", () => {
     expect(cardView({ ...base, data: payload({ guide: null }) })).toEqual({ view: "full", welcome: false });
     expect(cardView({ ...base, placement: INT, data: payload({ guide: null }) }).view).toBe("nothing");
@@ -174,5 +187,28 @@ describe("cardTitle", () => {
     expect(cardTitle("full")).toBe("Setup guide");
     expect(cardTitle("finished")).toBe("Setup guide");
     expect(cardTitle("skeleton")).toBe("Setup guide");
+  });
+});
+
+describe("upNextAction", () => {
+  it("the copy step gets outline while the welcome is due", () => {
+    const copy = step("tech_sign_in", { action: "copy_sign_in_link", copyValue: "https://x.test/tech/login" });
+    expect(upNextAction(copy, "outline")).toEqual({
+      kind: "copy",
+      url: "https://x.test/tech/login",
+      variant: "outline",
+    });
+    expect(upNextAction(copy, "default")).toMatchObject({ kind: "copy", variant: "default" });
+  });
+
+  it("a link step carries the variant; instruction-only and bare steps have no button", () => {
+    const link = step("phone_hours");
+    expect(upNextAction(link, "outline")).toMatchObject({ kind: "link", variant: "outline" });
+    expect(upNextAction(step("tech_sign_in", { instruction: "Ask them to sign in." }), "outline")).toEqual({
+      kind: "instruction",
+    });
+    expect(upNextAction(step("phone_hours", { href: null, instruction: undefined }), "default")).toEqual({
+      kind: "none",
+    });
   });
 });

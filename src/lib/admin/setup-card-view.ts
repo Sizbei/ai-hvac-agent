@@ -71,6 +71,25 @@ export function cardTitle(view: CardView): string {
   return view === "welcome-only" ? "Getting started" : "Setup guide";
 }
 
+export type UpNextAction =
+  | { readonly kind: "copy"; readonly url: string; readonly variant: "outline" | "default" }
+  | { readonly kind: "instruction" }
+  | { readonly kind: "link"; readonly href: string; readonly label: string; readonly variant: "outline" | "default" }
+  | { readonly kind: "none" };
+
+/**
+ * Up next's action. Every button kind takes `variant`, so while the welcome
+ * shows the card keeps one primary (the copy step included).
+ */
+export function upNextAction(step: DerivedStep, variant: "outline" | "default"): UpNextAction {
+  if (step.action === "copy_sign_in_link" && step.copyValue) {
+    return { kind: "copy", url: step.copyValue, variant };
+  }
+  if (step.instruction) return { kind: "instruction" };
+  if (step.href) return { kind: "link", href: step.href, label: step.hrefLabel, variant };
+  return { kind: "none" };
+}
+
 /** The unacknowledged finishing moment (spec §4 "Finishing moment"). */
 export function cardFinished(payload: OnboardingPayload): boolean {
   const { requiredDone, requiredTotal } = payload.progress;

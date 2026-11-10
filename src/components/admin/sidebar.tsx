@@ -32,6 +32,7 @@ import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import { setupDigit } from '@/lib/admin/setup-digit';
 import { envName, parseEnvLinks } from '@/lib/admin/environment';
 import type { AdminRole } from '@/lib/auth/types';
+import { ADMIN_TIER_ROLES } from '@/lib/admin/types';
 import { cn } from '@/lib/utils';
 
 
@@ -103,7 +104,7 @@ export function Sidebar({
     }),
     [unscheduledCount, onboarding, needsActionCount],
   );
-  const showQuickTour = role === 'admin' || role === 'super_admin';
+  const showQuickTour = ADMIN_TIER_ROLES.includes(role);
   const envLinks =
     role === 'super_admin'
       ? parseEnvLinks(

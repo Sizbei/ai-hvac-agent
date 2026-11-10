@@ -16,6 +16,7 @@ import { nextRows } from '@/lib/admin/setup-view';
 import {
   cardTitle,
   cardView,
+  upNextAction,
   readDemoFlags,
   writeDemoFlags,
   type CardSessionFlags,
@@ -61,34 +62,37 @@ function WelcomeRow({
       <h3 className="text-sm font-semibold text-foreground">{row.title}</h3>
       <p className="text-[13px] text-muted-foreground">{row.line}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 pt-1">
-        <Button className="w-full sm:w-auto" render={<Link href={row.primary.href} />}>
-          {row.primary.label}
-        </Button>
+        <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 sm:w-auto">
+          <Button className="w-full sm:w-auto" render={<Link href={row.primary.href} />}>
+            {row.primary.label}
+          </Button>
+          {row.meta && (
+            <span className="font-mono text-[13px] tabular-nums text-muted-foreground">{row.meta}</span>
+          )}
+        </div>
         <Button variant="ghost" className="w-full sm:w-auto" onClick={onNotNow}>
           Not now
         </Button>
-        {row.meta && (
-          <span className="font-mono text-[13px] tabular-nums text-muted-foreground">{row.meta}</span>
-        )}
       </div>
     </div>
   );
 }
 
 function UpNext({ step, variant }: { step: DerivedStep; variant: 'outline' | 'default' }) {
+  const action = upNextAction(step, variant);
   return (
     <div className="flex flex-col gap-2">
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Up next</p>
       <p className="text-sm font-semibold text-foreground">{step.title}</p>
       <p className="text-[13px] text-muted-foreground">{step.why}</p>
-      {step.action === 'copy_sign_in_link' && step.copyValue ? (
-        <CopySignInLink url={step.copyValue} instruction={step.instruction ?? ''} />
-      ) : step.instruction ? (
+      {action.kind === 'copy' ? (
+        <CopySignInLink url={action.url} instruction={step.instruction ?? ''} variant={action.variant} />
+      ) : action.kind === 'instruction' ? (
         <p className="text-[13px] text-muted-foreground">{step.instruction}</p>
-      ) : step.href ? (
+      ) : action.kind === 'link' ? (
         <div>
-          <Button variant={variant} className="w-full sm:w-auto" render={<Link href={step.href} />}>
-            {step.hrefLabel}
+          <Button variant={action.variant} className="w-full sm:w-auto" render={<Link href={action.href} />}>
+            {action.label}
           </Button>
         </div>
       ) : null}
@@ -188,14 +192,17 @@ export function SetupCard() {
     setWelcomeHidden(true);
     if (!body) return;
     try {
-      await adminFetch('/api/admin/guide', {
+      const res = await adminFetch('/api/admin/guide', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) console.warn('[setup-card] guide_dismiss_failed', res.status);
       await refreshOnboarding({ force: true });
-    } catch {
-      // Auth redirect or network failure: the row stays hidden for this visit.
+    } catch (err) {
+      // The row stays hidden for this visit either way.
+      if (err instanceof AdminAuthRedirectError) return;
+      console.warn('[setup-card] guide_dismiss_failed');
     }
   }
 
