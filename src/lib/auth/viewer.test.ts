@@ -132,6 +132,7 @@ describe("getViewerContext — view as", () => {
       targetUserId: "t1",
       targetName: "Chick Spears",
       targetRole: "admin",
+      exp: expect.any(Number),
     });
     expect(v?.showHidden).toBe(false);
     expect(v?.uiRole).toBe("admin");
@@ -153,7 +154,7 @@ describe("getViewerContext — view as", () => {
     target.mockResolvedValue(null);
     await setPreviewCookie();
     const v = await getViewerContext();
-    expect(v?.preview).toEqual({ status: "stale" });
+    expect(v?.preview).toEqual({ status: "stale", exp: expect.any(Number) });
     expect(v?.showHidden).toBe(false);
     expect(v?.uiRole).toBe("super_admin");
   });
@@ -204,14 +205,23 @@ describe("getViewerContext — view as", () => {
     expect(v?.showHidden).toBe(true);
   });
 
-  it("a target lookup error → not previewing, showHidden for the real viewer, logged", async () => {
+  it("a target lookup error behind a valid bound cookie → stale (agrees with the proxy), logged", async () => {
     target.mockRejectedValue(new Error("db down"));
     await setPreviewCookie();
     const v = await getViewerContext();
-    expect(v?.preview).toBeNull();
-    expect(v?.showHidden).toBe(true);
+    expect(v?.preview).toEqual({ status: "stale", exp: expect.any(Number) });
+    expect(v?.showHidden).toBe(false);
     expect(v?.uiRole).toBe("super_admin");
     expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("preview.exp is the cookie's exp", async () => {
+    const exp = Math.floor(Date.now() / 1000) + 900;
+    cookieJar.set(
+      PREVIEW_COOKIE,
+      await signPreviewCookie({ adminUserId: "u1", targetUserId: "t1", exp }, SECRET),
+    );
+    expect((await getViewerContext())?.preview?.exp).toBe(exp);
   });
 
   it("a cookie read error → not previewing", async () => {

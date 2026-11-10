@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getAdminSession } from '@/lib/auth/session';
-import { isPlatformAdmin } from '@/lib/auth/authz';
+import { getViewerContext } from '@/lib/auth/viewer';
 import { PlatformConsole, ViewAs } from '@/components/admin/platform/platform-console';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
@@ -14,8 +13,8 @@ import { PageHeader } from '@/components/admin/ui/page-header';
  * way — this redirect just avoids rendering an empty shell).
  */
 export default async function PlatformPage() {
-  const session = await getAdminSession();
-  if (!session || !isPlatformAdmin(session)) {
+  const viewer = await getViewerContext();
+  if (!viewer || !viewer.isPlatformAdmin) {
     redirect('/admin');
   }
 
@@ -25,7 +24,9 @@ export default async function PlatformPage() {
         title="Platform"
         subtitle="Provision new tenant organizations and view existing ones. Creating a tenant issues a one-time invite link for the owner to accept."
       />
-      <ViewAs />
+      {/* While a preview is on, the banner's Exit is the only control; a
+          second start would be refused by the read-only proxy anyway. */}
+      {viewer.preview === null && <ViewAs />}
       <PlatformConsole />
     </PageShell>
   );

@@ -33,6 +33,9 @@ if ((process.env.DATABASE_URL ?? "").includes(PROD_HOST)) {
 }
 const targetUserId = process.argv[2];
 if (!targetUserId) fail("Usage: mint-preview-cookie.mjs <targetUserId>");
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)) {
+  fail(`The target user id must be a UUID (got "${targetUserId}").`);
+}
 
 const { verifyToken } = await import("../../src/lib/auth/config.ts");
 const { signPreviewCookie, PREVIEW_MAX_AGE_S } = await import(

@@ -18,8 +18,10 @@ export type PreviewState =
       readonly targetUserId: string;
       readonly targetName: string;
       readonly targetRole: AdminRole | "technician";
+      /** The cookie's expiry, unix seconds (the banner reloads then). */
+      readonly exp: number;
     }
-  | { readonly status: "stale" };
+  | { readonly status: "stale"; readonly exp: number };
 
 /** Who is looking, and whether they see hidden (imported) history. */
 export interface ViewerContext extends Visibility {
@@ -66,34 +68,45 @@ async function safeFeatures(organizationId: string): Promise<Features> {
  * "View as" (spec P7). Only a platform admin's request is looked at. A cookie
  * with a valid signature, bound to THIS session, resolves to the target when
  * it is still an active user of the session org, else `stale` (plan ruling 9:
- * the proxy keeps refusing writes, so the banner must still show). Anything
- * else — no cookie, bad signature, another admin's cookie, any error — is
- * "not previewing" (the proxy clears a cookie it would ignore).
+ * the proxy keeps refusing writes, so the banner must still show). A failed
+ * target lookup behind such a cookie is `stale` too, for the same reason.
+ * Anything else — no cookie, bad signature, another admin's cookie, a cookie
+ * read error — is "not previewing" (the proxy clears a cookie it would ignore).
  */
 async function resolvePreview(
   session: AdminSessionPayload,
   platform: boolean,
 ): Promise<PreviewState | null> {
   if (!platform) return null;
+  let value: string | undefined;
   try {
-    const value = (await cookies()).get(PREVIEW_COOKIE)?.value;
-    if (!value) return null;
-    const claims = await verifyPreviewCookie(value, process.env.AUTH_SECRET ?? "");
-    if (!claims || claims.adminUserId !== session.userId) return null;
+    value = (await cookies()).get(PREVIEW_COOKIE)?.value;
+  } catch (error) {
+    logger.error(
+      { code: errorCode(error), organizationId: session.organizationId },
+      "Preview cookie read failed; rendering as the signed-in admin",
+    );
+    return null;
+  }
+  if (!value) return null;
+  const claims = await verifyPreviewCookie(value, process.env.AUTH_SECRET ?? "");
+  if (!claims || claims.adminUserId !== session.userId) return null;
+  try {
     const target = await findPreviewTarget(session.organizationId, claims.targetUserId);
-    if (!target) return { status: "stale" };
+    if (!target) return { status: "stale", exp: claims.exp };
     return {
       status: "active",
       targetUserId: target.userId,
       targetName: target.name,
       targetRole: target.role,
+      exp: claims.exp,
     };
   } catch (error) {
     logger.error(
       { code: errorCode(error), organizationId: session.organizationId },
-      "Preview resolution failed; rendering as the signed-in admin",
+      "Preview target lookup failed; staying read-only",
     );
-    return null;
+    return { status: "stale", exp: claims.exp };
   }
 }
 
