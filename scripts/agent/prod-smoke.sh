@@ -27,9 +27,9 @@ check "admin login" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/l
 # published-files test can assert no credential literal lives in the repo).
 DEMO_EMAIL="admin@demo-""hvac.com"
 DEMO_PW="admin""123"
+DEMO_BODY=$(printf '{"email":"%s","password":"%s"}' "$DEMO_EMAIL" "$DEMO_PW")
 check "demo login refused" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
-  -H 'content-type: application/json' -H "origin: $BASE" \
-  -d "{\"email\":\"$DEMO_EMAIL\",\"password\":\"$DEMO_PW\"}")"
+  -H 'content-type: application/json' -H "origin: $BASE" --data "$DEMO_BODY")"
 
 # Cookie-less admin probes: all must be refused.
 check "erase unauthenticated" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
