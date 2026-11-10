@@ -18,6 +18,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { errorResponse } from "@/lib/api-response";
+import { signupEnabledFromEnv } from "@/lib/auth/signup-enabled";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
@@ -80,6 +81,9 @@ function existingAccount(request: NextRequest): NextResponse {
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
+    if (!signupEnabledFromEnv()) {
+      return errorResponse("Not found", "NOT_FOUND", 404);
+    }
     const config = getSignupOidcConfig();
     if (!config) {
       return errorResponse("Not found", "NOT_FOUND", 404);

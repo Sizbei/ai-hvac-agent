@@ -76,7 +76,7 @@ describe('replyErrorToCopy', () => {
   it('maps DEMO_RESTRICTED', () => {
     expect(
       replyErrorToCopy({ code: 'DEMO_RESTRICTED', message: 'Sending is disabled for the demo account' }),
-    ).toBe('Sending replies is disabled for the demo account.');
+    ).toBe('Sending replies is turned off for this account.');
   });
 
   it('maps RATE_LIMITED', () => {

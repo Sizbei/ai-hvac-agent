@@ -30,9 +30,9 @@ export function useAdminTechnicians(): UseAdminTechniciansResult {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'Failed to fetch technicians' },
+          error: { message: 'Couldn’t load technicians. Please try again.' },
         }));
-        setError(body?.error?.message ?? 'Failed to fetch technicians');
+        setError(body?.error?.message ?? 'Couldn’t load technicians. Please try again.');
         return;
       }
 

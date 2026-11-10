@@ -31,10 +31,10 @@ export function useBotAnalytics(): UseBotAnalyticsResult {
       if (!isMountedRef.current) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({
-          error: { message: 'Failed to load bot analytics' },
+          error: { message: 'Couldn’t load bot analytics. Please try again.' },
         }));
         if (isMountedRef.current) {
-          setError(body?.error?.message ?? 'Failed to load bot analytics');
+          setError(body?.error?.message ?? 'Couldn’t load bot analytics. Please try again.');
         }
         return;
       }

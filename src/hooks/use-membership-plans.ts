@@ -39,7 +39,7 @@ export function useMembershipPlans(includeInactive = false): UseMembershipPlansR
         : '/api/admin/membership-plans';
       const res = await fetch(url);
       if (!res.ok) {
-        setError('Failed to load membership plans');
+        setError('Couldn’t load membership plans. Please try again.');
         return;
       }
       const body = (await res.json()) as {

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthShell } from '@/components/auth/auth-shell';
+import { signupEnabledFromEnv } from '@/lib/auth/signup-enabled';
 import type { LoginMode } from '@/lib/auth/login-mode';
 
 /** Generic, non-enumerating messages for the ?error= codes the OIDC callback
@@ -53,15 +54,17 @@ export function LoginForm({ mode, googleEnabled }: LoginFormProps) {
       title="Welcome back"
       subtitle="Sign in to the service console."
       footer={
-        <p>
-          New to Spears?{' '}
-          <Link
-            href="/signup"
-            className="font-medium text-link underline underline-offset-4 hover:no-underline"
-          >
-            Create an account
-          </Link>
-        </p>
+        signupEnabledFromEnv() ? (
+          <p>
+            New to Spears?{' '}
+            <Link
+              href="/signup"
+              className="font-medium text-link underline underline-offset-4 hover:no-underline"
+            >
+              Create an account
+            </Link>
+          </p>
+        ) : undefined
       }
     >
       <div className="flex flex-col gap-4">
