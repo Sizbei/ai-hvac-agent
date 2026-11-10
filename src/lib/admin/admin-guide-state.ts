@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { LESSON_IDS, type LessonId } from "./lesson-ids";
 
 /**
  * Per-user admin guide state (users.admin_guide_state, onboarding spec D1):
  * the welcome row and the quick tour. Imports only zod: safe for client code.
+ * Client code that needs only the lesson list imports `./lesson-ids` (no zod).
  */
-export const LESSON_IDS = ["requests", "schedule", "technicians", "customers", "paid"] as const;
-export type LessonId = (typeof LESSON_IDS)[number];
+export { LESSON_IDS, type LessonId };
 
 export interface AdminGuideState {
   welcomeDismissedAt?: string;

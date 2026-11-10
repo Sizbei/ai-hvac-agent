@@ -114,4 +114,5 @@ getDashboardStats and related helpers). Visual via the admin-pages skill recipe.
 **Setup card:** `setup-card.tsx` (data from the onboarding store, see page-setup)
 replaces the old checklist. It shows progress and Up next, hides on
 `dismissedAt`/`completedSeenAt`, and for the demo org keeps its dismiss in
-`sessionStorage` only.
+`sessionStorage` only. A per-user welcome row (`welcome-view.ts`) can sit on top, or alone as
+"Getting started"; see page-setup "Welcome row".
