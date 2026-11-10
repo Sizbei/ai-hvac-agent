@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   ChevronLeft,
   ChevronRight,
+  Compass,
   LogOut,
   X,
   Search,
@@ -69,6 +70,9 @@ function isSetupRefreshPath(pathname: string): boolean {
   return path === '/admin' || path === '/admin/setup';
 }
 
+/** Replays the quick tour; /admin/setup resumes at the last stop (onboarding spec D2). */
+const QUICK_TOUR_HREF = '/admin/setup#learn';
+
 /** Uppercase group label — the transform lives in the .u-label CSS class so the
  *  source strings stay sentence case (copy canon). */
 const GROUP_LABEL = 'u-label px-2.5 pb-1 [color:var(--sidebar-foreground-dim)]';
@@ -99,6 +103,7 @@ export function Sidebar({
     }),
     [unscheduledCount, onboarding, needsActionCount],
   );
+  const showQuickTour = role === 'admin' || role === 'super_admin';
   const envLinks =
     role === 'super_admin'
       ? parseEnvLinks(
@@ -298,6 +303,13 @@ export function Sidebar({
                   ))}
                 </div>
               )}
+              {showQuickTour && (
+                // Same-path hash links don't change pathname, so close the drawer here.
+                <Link href={QUICK_TOUR_HREF} onClick={onMobileClose} className={cn(RAIL_ROW, 'mb-2')}>
+                  <Compass className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" aria-hidden="true" />
+                  <span>Quick tour</span>
+                </Link>
+              )}
               <div className="flex items-center gap-2.5 rounded-[4px] bg-sidebar-accent px-2.5 py-2">
                 <span className="flex size-7 shrink-0 items-center justify-center rounded-[4px] bg-primary font-mono text-[11px] font-medium text-primary-foreground">
                   {initialsOf(adminName)}
@@ -426,6 +438,28 @@ export function Sidebar({
                 ))}
               </div>
             )}
+
+            {/* Quick tour — collapsed: icon with label + tooltip */}
+            {showQuickTour &&
+              (isCollapsed ? (
+                <Tooltip>
+                  <TooltipTrigger render={<div />}>
+                    <Link
+                      href={QUICK_TOUR_HREF}
+                      aria-label="Quick tour"
+                      className={cn(RAIL_ROW, 'mb-2 justify-center px-0')}
+                    >
+                      <Compass className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" aria-hidden="true" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Quick tour</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Link href={QUICK_TOUR_HREF} className={cn(RAIL_ROW, 'mb-2')}>
+                  <Compass className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" aria-hidden="true" />
+                  <span>Quick tour</span>
+                </Link>
+              ))}
 
             {/* User info — expanded: full card; collapsed: initials chip with tooltip */}
             {isCollapsed ? (

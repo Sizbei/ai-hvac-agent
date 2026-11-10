@@ -89,6 +89,19 @@ preview: none, never due); it never writes. `PATCH /api/admin/guide`
 the session user's own active admin-tier row, is refused while previewing and is
 not audited. Tests: `tests/integration/admin-guide-state.test.ts`.
 
+**Welcome row (home card, spec D2):** `cardView({ data, error, slow, placement,
+demoFlags })` in `setup-card-view.ts` is the card's one state decision
+(`nothing | skeleton | welcome-only | full | finished` + `welcome`); a due
+welcome rides on top of the full/finished card, or stands alone as
+"Getting started" when the checklist card would be hidden (Integrations
+placement, dismissed). Row copy, "Take the tour"/"Continue the tour" + "Stop n
+of 5", the hidden X and outline Up next live in `src/lib/admin/welcome-view.ts`
+(`welcomeRowView`, `welcomeDismissBody`). "Not now" hides locally, PATCHes
+`dismissWelcome` (never in preview: `readOnly`), refreshes, and moves focus to
+the next focusable in the card or the page `h1`. The sidebar footer (drawer and
+rail) has a "Quick tour" link to `/admin/setup#learn` for admin-tier users.
+Client code takes the lesson list from `src/lib/admin/lesson-ids.ts` (no zod).
+
 **Client store contract:** fetches are sequence-tagged (older responses dropped);
 `refreshOnboarding({ force: true })` during an in-flight fetch chains another;
 `invalidateOnboarding()` forces a refresh when there are subscribers, else marks

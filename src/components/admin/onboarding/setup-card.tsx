@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,23 +9,73 @@ import { SectionCard } from '@/components/admin/ui/section-card';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { CopySignInLink } from '@/components/admin/setup/copy-sign-in-link';
 import { useSetupPlacement } from '@/components/admin/setup-placement-context';
+import { useOrgName } from '@/components/admin/org-name-context';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import { nextRows } from '@/lib/admin/setup-view';
 import {
-  cardFinished,
-  cardHidden,
-  cardLoadingView,
+  cardTitle,
+  cardView,
   readDemoFlags,
   writeDemoFlags,
   type CardSessionFlags,
 } from '@/lib/admin/setup-card-view';
-import type { DerivedStep } from '@/lib/admin/onboarding-steps';
+import { welcomeDismissBody, welcomeRowView, type WelcomeRowView } from '@/lib/admin/welcome-view';
+import type { DerivedStep, OnboardingPayload } from '@/lib/admin/onboarding-steps';
 
 const SKELETON_DELAY_MS = 300;
 const WINS = ["Your technician can sign in", 'Your first request is booked', "It's on a technician's phone"];
 
-function UpNext({ step }: { step: DerivedStep }) {
+const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** After "Not now": the next focusable element in the card, else the page h1. */
+function focusAfterWelcome(body: HTMLElement | null): void {
+  const next = body?.querySelector<HTMLElement>(FOCUSABLE);
+  if (next) {
+    next.focus();
+    return;
+  }
+  const h1 = document.querySelector<HTMLElement>('main h1');
+  if (!h1) return;
+  if (!h1.hasAttribute('tabindex')) h1.setAttribute('tabindex', '-1');
+  h1.focus();
+}
+
+/** The payload as this card shows it: "Not now" hides the welcome locally. */
+function withWelcomeHidden(data: OnboardingPayload | null, hidden: boolean): OnboardingPayload | null {
+  if (!hidden || !data?.guide) return data;
+  return { ...data, guide: { ...data.guide, welcomeDue: false } };
+}
+
+function WelcomeRow({
+  row,
+  divided,
+  onNotNow,
+}: {
+  row: WelcomeRowView;
+  divided: boolean;
+  onNotNow: () => void;
+}) {
+  return (
+    <div className={divided ? 'flex flex-col gap-2 border-b border-border pb-4' : 'flex flex-col gap-2'}>
+      <h3 className="text-sm font-semibold text-foreground">{row.title}</h3>
+      <p className="text-[13px] text-muted-foreground">{row.line}</p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 pt-1">
+        <Button className="w-full sm:w-auto" render={<Link href={row.primary.href} />}>
+          {row.primary.label}
+        </Button>
+        <Button variant="ghost" className="w-full sm:w-auto" onClick={onNotNow}>
+          Not now
+        </Button>
+        {row.meta && (
+          <span className="font-mono text-[13px] tabular-nums text-muted-foreground">{row.meta}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UpNext({ step, variant }: { step: DerivedStep; variant: 'outline' | 'default' }) {
   return (
     <div className="flex flex-col gap-2">
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Up next</p>
@@ -37,7 +87,7 @@ function UpNext({ step }: { step: DerivedStep }) {
         <p className="text-[13px] text-muted-foreground">{step.instruction}</p>
       ) : step.href ? (
         <div>
-          <Button className="w-full sm:w-auto" render={<Link href={step.href} />}>
+          <Button variant={variant} className="w-full sm:w-auto" render={<Link href={step.href} />}>
             {step.hrefLabel}
           </Button>
         </div>
@@ -55,14 +105,21 @@ function MoreRow({ step }: { step: DerivedStep }) {
   );
 }
 
-/** Home "Setup guide" card (spec §2, §8): progress, Up next, two more rows, dismiss. */
+/**
+ * Home "Setup guide" card (spec §2, §8; onboarding spec D2): the per-user
+ * welcome row, progress, Up next, two more rows, dismiss.
+ */
 export function SetupCard() {
   const { data, error } = useOnboarding();
   const placement = useSetupPlacement();
+  const orgName = useOrgName();
   const [flags, setFlags] = useState<CardSessionFlags>({});
   const [hidden, setHidden] = useState(false);
+  const [welcomeHidden, setWelcomeHidden] = useState(false);
   const [failed, setFailed] = useState(false);
   const [slow, setSlow] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const focusPending = useRef(false);
 
   useEffect(() => {
     void refreshOnboarding();
@@ -72,9 +129,17 @@ export function SetupCard() {
     return () => clearTimeout(t);
   }, []);
 
-  const view = cardLoadingView(data, error, slow, placement);
-  if (view === 'nothing') return null;
-  if (view === 'skeleton' || !data) {
+  // Runs after the render that removed the welcome row.
+  useEffect(() => {
+    if (!welcomeHidden || !focusPending.current) return;
+    focusPending.current = false;
+    focusAfterWelcome(bodyRef.current);
+  }, [welcomeHidden]);
+
+  const shown = withWelcomeHidden(data, welcomeHidden);
+  const state = cardView({ data: shown, error, slow, placement, demoFlags: flags });
+  if (state.view === 'nothing' || hidden) return null;
+  if (state.view === 'skeleton' || !shown) {
     return (
       <SectionCard title="Setup guide">
         <div className="flex flex-col gap-2" aria-hidden="true">
@@ -85,17 +150,17 @@ export function SetupCard() {
       </SectionCard>
     );
   }
-  if (hidden || cardHidden(data, flags)) return null;
 
-  const finished = cardFinished(data);
+  const payload = shown;
+  const finished = state.view === 'finished';
+  const welcome = welcomeRowView({ guide: payload.guide, orgName, cardState: state });
 
   async function acknowledge(): Promise<void> {
-    if (!data) return;
     const key = finished ? 'completedSeen' : 'dismissed';
     setHidden(true);
     setFailed(false);
     try {
-      if (data.demo) {
+      if (payload.demo) {
         const next = { ...flags, [key]: true };
         writeDemoFlags(next);
         setFlags(next);
@@ -115,27 +180,50 @@ export function SetupCard() {
     }
   }
 
-  const upNext = data.steps.find((s) => s.id === data.upNext);
-  const more = nextRows(data, 3).filter((s) => s.id !== data.upNext).slice(0, 2);
-  const { requiredDone, requiredTotal } = data.progress;
+  // "Not now": hide at once; a failed PATCH keeps it hidden until the next load.
+  // In preview (readOnly) nothing is written or refetched.
+  async function notNow(): Promise<void> {
+    const body = welcomeDismissBody(payload.guide);
+    focusPending.current = true;
+    setWelcomeHidden(true);
+    if (!body) return;
+    try {
+      await adminFetch('/api/admin/guide', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await refreshOnboarding({ force: true });
+    } catch {
+      // Auth redirect or network failure: the row stays hidden for this visit.
+    }
+  }
+
+  const welcomeOnly = state.view === 'welcome-only';
+  const upNext = payload.steps.find((s) => s.id === payload.upNext);
+  const more = nextRows(payload, 3).filter((s) => s.id !== payload.upNext).slice(0, 2);
+  const { requiredDone, requiredTotal } = payload.progress;
 
   return (
     <SectionCard
-      title="Setup guide"
-      meta={`${requiredDone} of ${requiredTotal}`}
+      title={cardTitle(state.view)}
+      meta={welcomeOnly ? undefined : `${requiredDone} of ${requiredTotal}`}
       action={
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={finished ? 'Close the setup guide card' : 'Hide the setup guide from the home page'}
-          onClick={() => void acknowledge()}
-        >
-          <X className="size-4" aria-hidden="true" />
-        </Button>
+        welcomeOnly || welcome.hideCardDismiss ? undefined : (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={finished ? 'Close the setup guide card' : 'Hide the setup guide from the home page'}
+            onClick={() => void acknowledge()}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        )
       }
     >
-      <div className="flex flex-col gap-4">
-        {finished ? (
+      <div ref={bodyRef} className="flex flex-col gap-4">
+        {welcome.show && <WelcomeRow row={welcome} divided={!welcomeOnly} onNotNow={() => void notNow()} />}
+        {welcomeOnly ? null : finished ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-semibold text-foreground">You&apos;re ready to run requests</p>
             <ul className="flex flex-col gap-1.5">
@@ -149,7 +237,7 @@ export function SetupCard() {
           </div>
         ) : (
           <>
-            {upNext && <UpNext step={upNext} />}
+            {upNext && <UpNext step={upNext} variant={welcome.upNextVariant} />}
             {more.length > 0 && (
               <ul className="divide-y divide-border border-t border-border">
                 {more.map((s) => (
@@ -164,9 +252,11 @@ export function SetupCard() {
             Couldn&apos;t update the setup guide. Please try again.
           </p>
         )}
-        <Link href="/admin/setup" className="text-[13px] font-medium text-primary underline-offset-2 hover:underline">
-          See all steps
-        </Link>
+        {!welcomeOnly && (
+          <Link href="/admin/setup" className="text-[13px] font-medium text-primary underline-offset-2 hover:underline">
+            See all steps
+          </Link>
+        )}
       </div>
     </SectionCard>
   );

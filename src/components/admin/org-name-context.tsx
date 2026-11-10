@@ -8,6 +8,10 @@ const OrgNameContext = createContext<string | undefined>(undefined);
 
 export const OrgNameProvider = OrgNameContext.Provider;
 
+export function useOrgName(): string | undefined {
+  return useContext(OrgNameContext);
+}
+
 /**
  * Set the tab title to "<page> · <org name>" for a client admin page. Next's
  * streamed metadata can write the layout's default title AFTER this effect

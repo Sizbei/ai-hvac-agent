@@ -27,22 +27,48 @@ export function cardHidden(
   return payload.demo && (flags.dismissed === true || flags.completedSeen === true);
 }
 
-export type CardLoadingView = "nothing" | "skeleton" | "card";
+export type CardView = "nothing" | "skeleton" | "welcome-only" | "full" | "finished";
+
+export interface CardState {
+  readonly view: CardView;
+  /** The per-user welcome row shows on top of the card. */
+  readonly welcome: boolean;
+}
 
 /**
- * Under 300 ms nothing; then a skeleton; nothing at all after an error without
- * data. A dismissed or finished org (Integrations placement, decided by the
- * server) never sees a skeleton flash.
+ * The card's state (onboarding spec D2 table). Without data: nothing under
+ * 300 ms, then a skeleton, and nothing after an error or under Integrations
+ * placement (a dismissed or finished org never sees a skeleton flash). With
+ * data: as before when no welcome is due; a due welcome rides on top of the
+ * full or finished card, or stands alone ("welcome-only") when the checklist
+ * card would be hidden.
  */
-export function cardLoadingView(
-  data: OnboardingPayload | null,
-  error: boolean,
-  slow: boolean,
-  placement: SetupPlacement,
-): CardLoadingView {
-  if (placement !== "operations") return "nothing";
-  if (data) return "card";
-  return slow && !error ? "skeleton" : "nothing";
+export function cardView({
+  data,
+  error,
+  slow,
+  placement,
+  demoFlags,
+}: {
+  data: OnboardingPayload | null;
+  error: boolean;
+  slow: boolean;
+  placement: SetupPlacement;
+  demoFlags: CardSessionFlags;
+}): CardState {
+  if (!data) {
+    const skeleton = placement === "operations" && slow && !error;
+    return { view: skeleton ? "skeleton" : "nothing", welcome: false };
+  }
+  const welcome = data.guide?.welcomeDue === true;
+  if (placement !== "operations" || cardHidden(data, demoFlags)) {
+    return welcome ? { view: "welcome-only", welcome } : { view: "nothing", welcome };
+  }
+  return { view: cardFinished(data) ? "finished" : "full", welcome };
+}
+
+export function cardTitle(view: CardView): string {
+  return view === "welcome-only" ? "Getting started" : "Setup guide";
 }
 
 /** The unacknowledged finishing moment (spec §4 "Finishing moment"). */

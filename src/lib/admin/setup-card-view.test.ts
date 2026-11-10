@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { BANNER_DONE, bannerText, cardFinished, cardHidden, cardLoadingView } from "./setup-card-view";
+import { BANNER_DONE, bannerText, cardFinished, cardHidden, cardTitle, cardView } from "./setup-card-view";
+import type { AdminGuidePayload } from "./admin-guide-state";
 import { STEP_DEFS, type DerivedStep, type OnboardingPayload } from "./onboarding-steps";
 
 function step(id: string, extra: Partial<DerivedStep> = {}): DerivedStep {
@@ -96,27 +97,82 @@ describe("bannerText", () => {
   });
 });
 
-describe("cardLoadingView", () => {
+function guide(welcomeDue: boolean): AdminGuidePayload {
+  return {
+    welcomeDue,
+    lastLesson: null,
+    tourStartedAt: null,
+    tourCompletedAt: null,
+    readOnly: false,
+    payLinks: false,
+    hasFieldPulse: false,
+    historyHidden: false,
+    historyContact: "your account administrator",
+  };
+}
+
+describe("cardView", () => {
   const OPS = "operations" as const;
+  const INT = "integrations" as const;
+  const base = { error: false, slow: false, placement: OPS, demoFlags: {} };
 
   it("renders nothing after an error without data, even when slow", () => {
-    expect(cardLoadingView(null, true, false, OPS)).toBe("nothing");
-    expect(cardLoadingView(null, true, true, OPS)).toBe("nothing");
+    expect(cardView({ ...base, data: null, error: true })).toEqual({ view: "nothing", welcome: false });
+    expect(cardView({ ...base, data: null, error: true, slow: true })).toEqual({ view: "nothing", welcome: false });
   });
 
   it("renders nothing before 300 ms, then a skeleton", () => {
-    expect(cardLoadingView(null, false, false, OPS)).toBe("nothing");
-    expect(cardLoadingView(null, false, true, OPS)).toBe("skeleton");
+    expect(cardView({ ...base, data: null }).view).toBe("nothing");
+    expect(cardView({ ...base, data: null, slow: true }).view).toBe("skeleton");
   });
 
-  it("renders the card whenever data is present, errors included", () => {
-    expect(cardLoadingView(payload(), false, false, OPS)).toBe("card");
-    expect(cardLoadingView(payload(), true, true, OPS)).toBe("card");
+  it("no welcome due: full card whenever data is present, errors included", () => {
+    expect(cardView({ ...base, data: payload() })).toEqual({ view: "full", welcome: false });
+    expect(cardView({ ...base, data: payload(), error: true, slow: true })).toEqual({ view: "full", welcome: false });
+    expect(cardView({ ...base, data: payload({ guide: guide(false) }) })).toEqual({ view: "full", welcome: false });
   });
 
-  it("renders nothing at all for a dismissed or finished org (Integrations placement)", () => {
-    expect(cardLoadingView(null, false, true, "integrations")).toBe("nothing");
-    expect(cardLoadingView(null, false, false, "integrations")).toBe("nothing");
-    expect(cardLoadingView(payload(), false, true, "integrations")).toBe("nothing");
+  it("no welcome due: finished moment, and nothing once acknowledged or dismissed", () => {
+    expect(cardView({ ...base, data: payload({}, 4) })).toEqual({ view: "finished", welcome: false });
+    expect(cardView({ ...base, data: payload({ dismissedAt: "2026-11-04T00:00:00Z" }) }).view).toBe("nothing");
+    expect(cardView({ ...base, data: payload({ demo: true }), demoFlags: { dismissed: true } }).view).toBe("nothing");
+  });
+
+  it("no welcome due: nothing at all under Integrations placement (no skeleton flash)", () => {
+    expect(cardView({ ...base, placement: INT, data: null, slow: true }).view).toBe("nothing");
+    expect(cardView({ ...base, placement: INT, data: null }).view).toBe("nothing");
+    expect(cardView({ ...base, placement: INT, data: payload(), slow: true }).view).toBe("nothing");
+  });
+
+  it("welcome due, operations, active: full card with the welcome row", () => {
+    expect(cardView({ ...base, data: payload({ guide: guide(true) }) })).toEqual({ view: "full", welcome: true });
+  });
+
+  it("welcome due, operations, finished: finished state with the welcome row", () => {
+    expect(cardView({ ...base, data: payload({ guide: guide(true) }, 4) })).toEqual({
+      view: "finished",
+      welcome: true,
+    });
+  });
+
+  it("row shows when placement is integrations (welcome-only)", () => {
+    const data = payload({ guide: guide(true), dismissedAt: "2026-11-04T00:00:00Z" });
+    expect(cardView({ ...base, placement: INT, data })).toEqual({ view: "welcome-only", welcome: true });
+    // Org dismissed after this page load decided placement: still welcome-only.
+    expect(cardView({ ...base, data })).toEqual({ view: "welcome-only", welcome: true });
+  });
+
+  it("guide still loading or failed: as today", () => {
+    expect(cardView({ ...base, data: payload({ guide: null }) })).toEqual({ view: "full", welcome: false });
+    expect(cardView({ ...base, placement: INT, data: payload({ guide: null }) }).view).toBe("nothing");
+  });
+});
+
+describe("cardTitle", () => {
+  it('is "Getting started" for the welcome-only card, else "Setup guide"', () => {
+    expect(cardTitle("welcome-only")).toBe("Getting started");
+    expect(cardTitle("full")).toBe("Setup guide");
+    expect(cardTitle("finished")).toBe("Setup guide");
+    expect(cardTitle("skeleton")).toBe("Setup guide");
   });
 });
