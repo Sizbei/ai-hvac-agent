@@ -138,6 +138,8 @@ async function seed() {
   // a cancelled future appointment
   await chain("cancelledVisit", "completed");
   await appointment(f.cancelledVisitR!, sql`now() + interval '3 days'`, true);
+  // a cancelled request still carrying a future scheduled_date
+  await chain("cancelledReq", "cancelled", sql`now() + interval '3 days'`);
   // the local-midnight boundary in America/Chicago
   const midnight = sql`(date_trunc('day', now() AT TIME ZONE ${TZ}) AT TIME ZONE ${TZ})`;
   await chain("todayEarly", "completed");
@@ -244,6 +246,13 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     for (const mode of ["history", "empty"] as const) {
       await apply(mode);
       await expectHidden(true, [["service_requests", "cancelledVisitR"], ["customers", "cancelledVisitC"]]);
+    }
+  });
+
+  it("a cancelled request with a future scheduled_date is hidden in both modes", async () => {
+    for (const mode of ["history", "empty"] as const) {
+      await apply(mode);
+      await expectHidden(true, [["service_requests", "cancelledReqR"], ["customer_sessions", "cancelledReqS"], ["customers", "cancelledReqC"]]);
     }
   });
 

@@ -53,7 +53,7 @@ describe("golive marking SQL", () => {
     const history = render(keptRequestIdsSql(ORG, "history")).flat;
     const empty = render(keptRequestIdsSql(ORG, "empty")).flat;
     expect(history).toContain("sr.status NOT IN ('completed'::request_status, 'cancelled'::request_status)");
-    expect(empty).not.toContain("sr.status");
+    expect(empty).not.toContain("sr.status NOT IN");
     // both keep a visit from today
     const visit = render(visitFromTodaySql(ORG)).flat;
     expect(history).toContain(visit.slice(0, 40));
@@ -82,6 +82,11 @@ describe("golive marking SQL", () => {
     expect(flat).toContain("sr.scheduled_date >=");
     const today = render(todayStartSql(ORG)).flat;
     expect(flat).toContain(today.slice(0, 30));
+  });
+
+  it("a cancelled request with a future scheduled_date is not a visit", () => {
+    const { flat } = render(visitFromTodaySql(ORG));
+    expect(flat).toMatch(/^\(\(sr\.status <> 'cancelled'::request_status AND sr\.scheduled_date >= /);
   });
 
   it("today starts at local midnight in the org timezone with the business fallback", () => {

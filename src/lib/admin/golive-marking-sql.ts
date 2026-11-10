@@ -56,10 +56,11 @@ export function todayStartSql(org: string): SQL {
 
 /**
  * The request (correlated alias `sr`) has a visit from today on: its own
- * scheduled_date, or a live (not cancelled) appointment.
+ * scheduled_date (unless the request is cancelled; its mirrored visit is), or a
+ * live (not cancelled) appointment.
  */
 export function visitFromTodaySql(org: string): SQL {
-  return sql`(sr.scheduled_date >= ${todayStartSql(org)} OR EXISTS (SELECT 1 FROM appointments a WHERE a.organization_id = ${org}::uuid AND a.service_request_id = sr.id AND a.cancelled_at IS NULL AND COALESCE(a.starts_at, a.scheduled_date) >= ${todayStartSql(org)}))`;
+  return sql`((sr.status <> 'cancelled'::request_status AND sr.scheduled_date >= ${todayStartSql(org)}) OR EXISTS (SELECT 1 FROM appointments a WHERE a.organization_id = ${org}::uuid AND a.service_request_id = sr.id AND a.cancelled_at IS NULL AND COALESCE(a.starts_at, a.scheduled_date) >= ${todayStartSql(org)}))`;
 }
 
 export function keptRequestIdsSql(org: string, mode: MarkingMode): SQL {
