@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getAdminSession } from '@/lib/auth/session';
 import { isPlatformAdmin } from '@/lib/auth/authz';
-import { PlatformConsole } from '@/components/admin/platform/platform-console';
+import { PlatformConsole, ViewAs } from '@/components/admin/platform/platform-console';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 
@@ -25,6 +25,7 @@ export default async function PlatformPage() {
         title="Platform"
         subtitle="Provision new tenant organizations and view existing ones. Creating a tenant issues a one-time invite link for the owner to accept."
       />
+      <ViewAs />
       <PlatformConsole />
     </PageShell>
   );

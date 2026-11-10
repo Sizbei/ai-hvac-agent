@@ -60,12 +60,13 @@ function demoSafe(state: StateV2, demo: boolean): StateV2 {
 /**
  * GET: one SELECT, then the stamp statement iff there are new stamps or `$top`
  * keys (the write-once `firstSeenAt` on the first GET, plus grandfathering);
- * never for the demo org. The payload is built from the SELECT copy merged in
- * memory, never from RETURNING.
+ * never for the demo org, and never when `write` is false ("View as" preview:
+ * the read must not stamp, grandfather or set `firstSeenAt`). The payload is
+ * built from the SELECT copy merged in memory, never from RETURNING.
  */
 export async function getOnboarding(
   organizationId: string,
-  opts: { demo: boolean; googleEnabled: boolean; appUrl: string; now?: Date },
+  opts: { demo: boolean; write: boolean; googleEnabled: boolean; appUrl: string; now?: Date },
 ): Promise<OnboardingPayload> {
   const now = opts.now ?? new Date();
   const res = await db.execute(onboardingSelectSql(organizationId));
@@ -84,7 +85,7 @@ export async function getOnboarding(
   const needsWrite =
     Object.keys(derived.newStamps).length > 0 || Object.keys(top).length > 0;
 
-  if (!opts.demo && needsWrite) {
+  if (opts.write && !opts.demo && needsWrite) {
     try {
       await db.execute(
         stampStatementSql({ organizationId, newStamps: derived.newStamps, top }),

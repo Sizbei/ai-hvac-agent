@@ -26,7 +26,7 @@ import { getOnboarding, patchOnboarding } from "./onboarding-queries";
 const ORG = "11111111-1111-1111-1111-111111111111";
 const NOW = new Date("2026-11-04T12:00:00.000Z");
 const NOW_ISO = NOW.toISOString();
-const OPTS = { demo: false, googleEnabled: false, appUrl: "https://app.example.com/", now: NOW };
+const OPTS = { demo: false, write: true, googleEnabled: false, appUrl: "https://app.example.com/", now: NOW };
 const render = (q: SQL) => new PgDialect().sqlToQuery(q);
 const flat = (q: SQL) => render(q).sql.replace(/\s+/g, " ");
 
@@ -190,6 +190,25 @@ describe("getOnboarding", () => {
     expect(executed).toHaveLength(1);
     expect(p.dismissedAt).toBeNull();
     expect(p.completedSeenAt).toBeNull();
+  });
+
+  it("write:false (preview): one SELECT, no stamp, firstSeenAt or grandfather write", async () => {
+    // A first GET on an old org with a step due: every write path would fire.
+    queue.push({
+      rows: [row({ phone: true, business_hours: true, org_created_at: "2026-01-01T00:00:00.000Z" })],
+    });
+    const p = await getOnboarding(ORG, { ...OPTS, write: false });
+    expect(executed).toHaveLength(1);
+    expect(flat(executed[0])).toContain("AS tech_signed_in_evidence");
+    expect(stepOf(p, "phone_hours").done).toBe(true);
+  });
+
+  it("the same row with write:true does write (the preview test is meaningful)", async () => {
+    queue.push({
+      rows: [row({ phone: true, business_hours: true, org_created_at: "2026-01-01T00:00:00.000Z" })],
+    });
+    await getOnboarding(ORG, OPTS);
+    expect(executed).toHaveLength(2);
   });
 
   it("still returns the payload when the stamp statement throws", async () => {

@@ -3,6 +3,7 @@
  * Time to page frame and time to first data row for every admin nav page.
  *
  *   node scripts/agent/measure-latency.mjs [--base http://localhost:3000] [--runs 5] [--out <file>]
+ *     [--preview-as <userId>]
  *
  * Each run loads /admin, waits for it to settle, clicks the sidebar link and
  * measures from the click (plan ruling 14):
@@ -15,6 +16,10 @@
  * (reads .env.local = DEV). On any other base set HVAC_SESSION to the raw
  * hvac_admin_session cookie value. Measure a local `next build && next start`;
  * never point this at production without the user's say-so.
+ *
+ * --preview-as <userId> measures as that user ("View as", spec P7): it adds a
+ * dev hvac_preview cookie from mint-preview-cookie.mjs, bound to the session.
+ * Localhost only — refused for any other base.
  */
 import { execFileSync, spawnSync } from "child_process";
 import { writeFileSync } from "fs";
@@ -41,8 +46,13 @@ const opt = (name, fallback) => {
 const base = opt("base", "http://localhost:3000").replace(/\/+$/, "");
 const runs = Number(opt("runs", "5"));
 const out = opt("out", "");
+const previewAs = opt("preview-as", "");
 const { hostname } = new URL(base);
 const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+if (previewAs && !isLocal) {
+  console.error("--preview-as mints a dev cookie and is for localhost only.");
+  process.exit(1);
+}
 
 const { LATENCY_PAGES, formatLatencyTable } = await import(
   "../../src/lib/admin/latency-stats.ts"
@@ -99,6 +109,15 @@ const settled = (page) =>
   }, null, { timeout: 30000 });
 
 const token = sessionToken();
+const previewCookie = previewAs
+  ? execFileSync("npx", ["tsx", "scripts/agent/mint-preview-cookie.mjs", previewAs], {
+      encoding: "utf8",
+      env: { ...process.env, HVAC_SESSION: token },
+    })
+      .trim()
+      .split("\n")
+      .pop()
+  : null;
 const browser = await chromium.launch();
 const rows = [];
 try {
@@ -108,6 +127,9 @@ try {
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       await ctx.addCookies([
         { name: "hvac_admin_session", value: token, domain: hostname, path: "/" },
+        ...(previewCookie
+          ? [{ name: "hvac_preview", value: previewCookie, domain: hostname, path: "/" }]
+          : []),
       ]);
       const page = await ctx.newPage();
       try {

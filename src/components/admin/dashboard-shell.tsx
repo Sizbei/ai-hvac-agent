@@ -10,13 +10,17 @@ import { GlobalSearch } from '@/components/admin/global-search';
 import { navLabelFor, type SetupPlacement } from '@/components/admin/nav-items';
 import { SetupPlacementProvider } from '@/components/admin/setup-placement-context';
 import { OrgNameProvider } from '@/components/admin/org-name-context';
+import { PreviewBanner } from '@/components/admin/preview-banner';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
   readonly orgName?: string;
   readonly adminName: string;
   readonly adminEmail: string;
-  readonly role: AdminRole;
+  /** The role the UI renders for: the "View as" target's while previewing. */
+  readonly role: AdminRole | 'technician';
+  /** The "View as" banner line; set only while a preview is on. */
+  readonly previewLine?: string | null;
   /** When true, the org's subscription is past_due/suspended — render the
    * non-dismissable billing banner above the content. */
   readonly billingAttention?: boolean;
@@ -37,6 +41,7 @@ export function DashboardShell({
   adminName,
   adminEmail,
   role,
+  previewLine = null,
   billingAttention = false,
   setupPlacement,
   mapEnabled,
@@ -68,6 +73,7 @@ export function DashboardShell({
             onMobileClose={handleMobileClose}
           />
           <div className="flex flex-1 flex-col overflow-hidden">
+            {previewLine && <PreviewBanner line={previewLine} />}
             <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} orgName={orgName} />
             {billingAttention && (
               <div

@@ -7,6 +7,15 @@ vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
 
+// The viewer wraps the same session; `preview` is what a test sets.
+let preview: unknown = null;
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, preview } : null;
+  },
+}));
+
 const getOnboarding = vi.fn();
 const patchOnboarding = vi.fn();
 vi.mock("@/lib/admin/onboarding-queries", () => ({
@@ -51,6 +60,12 @@ const SESSION = {
 };
 const PAYLOAD = { steps: [], progress: { done: 0, total: 0 }, demo: false };
 
+function getReq(cookie?: string) {
+  return new NextRequest("https://app.example.com/api/admin/onboarding", {
+    headers: cookie ? { cookie } : {},
+  });
+}
+
 function patchReq(body: unknown) {
   return new NextRequest("https://app.example.com/api/admin/onboarding", {
     method: "PATCH",
@@ -60,6 +75,7 @@ function patchReq(body: unknown) {
 }
 
 beforeEach(() => {
+  preview = null;
   process.env.DEMO_MODE_ORG_IDS = DEMO_ORG_ID;
   getAdminSession.mockReset();
   getOnboarding.mockReset().mockResolvedValue(PAYLOAD);
@@ -72,7 +88,7 @@ beforeEach(() => {
 describe("GET /api/admin/onboarding", () => {
   it("401 without a session", async () => {
     getAdminSession.mockResolvedValue(null);
-    const res = await GET();
+    const res = await GET(getReq());
     expect(res.status).toBe(401);
     expect((await res.json()).error.code).toBe("UNAUTHORIZED");
   });
@@ -80,28 +96,49 @@ describe("GET /api/admin/onboarding", () => {
   it("429 when rate limited", async () => {
     getAdminSession.mockResolvedValue(SESSION);
     slidingWindow.mockReturnValue({ allowed: false });
-    const res = await GET();
+    const res = await GET(getReq());
     expect(res.status).toBe(429);
     expect(getOnboarding).not.toHaveBeenCalled();
   });
 
   it("returns the payload with no wrapper, demo false for a normal org", async () => {
     getAdminSession.mockResolvedValue(SESSION);
-    const res = await GET();
+    const res = await GET(getReq());
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.data).toEqual(PAYLOAD);
     expect(json.data.onboarding).toBeUndefined();
     expect(getOnboarding).toHaveBeenCalledWith(
       ORG,
-      expect.objectContaining({ demo: false, googleEnabled: false }),
+      expect.objectContaining({ demo: false, write: true, googleEnabled: false }),
     );
+  });
+
+  it("onboarding GET passes write:false while previewing and never runs the stamp statement", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    preview = { status: "active", targetUserId: "t", targetName: "Chick", targetRole: "admin" };
+    const res = await GET(getReq("hvac_preview=signed"));
+    expect(res.status).toBe(200);
+    expect(getOnboarding).toHaveBeenCalledWith(ORG, expect.objectContaining({ write: false }));
+  });
+
+  it("a stale preview is still read-only: write:false", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    preview = { status: "stale" };
+    await GET(getReq("hvac_preview=signed"));
+    expect(getOnboarding).toHaveBeenCalledWith(ORG, expect.objectContaining({ write: false }));
+  });
+
+  it("any preview cookie on the request means write:false, even if the viewer resolved none", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    await GET(getReq("hvac_preview=unresolved"));
+    expect(getOnboarding).toHaveBeenCalledWith(ORG, expect.objectContaining({ write: false }));
   });
 
   it("passes demo:true only when DEMO_MODE_ORG_IDS lists the org", async () => {
     delete process.env.DEMO_MODE_ORG_IDS;
     getAdminSession.mockResolvedValue({ ...SESSION, organizationId: DEMO_ORG_ID });
-    await GET();
+    await GET(getReq());
     expect(getOnboarding).toHaveBeenCalledWith(
       DEMO_ORG_ID,
       expect.objectContaining({ demo: false }),
@@ -110,17 +147,17 @@ describe("GET /api/admin/onboarding", () => {
 
   it("passes demo: true for a demo-mode org", async () => {
     getAdminSession.mockResolvedValue({ ...SESSION, organizationId: DEMO_ORG_ID });
-    await GET();
+    await GET(getReq());
     expect(getOnboarding).toHaveBeenCalledWith(
       DEMO_ORG_ID,
-      expect.objectContaining({ demo: true }),
+      expect.objectContaining({ demo: true, write: false }),
     );
   });
 
   it("500 with generic copy when the query throws", async () => {
     getAdminSession.mockResolvedValue(SESSION);
     getOnboarding.mockRejectedValue(new Error("secret db detail"));
-    const res = await GET();
+    const res = await GET(getReq());
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("secret db detail");
   });

@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Loader2, Plus, Download, Trash2, RefreshCw, Mail } from 'lucide-react';
+import { Check, Copy, Eye, Loader2, Plus, Download, Trash2, RefreshCw, Mail } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -31,6 +31,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { selectLabel, type SelectOption } from '@/lib/admin/select-label';
 import type { FeatureKey, Features } from '@/lib/tenancy/feature-flags';
 import {
   initialSwitchRow,
@@ -249,6 +257,126 @@ function OwnerInvite({ org }: { readonly org: OrgRow }) {
         </p>
       )}
     </div>
+  );
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: 'Super admin',
+  admin: 'Admin',
+  technician: 'Technician',
+};
+
+/** "View as" (spec P7): render the admin as an active user of this org, read-only.
+ * Start POSTs the preview route; the cookie it sets makes every page render as
+ * the target until Exit (in the banner). */
+export function ViewAs() {
+  const [options, setOptions] = useState<SelectOption[] | null>(null);
+  const [userId, setUserId] = useState('');
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/preview');
+        const json = await res.json().catch(() => ({ success: false }));
+        if (!live) return;
+        if (res.ok && json.success) {
+          const targets = json.data.targets as { userId: string; name: string; role: string }[];
+          setOptions(
+            targets.map((t) => ({
+              value: t.userId,
+              label: `${t.name} · ${ROLE_LABELS[t.role] ?? t.role}`,
+            })),
+          );
+          return;
+        }
+      } catch {
+        // fall through to the error below
+      }
+      if (live) {
+        setOptions([]);
+        setError('Couldn’t load the people in this org. Please try again.');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  async function start() {
+    if (starting || userId === '') return;
+    setStarting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      if (res.ok) {
+        location.assign('/admin');
+        return;
+      }
+      setError(
+        res.status === 404
+          ? 'That person is no longer an active user. Pick someone else.'
+          : 'Couldn’t start the preview. Please try again.',
+      );
+    } catch {
+      setError('Couldn’t start the preview. Please try again.');
+    }
+    setStarting(false);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>View as</CardTitle>
+        <CardDescription>
+          See the admin exactly as someone in your org sees it. Read-only: nothing can be
+          saved until you exit.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={userId}
+            onValueChange={(v) => setUserId(typeof v === 'string' ? v : '')}
+            disabled={options === null || options.length === 0}
+          >
+            <SelectTrigger className="w-full sm:w-72" aria-label="Person to view as">
+              <SelectValue>
+                {(v: unknown) =>
+                  selectLabel(
+                    options ?? [],
+                    v,
+                    options === null ? 'Loading…' : options.length === 0 ? 'No one to view as' : 'Pick a person',
+                  )
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {(options ?? []).map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" onClick={() => void start()} disabled={starting || userId === ''}>
+            {starting ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+            View as
+          </Button>
+        </div>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
