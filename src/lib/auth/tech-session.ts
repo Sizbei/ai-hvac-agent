@@ -72,6 +72,7 @@ export async function getTechSession(): Promise<TechSessionPayload | null> {
       payload.userId,
       payload.organizationId,
       payload.role,
+      payload.email,
     ))
   ) {
     return null;

@@ -12,6 +12,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
+import { isRetiredDemoEmail } from "@/lib/auth/retired-demo";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -79,15 +80,20 @@ export async function POST(request: NextRequest) {
     // valid password login. A Google-only user has passwordHash === null and can
     // never log in this way — we treat it as ineligible and (critically) never
     // pass null to bcrypt.compare as the stored hash. For every ineligible case
-    // (no user, wrong role, disabled, password-less), still run bcrypt.compare
-    // against a dummy hash and return the SAME generic 401 so neither timing nor
-    // the error message reveals whether the email exists or what's wrong.
+    // (no user, wrong role, disabled, password-less, retired demo email), still
+    // run bcrypt.compare against a dummy hash and return the SAME generic 401 so
+    // neither timing nor the error message reveals whether the email exists or
+    // what's wrong.
     const adminRole: AdminRole | null =
       user && (user.role === "super_admin" || user.role === "admin")
         ? user.role
         : null;
     const eligibleUser =
-      user && adminRole && user.isActive && user.passwordHash !== null
+      user &&
+      adminRole &&
+      user.isActive &&
+      user.passwordHash !== null &&
+      !isRetiredDemoEmail(user.email)
         ? { ...user, role: adminRole, passwordHash: user.passwordHash }
         : null;
     const passwordValid = await bcrypt.compare(

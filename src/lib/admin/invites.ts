@@ -7,6 +7,7 @@ import { staffInvites, users, organizations } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { canAssignRole } from "@/lib/auth/authz";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
+import { isRetiredDemoEmail } from "@/lib/auth/retired-demo";
 import { normalizeEmail, createStaff, claimPasswordlessStaff } from "./staff-queries";
 import { getSeatUsage } from "./seats";
 import { seatsFull } from "./seat-usage";
@@ -368,6 +369,10 @@ export async function acceptInvite(
     return { ok: false, reason: "invalid" };
   }
   const { invite } = resolved;
+  // Retired demo logins can never be (re)created through an invite.
+  if (isRetiredDemoEmail(invite.email)) {
+    return { ok: false, reason: "invalid" };
+  }
 
   // Create the user in the invite's OWN org, with the invite's role, BEFORE
   // claiming the invite. Internal call: actorRole defaults to super_admin (the

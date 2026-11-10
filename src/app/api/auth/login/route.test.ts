@@ -105,4 +105,19 @@ describe("POST /api/auth/login", () => {
     expect(res.status).toBe(415);
     expect(createAdminSession).not.toHaveBeenCalled();
   });
+  it("returns 401 INVALID_CREDENTIALS for an active demo user with the right password and still runs bcrypt.compare once", async () => {
+    const demoEmail = "admin@demo-hvac.com";
+    dbRows.current = [{ ...adminRow, email: demoEmail }];
+    (bcrypt.compare as unknown as Mock).mockResolvedValue(true);
+    const res = await POST(req({ email: demoEmail, password: "pw" }));
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toMatchObject({
+      code: "INVALID_CREDENTIALS",
+      message: "Invalid credentials",
+    });
+    expect(bcrypt.compare).toHaveBeenCalledOnce();
+    // Ineligible → compared against the dummy hash, never the real one.
+    expect((bcrypt.compare as unknown as Mock).mock.calls[0][1]).not.toBe(adminRow.passwordHash);
+    expect(createAdminSession).not.toHaveBeenCalled();
+  });
 });

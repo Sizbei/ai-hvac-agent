@@ -11,8 +11,9 @@ vi.mock("next/server", () => ({
 }));
 
 const cookieSet = vi.fn();
+const cookieGet = vi.fn();
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ set: cookieSet, get: vi.fn(), delete: vi.fn() }),
+  cookies: async () => ({ set: cookieSet, get: cookieGet, delete: vi.fn() }),
 }));
 
 const execute = vi.fn();
@@ -27,7 +28,9 @@ vi.mock("./session-revocation", () => ({ isSessionUserCurrent: vi.fn() }));
 const warn = vi.fn();
 vi.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => warn(...a) } }));
 
-import { createTechSession } from "./tech-session";
+import { createTechSession, getTechSession } from "./tech-session";
+import { verifyTechToken } from "./tech-config";
+import { isSessionUserCurrent } from "./session-revocation";
 import { DEMO_ORG_ID } from "@/lib/tenancy/organization";
 
 const ORG = "33333333-3333-3333-3333-333333333333";
@@ -59,5 +62,40 @@ describe("createTechSession onboarding flag", () => {
     execute.mockRejectedValue(new Error("db down"));
     await expect(createTechSession(payload(ORG))).resolves.toBeUndefined();
     await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+  });
+});
+
+describe("getTechSession revocation call shape", () => {
+  it("passes the token email to isSessionUserCurrent", async () => {
+    cookieGet.mockReturnValue({ value: "tok" });
+    const tokenPayload = {
+      userId: "u1",
+      organizationId: ORG,
+      email: "tech@example.com",
+      name: "Tess",
+      role: "technician",
+    };
+    vi.mocked(verifyTechToken).mockResolvedValue(tokenPayload as never);
+    vi.mocked(isSessionUserCurrent).mockResolvedValue(true);
+    expect(await getTechSession()).toEqual(tokenPayload);
+    expect(isSessionUserCurrent).toHaveBeenCalledWith(
+      "u1",
+      ORG,
+      "technician",
+      "tech@example.com",
+    );
+  });
+
+  it("returns null when the revocation check denies", async () => {
+    cookieGet.mockReturnValue({ value: "tok" });
+    vi.mocked(verifyTechToken).mockResolvedValue({
+      userId: "u1",
+      organizationId: ORG,
+      email: "mike.johnson@demo-hvac.com",
+      name: "Mike",
+      role: "technician",
+    } as never);
+    vi.mocked(isSessionUserCurrent).mockResolvedValue(false);
+    expect(await getTechSession()).toBeNull();
   });
 });

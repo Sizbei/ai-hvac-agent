@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
+import { isRetiredDemoEmail } from "./retired-demo";
 
 /**
  * Revocation freshness check for a cryptographically-valid session.
@@ -17,7 +18,12 @@ import { logger } from "@/lib/logger";
  * Fails OPEN on a DB error (returns true) — the token is already crypto-valid and
  * a transient DB blip must not lock every operator out; it degrades to the prior
  * crypto-only behavior. DENIES on a definitive mismatch (row missing / inactive /
- * role changed).
+ * role changed / email changed / retired demo email).
+ *
+ * EMAIL: the row's email must still equal the token's (trim + lowercase), and
+ * must not be a retired `@demo-hvac.com` login — so a live demo JWT dies within
+ * the cache TTL. The token email is part of the cache key, so a pass for one
+ * email never satisfies another.
  *
  * NOTE: does not yet revoke on password reset (the old token stays valid while
  * the user is active with the same role) — that needs a per-user token version
@@ -42,19 +48,26 @@ export async function isSessionUserCurrent(
   userId: string,
   organizationId: string,
   role: string,
+  email: string,
 ): Promise<boolean> {
-  const cacheKey = `${userId}:${organizationId}:${role}`;
+  const tokenEmail = normalizeSessionEmail(email);
+  const cacheKey = `${userId}:${organizationId}:${role}:${tokenEmail}`;
   const cachedAt = revocationCache.get(cacheKey);
   if (cachedAt !== undefined && Date.now() - cachedAt < REVOCATION_CACHE_TTL_MS) {
     return true;
   }
   try {
     const [row] = await db
-      .select({ isActive: users.isActive, role: users.role })
+      .select({ isActive: users.isActive, role: users.role, email: users.email })
       .from(users)
       .where(and(eq(users.id, userId), eq(users.organizationId, organizationId)))
       .limit(1);
-    const ok = !!row && row.isActive === true && row.role === role;
+    const ok =
+      !!row &&
+      row.isActive === true &&
+      row.role === role &&
+      normalizeSessionEmail(row.email) === tokenEmail &&
+      !isRetiredDemoEmail(row.email);
     if (ok) {
       revocationCache.set(cacheKey, Date.now());
     } else {
@@ -68,4 +81,8 @@ export async function isSessionUserCurrent(
     );
     return true;
   }
+}
+
+function normalizeSessionEmail(email: string): string {
+  return email.trim().toLowerCase();
 }

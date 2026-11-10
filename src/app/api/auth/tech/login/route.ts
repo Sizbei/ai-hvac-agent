@@ -11,6 +11,7 @@ import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
+import { isRetiredDemoEmail } from "@/lib/auth/retired-demo";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -75,13 +76,15 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     // Eligible iff the row is an ACTIVE technician WITH a password. Anything else
-    // (no row, admin-tier, disabled, Google-only) is ineligible; we still compare
-    // against the dummy hash so timing/messages don't leak which condition failed.
+    // (no row, admin-tier, disabled, Google-only, retired demo email) is
+    // ineligible; we still compare against the dummy hash so timing/messages
+    // don't leak which condition failed.
     const eligibleUser =
       user &&
       user.role === "technician" &&
       user.isActive &&
-      user.passwordHash !== null
+      user.passwordHash !== null &&
+      !isRetiredDemoEmail(user.email)
         ? { ...user, passwordHash: user.passwordHash }
         : null;
 

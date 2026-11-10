@@ -101,6 +101,17 @@ describe("resolveGoogleLogin — pre-provisioned only", () => {
     expect(updateCalls).toHaveLength(1); // links google_id on first login too
   });
 
+  it("refuses a retired demo user before linking google_id", async () => {
+    selectQueue.push([
+      userRow({ email: "admin@demo-hvac.com", googleId: null }),
+    ]);
+    const result = await resolveGoogleLogin(
+      identity({ email: "Admin@Demo-HVAC.com" }),
+    );
+    expect(result).toEqual({ ok: false, reason: "no_account" });
+    expect(updateCalls).toHaveLength(0); // db.update never called
+  });
+
   it("denies an inactive technician", async () => {
     selectQueue.push([userRow({ role: "technician", isActive: false })]);
     const result = await resolveGoogleLogin(identity());

@@ -394,6 +394,14 @@ describe('acceptInvite', () => {
     expect(mockCreateStaff).not.toHaveBeenCalled();
   });
 
+  it('acceptInvite returns invalid for an invite to a @demo-hvac.com email', async () => {
+    selectQueue.push([{ ...liveRow('admin'), email: 'admin@demo-hvac.com' }]);
+    const res = await acceptInvite('t', { name: 'N', password: 'password1' });
+    expect(res).toEqual({ ok: false, reason: 'invalid' });
+    expect(mockCreateStaff).not.toHaveBeenCalled();
+    expect(mockClaimPasswordlessStaff).not.toHaveBeenCalled();
+  });
+
   it('creates the user with the role FROM THE INVITE, not request input', async () => {
     selectQueue.push([liveRow('technician')]); // resolve
     selectQueue.push([{ ownerEmail: null }]); // org has no pending owner

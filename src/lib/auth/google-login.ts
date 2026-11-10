@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { normalizeEmail } from "@/lib/admin/staff-queries";
+import { isRetiredDemoEmail } from "./retired-demo";
 import type { AdminSessionPayload } from "./types";
 import type { TechSessionPayload } from "./tech-config";
 import type { VerifiedGoogleIdentity } from "./google-oidc";
@@ -39,9 +40,9 @@ export async function resolveGoogleLogin(
     .where(eq(users.email, email))
     .limit(1);
 
-  // Pre-provisioned only: no row or inactive → denied, with a single generic
-  // reason (no account enumeration).
-  if (!user || !user.isActive) {
+  // Pre-provisioned only: no row, inactive, or a retired demo login → denied,
+  // with a single generic reason (no account enumeration), before any link.
+  if (!user || !user.isActive || isRetiredDemoEmail(user.email)) {
     return { ok: false, reason: "no_account" };
   }
 

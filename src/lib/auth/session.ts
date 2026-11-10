@@ -45,6 +45,7 @@ export async function getAdminSession(): Promise<AdminSessionPayload | null> {
       payload.userId,
       payload.organizationId,
       payload.role,
+      payload.email,
     ))
   ) {
     return null;
