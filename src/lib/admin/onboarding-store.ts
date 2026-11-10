@@ -93,7 +93,8 @@ function asPayload(body: unknown): OnboardingPayload | null {
   if (!Array.isArray(p.steps)) return null;
   if (typeof p.progress?.requiredDone !== "number") return null;
   if (typeof p.progress?.requiredTotal !== "number") return null;
-  return data as OnboardingPayload;
+  // A server from before the guide sends no `guide`: same as a failed guide read.
+  return { ...(data as OnboardingPayload), guide: p.guide ?? null };
 }
 
 async function load(seq: number, invAtStart: number): Promise<void> {

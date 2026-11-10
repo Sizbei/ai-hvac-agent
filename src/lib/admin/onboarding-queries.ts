@@ -67,7 +67,7 @@ function demoSafe(state: StateV2, demo: boolean): StateV2 {
 export async function getOnboarding(
   organizationId: string,
   opts: { demo: boolean; write: boolean; googleEnabled: boolean; appUrl: string; now?: Date },
-): Promise<OnboardingPayload> {
+): Promise<Omit<OnboardingPayload, "guide">> {
   const now = opts.now ?? new Date();
   const res = await db.execute(onboardingSelectSql(organizationId));
   const raw = signalsFromRow((res.rows[0] ?? {}) as Row);

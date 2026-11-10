@@ -18,6 +18,7 @@ function payload(
     dismissedAt: opts.dismissedAt ?? null,
     completedSeenAt: opts.completedSeenAt ?? null,
     demo: false,
+    guide: null,
   };
 }
 

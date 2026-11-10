@@ -42,15 +42,18 @@ export function isSuperAdmin(
  * Returns false when the env var is unset/empty or the email is blank.
  */
 export function isPlatformAdminEmail(email: string | null | undefined): boolean {
-  const allow = process.env.PLATFORM_ADMIN_EMAILS;
-  if (!allow || !email) return false;
+  if (!email) return false;
   const normalized = email.trim().toLowerCase();
   if (!normalized) return false;
-  return allow
+  return platformAdminEmails().includes(normalized);
+}
+
+/** The PLATFORM_ADMIN_EMAILS entries, trimmed and lowercased; [] when unset. */
+export function platformAdminEmails(): string[] {
+  return (process.env.PLATFORM_ADMIN_EMAILS ?? "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
-    .filter((e) => e.length > 0)
-    .includes(normalized);
+    .filter((e) => e.length > 0);
 }
 
 /**

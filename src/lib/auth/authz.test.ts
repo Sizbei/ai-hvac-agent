@@ -7,6 +7,7 @@ import {
   isSuperAdmin,
   canAssignRole,
   isPlatformAdminEmail,
+  platformAdminEmails,
   assertMayMutateUser,
   type MutationActor,
 } from './authz';
@@ -96,6 +97,15 @@ describe('isPlatformAdminEmail', () => {
     expect(isPlatformAdminEmail(' r@X.COM ')).toBe(true);
     expect(isPlatformAdminEmail('other@y.com')).toBe(true);
     expect(isPlatformAdminEmail('t@x.com')).toBe(false);
+  });
+});
+
+describe('platformAdminEmails', () => {
+  it('is the trimmed, lowercased, non-empty allowlist entries; [] when unset', () => {
+    delete process.env.PLATFORM_ADMIN_EMAILS;
+    expect(platformAdminEmails()).toEqual([]);
+    process.env.PLATFORM_ADMIN_EMAILS = ' R@x.com ,, other@y.com , ';
+    expect(platformAdminEmails()).toEqual(['r@x.com', 'other@y.com']);
   });
 });
 

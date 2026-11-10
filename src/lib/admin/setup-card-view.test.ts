@@ -17,6 +17,7 @@ function payload(extra: Partial<OnboardingPayload> = {}, requiredDone = 0): Onbo
     dismissedAt: null,
     completedSeenAt: null,
     demo: false,
+    guide: null,
     ...extra,
   };
 }

@@ -1,4 +1,5 @@
 import type { Signals, StepId } from "./onboarding-state";
+import type { AdminGuidePayload } from "./admin-guide-state";
 
 /**
  * Setup-guide step table + pure derivation (spec §3/§4). Imports only types:
@@ -50,6 +51,8 @@ export interface OnboardingPayload {
   dismissedAt: string | null;
   completedSeenAt: string | null;
   demo: boolean;
+  /** Per-user welcome + quick tour (onboarding D1); null when its separate read failed. */
+  guide: AdminGuidePayload | null;
 }
 
 export interface DeriveOptions {

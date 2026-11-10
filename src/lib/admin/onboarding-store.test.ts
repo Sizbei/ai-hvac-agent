@@ -18,6 +18,7 @@ function payload(requiredDone: number): OnboardingPayload {
     dismissedAt: null,
     completedSeenAt: null,
     demo: false,
+    guide: null,
   };
 }
 
@@ -161,6 +162,28 @@ describe("onboarding store", () => {
     await a;
     expect(getOnboardingSnapshot().data).toBeNull();
     expect(getOnboardingSnapshot().error).toBe(true);
+  });
+
+  it("reads a payload without guide (a server from before 0060) as guide: null", async () => {
+    const { pending } = stubFetch();
+    const a = refreshOnboarding();
+    const { guide: _g, ...old } = payload(1);
+    pending[0].resolve(new Response(JSON.stringify({ success: true, data: old }), { status: 200 }));
+    await a;
+    expect(getOnboardingSnapshot().data?.guide).toBeNull();
+    expect(getOnboardingSnapshot().data?.progress.requiredDone).toBe(1);
+  });
+
+  it("keeps the guide object as sent", async () => {
+    const { pending } = stubFetch();
+    const a = refreshOnboarding();
+    const guide = {
+      welcomeDue: true, lastLesson: "schedule", tourStartedAt: "2026-11-10T12:00:00.000Z", tourCompletedAt: null,
+      readOnly: false, payLinks: false, hasFieldPulse: true, historyHidden: true, historyContact: "Ray",
+    } as const;
+    pending[0].resolve(ok({ ...payload(0), guide }));
+    await a;
+    expect(getOnboardingSnapshot().data?.guide).toEqual(guide);
   });
 
   it("keeps a network rejection from escaping and sets error", async () => {

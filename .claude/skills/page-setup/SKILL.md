@@ -77,6 +77,18 @@ audit. PATCH applies the body in memory; the card's dismiss lives in
 stripped in `getOnboarding`, and `loadSetupPlacement` always returns
 `operations` for the demo org (`placementFor(state, isDemo)`).
 
+**Per-user guide (welcome + quick tour, onboarding spec D1):**
+`users.admin_guide_state` (migration 0060) holds `welcomeDismissedAt`,
+`tourStartedAt`, `tourCompletedAt` (write-once) and `lastLesson`. GET onboarding
+adds `guide` from a SEPARATE read (`src/lib/admin/admin-guide-queries.ts`
+`readAdminGuide`, SQL in `admin-guide-sql.ts`, pure parse/payload in
+`admin-guide-state.ts`); a failed read is `guide: null`, never a failed
+checklist. The subject is the session user or the "View as" target (stale
+preview: none, never due); it never writes. `PATCH /api/admin/guide`
+(`dismissWelcome` | `lesson` | `tourCompleted`) always answers 204, writes only
+the session user's own active admin-tier row, is refused while previewing and is
+not audited. Tests: `tests/integration/admin-guide-state.test.ts`.
+
 **Client store contract:** fetches are sequence-tagged (older responses dropped);
 `refreshOnboarding({ force: true })` during an in-flight fetch chains another;
 `invalidateOnboarding()` forces a refresh when there are subscribers, else marks

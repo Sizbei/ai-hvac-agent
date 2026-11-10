@@ -5,6 +5,7 @@ import { getViewerContext } from "@/lib/auth/viewer";
 import { PREVIEW_COOKIE } from "@/lib/auth/preview-cookie";
 import { getGoogleOidcConfig } from "@/lib/auth/google-oidc";
 import { getOnboarding, patchOnboarding } from "@/lib/admin/onboarding-queries";
+import { readAdminGuide } from "@/lib/admin/admin-guide-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { isDemoOrg } from "@/lib/tenancy/demo-mode";
 import {
@@ -13,13 +14,14 @@ import {
   readJsonBody,
 } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
-import { logger } from "@/lib/logger";
+import { errorCode, logger } from "@/lib/logger";
 
 /**
  * GET — the setup guide payload for the session's org. Read-only while a
  * "View as" preview is on: no stamp, grandfathering or `firstSeenAt` write.
  * Any preview cookie on the request counts, even one the viewer could not
  * resolve, so a lookup error can never turn a preview read into a write.
+ * `guide` (onboarding D1) is the viewer's own state, or the preview target's.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -40,13 +42,23 @@ export async function GET(request: NextRequest) {
 
     const demo = isDemoOrg(session.organizationId);
     const previewing = viewer.preview !== null || request.cookies.has(PREVIEW_COOKIE);
-    const payload = await getOnboarding(session.organizationId, {
-      demo,
-      write: !demo && !previewing,
-      googleEnabled: getGoogleOidcConfig() !== null,
-      appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
-    });
-    return successResponse(payload);
+    const [payload, guide] = await Promise.all([
+      getOnboarding(session.organizationId, {
+        demo,
+        write: !demo && !previewing,
+        googleEnabled: getGoogleOidcConfig() !== null,
+        appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+      }),
+      // A separate read that never fails the checklist (spec D1): guide: null.
+      readAdminGuide(viewer, { readOnly: previewing }).catch((error: unknown) => {
+        logger.warn(
+          { code: errorCode(error), organizationId: session.organizationId },
+          "Admin guide read failed; returning guide: null",
+        );
+        return null;
+      }),
+    ]);
+    return successResponse({ ...payload, guide });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to load onboarding state");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

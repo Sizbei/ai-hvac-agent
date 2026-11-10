@@ -318,6 +318,9 @@ export const users = pgTable(
     // Technician getting-started guide (spec 2026-11-05): { hiddenAt?, firstCompleted: { <stepId>: iso } }.
     // Timestamps and step ids only — never PII. NULL = never read.
     fieldGuideState: jsonb("field_guide_state"),
+    // Admin first-run guide (onboarding D1): { welcomeDismissedAt?, tourStartedAt?,
+    // tourCompletedAt?, lastLesson? }. Timestamps and a lesson id only. NULL = never written.
+    adminGuideState: jsonb("admin_guide_state"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

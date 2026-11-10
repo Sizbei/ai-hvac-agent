@@ -32,6 +32,7 @@ function payload(
     dismissedAt: null,
     completedSeenAt: null,
     demo: false,
+    guide: null,
     ...rest,
   };
 }

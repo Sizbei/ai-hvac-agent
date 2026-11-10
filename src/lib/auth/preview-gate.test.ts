@@ -62,6 +62,7 @@ describe("previewGate", () => {
     expect(previewGate("OPTIONS", "/api/admin/customers")).toBe("refuse");
     expect(previewGate("POST", "/admin/customers")).toBe("refuse");
     expect(previewGate("POST", "/api/admin/preview")).toBe("refuse");
+    expect(previewGate("PATCH", "/api/admin/guide")).toBe("refuse");
   });
 
   it("lets the exit and logout POSTs through, and only those", () => {

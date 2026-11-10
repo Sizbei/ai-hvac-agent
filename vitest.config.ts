@@ -38,6 +38,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/visibility-customers.test.ts",
   "tests/integration/visibility-money.test.ts",
   "tests/integration/visibility-insights.test.ts",
+  // Onboarding D1: per-user admin guide merge, isolation and read-only preview (two throwaway orgs).
+  "tests/integration/admin-guide-state.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

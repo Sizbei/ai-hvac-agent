@@ -16,6 +16,11 @@ vi.mock("@/lib/auth/viewer", () => ({
   },
 }));
 
+const readAdminGuide = vi.fn();
+vi.mock("@/lib/admin/admin-guide-queries", () => ({
+  readAdminGuide: (...a: unknown[]) => readAdminGuide(...a),
+}));
+
 const getOnboarding = vi.fn();
 const patchOnboarding = vi.fn();
 vi.mock("@/lib/admin/onboarding-queries", () => ({
@@ -42,8 +47,10 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 const loggerError = vi.fn();
+const loggerWarn = vi.fn();
 vi.mock("@/lib/logger", () => ({
-  logger: { error: (...a: unknown[]) => loggerError(...a), info: vi.fn(), warn: vi.fn() },
+  logger: { error: (...a: unknown[]) => loggerError(...a), info: vi.fn(), warn: (...a: unknown[]) => loggerWarn(...a) },
+  errorCode: (e: unknown) => (e instanceof Error ? "E_GUIDE" : "unknown"),
 }));
 
 import { NextRequest } from "next/server";
@@ -59,6 +66,7 @@ const SESSION = {
   role: "admin" as const,
 };
 const PAYLOAD = { steps: [], progress: { done: 0, total: 0 }, demo: false };
+const GUIDE = { welcomeDue: true, lastLesson: null, readOnly: false };
 
 function getReq(cookie?: string) {
   return new NextRequest("https://app.example.com/api/admin/onboarding", {
@@ -79,9 +87,11 @@ beforeEach(() => {
   process.env.DEMO_MODE_ORG_IDS = DEMO_ORG_ID;
   getAdminSession.mockReset();
   getOnboarding.mockReset().mockResolvedValue(PAYLOAD);
+  readAdminGuide.mockReset().mockResolvedValue(GUIDE);
   patchOnboarding.mockReset().mockResolvedValue({ flags: {} });
   logAudit.mockReset().mockResolvedValue(undefined);
   loggerError.mockReset();
+  loggerWarn.mockReset();
   slidingWindow.mockReset().mockReturnValue({ allowed: true });
 });
 
@@ -106,7 +116,7 @@ describe("GET /api/admin/onboarding", () => {
     const res = await GET(getReq());
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.data).toEqual(PAYLOAD);
+    expect(json.data).toEqual({ ...PAYLOAD, guide: GUIDE });
     expect(json.data.onboarding).toBeUndefined();
     expect(getOnboarding).toHaveBeenCalledWith(
       ORG,
@@ -152,6 +162,38 @@ describe("GET /api/admin/onboarding", () => {
       DEMO_ORG_ID,
       expect.objectContaining({ demo: true, write: false }),
     );
+  });
+
+  it("adds guide from a separate read, read-write for the session user", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    await GET(getReq());
+    expect(readAdminGuide).toHaveBeenCalledTimes(1);
+    const [viewerArg, opts] = readAdminGuide.mock.calls[0];
+    expect((viewerArg as { session: unknown }).session).toEqual(SESSION);
+    expect(opts).toEqual({ readOnly: false });
+  });
+
+  it.each([
+    ["an active preview", { status: "active", targetUserId: "t", targetName: "Chick", targetRole: "admin" }, "hvac_preview=signed"],
+    ["a stale preview", { status: "stale" }, "hvac_preview=signed"],
+    ["an unresolved preview cookie", null, "hvac_preview=x"],
+  ])("guide is readOnly with %s", async (_n, p, cookie) => {
+    getAdminSession.mockResolvedValue(SESSION);
+    preview = p;
+    await GET(getReq(cookie));
+    expect(readAdminGuide.mock.calls[0][1]).toEqual({ readOnly: true });
+  });
+
+  it("a failed guide read gives guide: null, keeps the checklist and logs a code only", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    readAdminGuide.mockRejectedValue(new Error("secret db detail"));
+    const res = await GET(getReq());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data).toEqual({ ...PAYLOAD, guide: null });
+    const warned = JSON.stringify(loggerWarn.mock.calls);
+    expect(warned).toContain("E_GUIDE");
+    expect(warned).not.toContain("secret db detail");
   });
 
   it("500 with generic copy when the query throws", async () => {
