@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Copy, Loader2, Plus, Download, Trash2, RefreshCw } from 'lucide-react';
 import {
   Card,
@@ -30,6 +30,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { DEFAULT_FEATURES, type FeatureKey, type Features } from '@/lib/tenancy/feature-flags';
 import { SkeletonTable } from '@/components/admin/ui/skeleton-table';
 
 interface OrgRow {
@@ -37,6 +39,7 @@ interface OrgRow {
   readonly name: string;
   readonly status: 'active' | 'suspended' | 'trial' | 'past_due';
   readonly createdAt: string;
+  readonly features: Features;
 }
 
 /** Token-based status badge for org status — no raw palette classes. */
@@ -63,6 +66,76 @@ function OrgStatusBadge({ status }: { status: OrgRow['status'] }) {
     <Badge variant="outline" className={className}>
       {label}
     </Badge>
+  );
+}
+
+const SWITCHES: readonly { readonly key: FeatureKey; readonly label: string }[] = [
+  { key: 'map', label: 'Map' },
+  { key: 'reviewRequests', label: 'Review requests' },
+  { key: 'payLinks', label: 'Pay links' },
+  { key: 'showHistory', label: 'Show history' },
+];
+
+/** One org's feature switches. Optimistic: a failed save reverts the switch. */
+function OrgSwitches({ org }: { readonly org: OrgRow }) {
+  const [features, setFeatures] = useState<Features>(org.features ?? DEFAULT_FEATURES);
+  const [saving, setSaving] = useState<FeatureKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(key: FeatureKey, next: boolean) {
+    const previous = features;
+    setFeatures({ ...features, [key]: next });
+    setSaving(key);
+    setError(null);
+    try {
+      const res = await fetch(`/api/platform/organizations/${org.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ features: { [key]: next } }),
+      });
+      const json = await res.json().catch(() => ({ success: false }));
+      if (res.ok && json.success) {
+        setFeatures(json.data.features as Features);
+      } else {
+        setFeatures(previous);
+        setError('Couldn’t save the switch. Please try again.');
+      }
+    } catch {
+      setFeatures(previous);
+      setError('Couldn’t save the switch. Please try again.');
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <span className="text-sm font-medium">Switches</span>
+        {SWITCHES.map(({ key, label }) => {
+          const id = `${org.id}-${key}`;
+          return (
+            <div key={key} className="flex items-center gap-2">
+              <Switch
+                id={id}
+                size="sm"
+                checked={features[key]}
+                disabled={saving === key}
+                onCheckedChange={(next) => void toggle(key, next)}
+              />
+              <Label htmlFor={id} className="text-sm font-normal">
+                {label}
+              </Label>
+            </div>
+          );
+        })}
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -138,7 +211,8 @@ export function PlatformConsole() {
             </TableHeader>
             <TableBody>
               {orgs.map((o) => (
-                <TableRow key={o.id}>
+                <Fragment key={o.id}>
+                <TableRow>
                   <TableCell className="font-medium">{o.name}</TableCell>
                   <TableCell>
                     <OrgStatusBadge status={o.status} />
@@ -173,6 +247,12 @@ export function PlatformConsole() {
                     </div>
                   </TableCell>
                 </TableRow>
+                <TableRow>
+                  <TableCell colSpan={4} className="bg-surface-sunken/40 py-2.5">
+                    <OrgSwitches org={o} />
+                  </TableCell>
+                </TableRow>
+                </Fragment>
               ))}
             </TableBody>
           </Table>

@@ -10,6 +10,11 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn() } }));
 
+const getFeatures = vi.fn();
+vi.mock("@/lib/tenancy/features", () => ({
+  getFeatures: (...a: unknown[]) => getFeatures(...a),
+}));
+
 import { NextRequest } from "next/server";
 import { generateKeyPair, exportPKCS8 } from "jose";
 import { GET } from "./route";
@@ -53,6 +58,7 @@ function clearAppleEnv() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getFeatures.mockResolvedValue({ map: true });
   savedEnv = {
     APPLE_TEAM_ID: process.env.APPLE_TEAM_ID,
     APPLE_MAPKIT_KEY_ID: process.env.APPLE_MAPKIT_KEY_ID,
@@ -72,6 +78,16 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("GET /api/admin/mapkit-token", () => {
+  it("404 NOT_FOUND when the map switch is off, even with credentials set", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    getFeatures.mockResolvedValue({ map: false });
+    setAppleEnv("TEAM123", "kid-1", "placeholder");
+    const res = await GET(makeReq());
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("NOT_FOUND");
+    expect(getFeatures).toHaveBeenCalledWith("org-1");
+  });
+
   it("401 when unauthenticated", async () => {
     getAdminSession.mockResolvedValue(null);
     clearAppleEnv();

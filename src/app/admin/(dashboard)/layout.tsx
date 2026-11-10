@@ -8,6 +8,7 @@ import { organizations, organizationSettings } from '@/lib/db/schema';
 import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
 import { isDemoOrg } from '@/lib/tenancy/demo-mode';
 import { loadOrgRow } from '@/lib/tenancy/org-row';
+import { parseFeatures } from '@/lib/tenancy/feature-flags';
 import type { SetupPlacement } from '@/components/admin/nav-items';
 import { isOrgActive } from '@/lib/billing/entitlements';
 import { DashboardShell } from '@/components/admin/dashboard-shell';
@@ -34,7 +35,7 @@ export default async function DashboardLayout({
 
   // The two lookups run concurrently and fail independently: a miss on one
   // never changes what the other decides.
-  const [{ billingAttention, orgName }, setupPlacement] = await Promise.all([
+  const [{ billingAttention, orgName, mapEnabled }, setupPlacement] = await Promise.all([
     loadBillingState(session.organizationId),
     loadSetupPlacement(session.organizationId),
   ]);
@@ -47,6 +48,7 @@ export default async function DashboardLayout({
       role={session.role}
       billingAttention={billingAttention}
       setupPlacement={setupPlacement}
+      mapEnabled={mapEnabled}
     >
       {children}
     </DashboardShell>
@@ -61,15 +63,17 @@ export default async function DashboardLayout({
 // cache(): generateMetadata and the layout share one lookup per request.
 const loadBillingState = cache(async function loadBillingState(
   organizationId: string,
-): Promise<{ billingAttention: boolean; orgName: string | undefined }> {
+): Promise<{ billingAttention: boolean; orgName: string | undefined; mapEnabled: boolean }> {
   try {
     const org = await loadOrgRow(organizationId);
     return {
       billingAttention: org ? !isOrgActive(org) : false,
       orgName: org?.name ?? undefined,
+      mapEnabled: parseFeatures(org?.featureFlags).map,
     };
   } catch {
-    return { billingAttention: false, orgName: undefined };
+    // Fail closed on the Map switch: an unreadable row hides the Map link.
+    return { billingAttention: false, orgName: undefined, mapEnabled: false };
   }
 });
 

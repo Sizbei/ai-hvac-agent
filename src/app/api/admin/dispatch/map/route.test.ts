@@ -81,6 +81,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+const getFeatures = vi.fn();
+vi.mock("@/lib/tenancy/features", () => ({
+  getFeatures: (...a: unknown[]) => getFeatures(...a),
+}));
+
 import { GET } from "./route";
 
 const SESSION = {
@@ -119,9 +124,26 @@ beforeEach(() => {
   selectShouldThrow = null;
   fetchAddressSuggestions.mockReset();
   getAdminSession.mockResolvedValue(SESSION);
+  getFeatures.mockResolvedValue({ map: true });
 });
 
 describe("GET /api/admin/dispatch/map", () => {
+  it("404 NOT_FOUND when the map switch is off, without touching the db", async () => {
+    getFeatures.mockResolvedValue({ map: false });
+    const res = await GET();
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("NOT_FOUND");
+    expect(getFeatures).toHaveBeenCalledWith("org-1");
+    expect(dbSelect).not.toHaveBeenCalled();
+  });
+
+  it("500 (fail closed) when the feature lookup throws", async () => {
+    getFeatures.mockRejectedValue(new Error("db down"));
+    const res = await GET();
+    expect(res.status).toBe(500);
+    expect(dbSelect).not.toHaveBeenCalled();
+  });
+
   it("401 when unauthenticated", async () => {
     getAdminSession.mockResolvedValue(null);
     const res = await GET();

@@ -3,8 +3,11 @@ import { ListChecks } from "lucide-react";
 import { navGroupsFor, navItemMatches, navLabelFor } from "./nav-items";
 import { filterCommands } from "@/lib/admin/nav-search";
 
+const ON = { map: true } as const;
+const OFF = { map: false } as const;
+
 function group(placement: "operations" | "integrations", heading: string) {
-  const g = navGroupsFor(placement).find((x) => x.heading === heading);
+  const g = navGroupsFor(placement, ON).find((x) => x.heading === heading);
   if (!g) throw new Error(`missing group ${heading}`);
   return g;
 }
@@ -30,13 +33,13 @@ describe("navGroupsFor", () => {
 
   it("includes Setup exactly once for either placement (searchable)", () => {
     for (const p of ["operations", "integrations"] as const) {
-      const all = navGroupsFor(p).flatMap((g) => g.items);
+      const all = navGroupsFor(p, ON).flatMap((g) => g.items);
       expect(all.filter((i) => i.label === "Setup")).toHaveLength(1);
     }
   });
 
   it("is found by the ⌘K page search", () => {
-    const items = navGroupsFor("integrations").flatMap((g) =>
+    const items = navGroupsFor("integrations", ON).flatMap((g) =>
       g.items.map((i) => ({ label: i.label, href: i.href, group: g.heading })),
     );
     expect(filterCommands("setup", items)[0]?.href).toBe("/admin/setup");
@@ -44,9 +47,9 @@ describe("navGroupsFor", () => {
 
   it("keeps every other item and group order unchanged", () => {
     const strip = (p: "operations" | "integrations") =>
-      navGroupsFor(p).map((g) => [g.heading, g.items.filter((i) => i.href !== "/admin/setup").map((i) => i.href)]);
+      navGroupsFor(p, ON).map((g) => [g.heading, g.items.filter((i) => i.href !== "/admin/setup").map((i) => i.href)]);
     expect(strip("operations")).toEqual(strip("integrations"));
-    expect(navGroupsFor("operations").map((g) => g.heading)).toEqual([
+    expect(navGroupsFor("operations", ON).map((g) => g.heading)).toEqual([
       "Operations",
       "Customers",
       "Workspace",
@@ -57,7 +60,7 @@ describe("navGroupsFor", () => {
   });
 
   it("returns a stable reference per placement", () => {
-    expect(navGroupsFor("operations")).toBe(navGroupsFor("operations"));
+    expect(navGroupsFor("operations", ON)).toBe(navGroupsFor("operations", ON));
   });
 });
 
@@ -76,17 +79,45 @@ describe("navItemMatches / navLabelFor", () => {
   });
 
   it("labels the mobile top bar, including the dashboard", () => {
-    expect(navLabelFor("/admin", "operations")).toBe("Dashboard");
-    expect(navLabelFor("/admin/conversations", "integrations")).toBe("Conversations");
-    expect(navLabelFor("/nowhere", "integrations")).toBeUndefined();
+    expect(navLabelFor("/admin", "operations", ON)).toBe("Dashboard");
+    expect(navLabelFor("/admin/conversations", "integrations", ON)).toBe("Conversations");
+    expect(navLabelFor("/nowhere", "integrations", ON)).toBeUndefined();
   });
 
   it("uses plain sentence-case labels and keeps reports out of Money", () => {
-    const labels = navGroupsFor("operations").flatMap((g) => g.items.map((i) => i.label));
+    const labels = navGroupsFor("operations", ON).flatMap((g) => g.items.map((i) => i.label));
     expect(labels).toEqual(expect.arrayContaining(["AI insights", "Settings", "FieldPulse import"]));
     expect(labels).not.toEqual(expect.arrayContaining(["AI Insights"]));
-    const money = navGroupsFor("operations").find((g) => g.heading === "Money")!;
+    const money = navGroupsFor("operations", ON).find((g) => g.heading === "Money")!;
     expect(money.items.map((i) => i.href)).not.toContain("/admin/reports");
-    expect(navLabelFor("/admin/operations", "operations")).toBe("Operations");
+    expect(navLabelFor("/admin/operations", "operations", ON)).toBe("Operations");
+  });
+});
+
+describe("map gate", () => {
+  const hrefs = (p: "operations" | "integrations", map: boolean) =>
+    navGroupsFor(p, { map }).flatMap((g) => g.items.map((i) => i.href));
+
+  it("omits /admin/map when map is off, for both placements", () => {
+    for (const p of ["operations", "integrations"] as const) {
+      expect(hrefs(p, false)).not.toContain("/admin/map");
+      expect(hrefs(p, false)).toContain("/admin/dispatch");
+    }
+  });
+
+  it("keeps /admin/map when map is on", () => {
+    for (const p of ["operations", "integrations"] as const) {
+      expect(hrefs(p, true)).toContain("/admin/map");
+    }
+  });
+
+  it("returns a stable reference per placement and map value", () => {
+    expect(navGroupsFor("operations", OFF)).toBe(navGroupsFor("operations", OFF));
+    expect(navGroupsFor("operations", ON)).not.toBe(navGroupsFor("operations", OFF));
+  });
+
+  it("has no mobile title for the map page when it is off", () => {
+    expect(navLabelFor("/admin/map", "operations", ON)).toBe("Map");
+    expect(navLabelFor("/admin/map", "operations", OFF)).toBeUndefined();
   });
 });

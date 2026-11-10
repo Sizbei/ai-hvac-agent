@@ -19,6 +19,7 @@ import { getAdminSession } from "@/lib/auth/session";
 import { isPlatformAdmin } from "@/lib/auth/authz";
 import { db } from "@/lib/db";
 import { organizations } from "@/lib/db/schema";
+import { parseFeatures } from "@/lib/tenancy/feature-flags";
 import { provisionOrganization } from "@/lib/admin/provisioning";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -51,6 +52,7 @@ export async function GET(): Promise<Response> {
         name: organizations.name,
         status: organizations.status,
         createdAt: organizations.createdAt,
+        featureFlags: organizations.featureFlags,
       })
       .from(organizations)
       .orderBy(desc(organizations.createdAt));
@@ -61,6 +63,7 @@ export async function GET(): Promise<Response> {
         name: o.name,
         status: o.status,
         createdAt: o.createdAt.toISOString(),
+        features: parseFeatures(o.featureFlags),
       })),
     });
   } catch (error: unknown) {

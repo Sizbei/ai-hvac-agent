@@ -15,6 +15,8 @@ vi.mock("@/lib/admin/erasure-queries", () => ({
   purgeOrganization: (...a: unknown[]) => purgeOrganization(...a),
 }));
 
+vi.mock("@/lib/admin/platform-features", () => ({ updateOrgFeatures: vi.fn() }));
+
 vi.mock("@/lib/rate-limit", () => ({
   slidingWindow: () => ({ allowed: true }),
   RATE_LIMITS: { adminMutation: { maxRequests: 30, windowMs: 60_000 } },

@@ -10,10 +10,15 @@
  * tenant is a cross-org platform operation, never an in-org one.
  */
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
 import { isPlatformAdmin } from "@/lib/auth/authz";
 import { purgeOrganization } from "@/lib/admin/erasure-queries";
-import { successResponse, errorResponse } from "@/lib/api-response";
+import { updateOrgFeatures } from "@/lib/admin/platform-features";
+import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
+import { isSameOriginRequest } from "@/lib/session-csrf";
+import { isUuid } from "@/lib/validation/uuid";
+import { featurePatchSchema } from "@/lib/tenancy/feature-flags";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 
@@ -23,6 +28,56 @@ interface RouteParams {
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const featuresBodySchema = z.object({ features: featurePatchSchema });
+
+/** PATCH { features } — merge per-org feature switches (platform admins only). */
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  try {
+    const session = await getAdminSession();
+    if (!session) {
+      return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    if (!isPlatformAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
+    }
+    if (!isSameOriginRequest(request)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
+    }
+
+    const rateCheck = slidingWindow(
+      `platform:org-features:${session.userId}`,
+      RATE_LIMITS.adminMutation.maxRequests,
+      RATE_LIMITS.adminMutation.windowMs,
+    );
+    if (!rateCheck.allowed) {
+      return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
+    }
+
+    const { id } = await params;
+    if (!isUuid(id)) {
+      return errorResponse("Invalid organization ID format", "INVALID_ID", 400);
+    }
+
+    const body = await readJsonBody(request);
+    const parsed = body.ok ? featuresBodySchema.safeParse(body.data) : null;
+    if (!parsed || !parsed.success) {
+      return errorResponse("Invalid request", "VALIDATION_ERROR", 400);
+    }
+
+    const features = await updateOrgFeatures(id, parsed.data.features, {
+      userId: session.userId,
+      email: session.email,
+    });
+    if (!features) {
+      return errorResponse("Organization not found", "NOT_FOUND", 404);
+    }
+    return successResponse({ features });
+  } catch (error: unknown) {
+    logger.error({ error }, "Failed to update organization features");
+    return errorResponse("Internal server error", "INTERNAL_ERROR", 500);
+  }
+}
 
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {

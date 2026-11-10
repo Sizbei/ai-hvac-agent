@@ -124,18 +124,30 @@ function withSetup(placement: SetupPlacement): readonly NavGroup[] {
   });
 }
 
-const GROUPS_BY_PLACEMENT: Record<SetupPlacement, readonly NavGroup[]> = {
-  operations: withSetup('operations'),
-  integrations: withSetup('integrations'),
+export interface NavOptions {
+  /** The org's Map switch; off drops the Map item everywhere. */
+  readonly map: boolean;
+}
+
+const MAP_HREF = '/admin/map';
+
+function withoutMap(groups: readonly NavGroup[]): readonly NavGroup[] {
+  return groups.map((g) => ({ ...g, items: g.items.filter((i) => i.href !== MAP_HREF) }));
+}
+
+const GROUPS: Record<SetupPlacement, Record<'on' | 'off', readonly NavGroup[]>> = {
+  operations: { on: withSetup('operations'), off: withoutMap(withSetup('operations')) },
+  integrations: { on: withSetup('integrations'), off: withoutMap(withSetup('integrations')) },
 };
 
 /**
  * The nav groups for the sidebar, the mobile title and ⌘K search: Setup second
- * in Operations (after Dashboard) or last in Integrations. Stable reference per
- * placement so consumers can memoise on it.
+ * in Operations (after Dashboard) or last in Integrations; Map only when the
+ * org's switch is on. Stable reference per (placement, map) so consumers can
+ * memoise on it.
  */
-export function navGroupsFor(placement: SetupPlacement): readonly NavGroup[] {
-  return GROUPS_BY_PLACEMENT[placement];
+export function navGroupsFor(placement: SetupPlacement, opts: NavOptions): readonly NavGroup[] {
+  return GROUPS[placement][opts.map ? 'on' : 'off'];
 }
 
 /** Drop trailing slashes so "/admin/" and "/admin" compare equal. */
@@ -156,8 +168,12 @@ export function navItemMatches(pathname: string, item: Pick<NavItem, 'href' | 'e
 }
 
 /** The nav label for the current page (mobile top bar), or undefined. */
-export function navLabelFor(pathname: string, placement: SetupPlacement): string | undefined {
-  for (const group of navGroupsFor(placement)) {
+export function navLabelFor(
+  pathname: string,
+  placement: SetupPlacement,
+  opts: NavOptions,
+): string | undefined {
+  for (const group of navGroupsFor(placement, opts)) {
     for (const item of group.items) {
       if (navItemMatches(pathname, item)) return item.label;
     }

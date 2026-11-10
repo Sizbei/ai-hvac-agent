@@ -22,12 +22,14 @@ interface DashboardShellProps {
   readonly billingAttention?: boolean;
   /** Server-decided position of the Setup nav item for this page load. */
   readonly setupPlacement: SetupPlacement;
+  /** The org's Map switch (server-decided). */
+  readonly mapEnabled: boolean;
   readonly children: React.ReactNode;
 }
 
 /** The current page's nav label for the mobile top bar (undefined if none). */
-function useMobileTitle(placement: SetupPlacement): string | undefined {
-  return navLabelFor(usePathname(), placement);
+function useMobileTitle(placement: SetupPlacement, mapEnabled: boolean): string | undefined {
+  return navLabelFor(usePathname(), placement, { map: mapEnabled });
 }
 
 export function DashboardShell({
@@ -37,10 +39,11 @@ export function DashboardShell({
   role,
   billingAttention = false,
   setupPlacement,
+  mapEnabled,
   children,
 }: DashboardShellProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const mobileTitle = useMobileTitle(setupPlacement);
+  const mobileTitle = useMobileTitle(setupPlacement, mapEnabled);
 
   const handleMobileClose = useCallback(() => {
     setIsMobileOpen(false);
@@ -60,6 +63,7 @@ export function DashboardShell({
             adminEmail={adminEmail}
             role={role}
             setupPlacement={setupPlacement}
+            mapEnabled={mapEnabled}
             isMobileOpen={isMobileOpen}
             onMobileClose={handleMobileClose}
           />
@@ -83,7 +87,7 @@ export function DashboardShell({
                 </Link>
               </div>
             )}
-            <GlobalSearch placement={setupPlacement} />
+            <GlobalSearch placement={setupPlacement} mapEnabled={mapEnabled} />
             <main className="flex-1 overflow-auto">{children}</main>
           </div>
         </div>

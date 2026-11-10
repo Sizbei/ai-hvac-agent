@@ -41,6 +41,8 @@ interface SidebarProps {
   readonly role: AdminRole;
   /** Server-decided position of the Setup item (fixed for this page load). */
   readonly setupPlacement: SetupPlacement;
+  /** The org's Map switch. */
+  readonly mapEnabled: boolean;
   readonly isMobileOpen: boolean;
   readonly onMobileClose: () => void;
 }
@@ -77,6 +79,7 @@ export function Sidebar({
   adminEmail,
   role,
   setupPlacement,
+  mapEnabled,
   isMobileOpen,
   onMobileClose,
 }: SidebarProps) {
@@ -86,7 +89,7 @@ export function Sidebar({
   const { count: unscheduledCount } = useUnscheduledCount();
   const { data: onboarding } = useOnboarding();
   const needsActionCount = useNeedsActionCount();
-  const navGroups = navGroupsFor(setupPlacement);
+  const navGroups = navGroupsFor(setupPlacement, { map: mapEnabled });
   // One entry per NavItem.badge kind; every kind shares the visible/label/srLabel shape.
   const badges: Record<NonNullable<NavItem['badge']>, UnscheduledBadge> = useMemo(
     () => ({

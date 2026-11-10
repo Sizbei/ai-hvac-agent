@@ -62,16 +62,18 @@ function groupResults(
 interface GlobalSearchProps {
   /** Server-decided position of the Setup item (its group label in results). */
   readonly placement: SetupPlacement;
+  /** The org's Map switch (drops the Map page from results when off). */
+  readonly mapEnabled: boolean;
 }
 
-export function GlobalSearch({ placement }: GlobalSearchProps) {
+export function GlobalSearch({ placement, mapEnabled }: GlobalSearchProps) {
   /** Every admin destination, flattened — the ⌘K search matches these as "Pages". */
   const navCommands: CommandItem[] = useMemo(
     () =>
-      navGroupsFor(placement).flatMap((g) =>
+      navGroupsFor(placement, { map: mapEnabled }).flatMap((g) =>
         g.items.map((it) => ({ label: it.label, href: it.href, group: g.heading })),
       ),
-    [placement],
+    [placement, mapEnabled],
   );
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
