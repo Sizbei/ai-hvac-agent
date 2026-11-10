@@ -158,6 +158,7 @@ beforeEach(() => {
 });
 
 import { getInvoiceSummaryStats, listInvoices } from './invoice-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -170,7 +171,7 @@ describe('getInvoiceSummaryStats', () => {
       overdueCents: '0',
       overdueCount: 0,
     }]);
-    const result = await getInvoiceSummaryStats(ORG);
+    const result = await getInvoiceSummaryStats(ORG, VISIBLE_ONLY);
     expect(captured.length).toBe(1);
     const where = JSON.stringify(captured[0]?.where ?? '');
     // must contain tenant scope
@@ -193,7 +194,7 @@ describe('getInvoiceSummaryStats', () => {
       overdueCents: '5000000',
       overdueCount: 30,
     }]);
-    const result = await getInvoiceSummaryStats(ORG);
+    const result = await getInvoiceSummaryStats(ORG, VISIBLE_ONLY);
     expect(typeof result.outstandingCents).toBe('number');
     expect(result.outstandingCents).toBe(15206100);
     expect(result.overdueCount).toBe(30);
@@ -220,13 +221,13 @@ describe('listInvoices', () => {
 
   it('(b) page query carries a LIMIT', async () => {
     queueListPage();
-    await listInvoices(ORG);
+    await listInvoices(ORG, {}, VISIBLE_ONLY);
     expect(captured.some((c) => c.hasLimit)).toBe(true);
   });
 
   it('returns { invoices, total, sourceCounts } shape', async () => {
     queueListPage([{ id: 'inv-1', state: 'open', totalCents: 10000, amountPaidCents: 0, customerId: null, serviceRequestId: null, createdAt: new Date(), issuedAt: null, dueDate: null, lastReminderSentAt: null, fieldpulseInvoiceId: null, hcpInvoiceId: null, nameEncrypted: null, fieldpulseData: null }]);
-    const result = await listInvoices(ORG);
+    const result = await listInvoices(ORG, {}, VISIBLE_ONLY);
     expect(result).toHaveProperty('invoices');
     expect(result).toHaveProperty('total', 2851);
     expect(result).toHaveProperty('sourceCounts');
@@ -242,7 +243,7 @@ describe('listInvoices', () => {
     selectQueue.push([{ n: 0 }]); // [1] count (unused in search path)
     selectQueue.push([]); // [2] rows (unused in search path)
     selectQueue.push([]); // [3] allRows for search
-    await listInvoices(ORG, { state: 'open', search: 'test' });
+    await listInvoices(ORG, { state: 'open', search: 'test' }, VISIBLE_ONLY);
 
     // All 4 queries must be tenant-scoped.
     const allWheres = captured.map((c) => JSON.stringify(c.where ?? ''));
@@ -262,7 +263,7 @@ describe('listInvoices', () => {
     selectQueue.push([{ n: 0 }]); // [1] count
     selectQueue.push([]); // [2] rows
     selectQueue.push([]); // [3] allRows
-    await listInvoices(ORG, { state: 'open', source: 'fieldpulse', search: 'test' });
+    await listInvoices(ORG, { state: 'open', source: 'fieldpulse', search: 'test' }, VISIBLE_ONLY);
 
     const sourceCountsWhere = JSON.stringify(captured[0]?.where ?? '');
     const mainRowsWhere = JSON.stringify(captured[3]?.where ?? '');
@@ -281,7 +282,7 @@ describe('listInvoices', () => {
 
   it('(d) source filter "native" produces both-ids-NULL predicates', async () => {
     queueListPage();
-    await listInvoices(ORG, { source: 'native' });
+    await listInvoices(ORG, { source: 'native' }, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     // the native filter: both fieldpulse and hcp ids must be IS NULL
     const hasNullFp = wheres.some((w) => w.includes('"kind":"isNull"') && w.includes('fpInvoiceId'));
@@ -292,7 +293,7 @@ describe('listInvoices', () => {
 
   it('is tenant-scoped: every query WHERE includes the org id', async () => {
     queueListPage();
-    await listInvoices(ORG);
+    await listInvoices(ORG, {}, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(wheres.every((w) => w.includes(ORG))).toBe(true);
   });
@@ -301,7 +302,7 @@ describe('listInvoices', () => {
 
   it('(e) sort=newest produces DESC orderBy on rows query', async () => {
     queueListPage();
-    await listInvoices(ORG, { sort: 'newest' });
+    await listInvoices(ORG, { sort: 'newest' }, VISIBLE_ONLY);
     // captured[2] is the rows query (index 0=sourceCounts, 1=count, 2=rows)
     const rowsOrderBy = JSON.stringify(captured[2]?.orderBy ?? '');
     expect(rowsOrderBy).toContain('"kind":"desc"');
@@ -309,21 +310,21 @@ describe('listInvoices', () => {
 
   it('(f) sort=oldest produces ASC orderBy on rows query', async () => {
     queueListPage();
-    await listInvoices(ORG, { sort: 'oldest' });
+    await listInvoices(ORG, { sort: 'oldest' }, VISIBLE_ONLY);
     const rowsOrderBy = JSON.stringify(captured[2]?.orderBy ?? '');
     expect(rowsOrderBy).toContain('"kind":"asc"');
   });
 
   it('(g) sort=balance-high produces DESC orderBy on rows query', async () => {
     queueListPage();
-    await listInvoices(ORG, { sort: 'balance-high' });
+    await listInvoices(ORG, { sort: 'balance-high' }, VISIBLE_ONLY);
     const rowsOrderBy = JSON.stringify(captured[2]?.orderBy ?? '');
     expect(rowsOrderBy).toContain('"kind":"desc"');
   });
 
   it('(h) sort=age-oldest produces DESC orderBy on rows query', async () => {
     queueListPage();
-    await listInvoices(ORG, { sort: 'age-oldest' });
+    await listInvoices(ORG, { sort: 'age-oldest' }, VISIBLE_ONLY);
     const rowsOrderBy = JSON.stringify(captured[2]?.orderBy ?? '');
     expect(rowsOrderBy).toContain('"kind":"desc"');
   });
@@ -332,7 +333,7 @@ describe('listInvoices', () => {
 
   it('(i) overdue=true adds overdue sql predicate to WHERE in count and rows queries', async () => {
     queueListPage();
-    await listInvoices(ORG, { state: 'open', overdue: true });
+    await listInvoices(ORG, { state: 'open', overdue: true }, VISIBLE_ONLY);
     // captured[1]=count, [2]=rows — both must carry the overdue sql fragment
     const countWhere = JSON.stringify(captured[1]?.where ?? '');
     const rowsWhere = JSON.stringify(captured[2]?.where ?? '');
@@ -347,7 +348,7 @@ describe('listInvoices', () => {
 
   it('(j) overdue=false (default) does not add the dueDate overdue predicate to WHERE', async () => {
     queueListPage();
-    await listInvoices(ORG, { state: 'open' });
+    await listInvoices(ORG, { state: 'open' }, VISIBLE_ONLY);
     const countWhere = JSON.stringify(captured[1]?.where ?? '');
     // Without the overdue flag, the dueDate-specific overdue fragment must be absent.
     // The overdue predicate always contains 'dueDate' column refs in its sql text.

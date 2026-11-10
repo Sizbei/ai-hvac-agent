@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import {
   getSalesReport,
   getLeadSourceBreakdown,
@@ -20,10 +20,11 @@ function parseDateParam(value: string | null): Date | null | undefined {
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:reports:${session.userId}`,
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
       locationBreakdown,
       technicianScorecards,
     ] = await Promise.all([
-      getSalesReport(session.organizationId, period),
+      getSalesReport(session.organizationId, period, viewer),
       getLeadSourceBreakdown(session.organizationId, period),
       getLocationBreakdown(session.organizationId, period),
       getTechnicianScorecards(session.organizationId, period),

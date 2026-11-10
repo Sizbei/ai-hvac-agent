@@ -1,6 +1,7 @@
 import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { triggerEstimateSent } from "@/lib/communication/money-triggers";
 import {
   listEstimates,
@@ -67,10 +68,11 @@ const createSchema = z.object({
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:estimates-list:${session.userId}`,
@@ -105,8 +107,8 @@ export async function GET(request: NextRequest) {
     await expireOverdueEstimates(session.organizationId);
 
     const [{ estimates, total }, stats] = await Promise.all([
-      listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId, bucket, search }),
-      getEstimatePipelineStats(session.organizationId),
+      listEstimates(session.organizationId, { page, limit, customerId, serviceRequestId, bucket, search }, viewer),
+      getEstimatePipelineStats(session.organizationId, viewer),
     ]);
     return successResponse({ estimates, total, stats });
   } catch (error: unknown) {

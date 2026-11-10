@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import {
   getInvoiceDetailById,
   getInvoiceOrgIdentity,
@@ -45,10 +45,11 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:invoice-detail:${session.userId}`,
@@ -64,7 +65,7 @@ export async function GET(
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
     const [invoice, org, reminders] = await Promise.all([
-      getInvoiceDetailById(session.organizationId, id),
+      getInvoiceDetailById(session.organizationId, id, viewer),
       getInvoiceOrgIdentity(session.organizationId),
       listInvoiceReminders(session.organizationId, id),
     ]);

@@ -84,6 +84,13 @@ vi.mock("@/lib/db/tenant", () => ({ withTenant: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => mockGetAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 vi.mock("@/lib/admin/invoice-queries", () => ({
   takePayment: (...a: unknown[]) => mockTakePayment(...a),
   refundPayment: (...a: unknown[]) => mockRefundPayment(...a),
@@ -508,6 +515,17 @@ describe("GET /api/admin/invoices/[id] — signature URLs", () => {
     const body = await res.json();
     expect(body.data.invoice.signature).toMatchObject({ state: "unavailable", url: null, name: "Pat" });
     expect(body.data.invoice.requestSignature).toMatchObject({ state: "unavailable", url: null });
+  });
+
+  it("answers 404 when the invoice is hidden from the viewer (the read returns null)", async () => {
+    mockGetInvoiceDetailById.mockResolvedValue(null);
+    const res = await getDetail();
+    expect(res.status).toBe(404);
+    expect(mockGetInvoiceDetailById).toHaveBeenLastCalledWith(
+      ORG,
+      INV_ID,
+      expect.objectContaining({ showHidden: false }),
+    );
   });
 });
 

@@ -8,6 +8,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ESTIMATE_VALUE_SQL, createEstimate, getEstimatePipelineStats } from "./estimate-queries";
+import { VISIBLE_ONLY } from "./visibility";
 
 const selected: Record<string, unknown>[] = [];
 
@@ -46,7 +47,7 @@ describe("ESTIMATE_VALUE_SQL", () => {
 
 describe("getEstimatePipelineStats", () => {
   it("sums won (and every bucket) by the sold-aware value", async () => {
-    await getEstimatePipelineStats("org-1");
+    await getEstimatePipelineStats("org-1", VISIBLE_ONLY);
     const cols = selected[0]!;
     for (const k of ["wonCents", "openCents", "staleCents", "lostCents", "draftCents"]) {
       expect(render(cols[k])).toContain('"estimates"."sold_option_id"');

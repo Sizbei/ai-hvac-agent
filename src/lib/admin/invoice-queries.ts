@@ -27,6 +27,7 @@ import {
 } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "@/lib/admin/visibility";
 import {
   rollUpActualMaterialsCost,
   rollUpActualLaborCost,
@@ -897,10 +898,13 @@ export async function getInvoiceOrgIdentity(
  * refunds given this month. A payment that has since been refunded in full
  * reads `refunded`, so it still counts as received; its refund rows subtract.
  * Native money only (FieldPulse-mirrored payments are excluded, and so are any
- * refunds on them). neon-http returns sum() as a string, hence the coercion.
+ * refunds on them). Payments and refunds count only on invoices the viewer
+ * sees (both are children of the invoice). neon-http returns sum() as a
+ * string, hence the coercion.
  */
 export async function collectedThisMonthCents(
   organizationId: string,
+  vis: Visibility,
   now: Date = new Date(),
 ): Promise<number> {
   const monthStart = new Date(
@@ -910,6 +914,14 @@ export async function collectedThisMonthCents(
     db
       .select({ value: sum(payments.amountCents) })
       .from(payments)
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          visibleRows(invoices, vis),
+        ),
+      )
       .where(
         withTenant(
           payments,
@@ -928,6 +940,14 @@ export async function collectedThisMonthCents(
         and(
           eq(payments.id, refunds.paymentId),
           eq(payments.organizationId, organizationId),
+        ),
+      )
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          visibleRows(invoices, vis),
         ),
       )
       .where(
@@ -1036,10 +1056,13 @@ function deriveSyncedSource(
  * and Overdue in SQL so the numbers stay correct after pagination removes the
  * full client list. isCollectible semantics: state='open' AND total>paid.
  * overdueByDates semantics: past dueDate (when present) OR age >= 30 days.
- * Neon returns ::bigint columns as strings — wrapped with Number().
+ * Neon returns ::bigint columns as strings — wrapped with Number(). Hidden
+ * invoices are left out exactly as listInvoices leaves them out, so each tile
+ * is the sum over the rows the list shows.
  */
 export async function getInvoiceSummaryStats(
   organizationId: string,
+  vis: Visibility,
 ): Promise<InvoiceSummaryStats> {
   const [row] = await db
     .select({
@@ -1064,6 +1087,7 @@ export async function getInvoiceSummaryStats(
         organizationId,
         eq(invoices.state, "open"),
         sql`${invoices.totalCents} > ${invoices.amountPaidCents}`,
+        visibleRows(invoices, vis),
       ),
     );
 
@@ -1125,7 +1149,8 @@ function makeOverduePredicate() {
 /** Admin list of an org's invoices, server-paginated. */
 export async function listInvoices(
   organizationId: string,
-  opts: ListInvoicesOptions = {},
+  opts: ListInvoicesOptions,
+  vis: Visibility,
 ): Promise<InvoiceListPage> {
   const page = Math.max(1, opts.page ?? 1);
   const limit = Math.max(1, opts.limit ?? INVOICES_PAGE_SIZE);
@@ -1218,7 +1243,7 @@ export async function listInvoices(
       n: sql<number>`count(*)::int`,
     })
     .from(invoices)
-    .where(whereClauseNoSource)
+    .where(and(whereClauseNoSource, visibleRows(invoices, vis)))
     .groupBy(sourceExpr)
     .then((rows) => {
       const m: Record<string, number> = {};
@@ -1231,7 +1256,7 @@ export async function listInvoices(
   const countPromise = db
     .select({ n: sql<number>`count(*)::int` })
     .from(invoices)
-    .where(whereClause);
+    .where(and(whereClause, visibleRows(invoices, vis)));
 
   const rowCols = {
     id: invoices.id,
@@ -1253,15 +1278,16 @@ export async function listInvoices(
   const rowsPromise = db
     .select(rowCols)
     .from(invoices)
-    // Org-scope the join too (defense in depth).
+    // Org-scope the join too (defense in depth). A hidden customer contributes no name.
     .leftJoin(
       customers,
       and(
         eq(customers.id, invoices.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
-    .where(whereClause)
+    .where(and(whereClause, visibleRows(invoices, vis)))
     .orderBy(orderByClause)
     .limit(limit)
     .offset(offset);
@@ -1281,9 +1307,10 @@ export async function listInvoices(
         and(
           eq(customers.id, invoices.customerId),
           eq(customers.organizationId, organizationId),
+          visibleRows(customers, vis),
         ),
       )
-      .where(whereClause)
+      .where(and(whereClause, visibleRows(invoices, vis)))
       .orderBy(orderByClause)
       .limit(5000);
 
@@ -1449,11 +1476,13 @@ export interface InvoiceDetailView {
 
 /**
  * Detail view: invoice header + its line items + its payments (each with that
- * payment's refunds). All reads tenant-scoped. Returns null if not found.
+ * payment's refunds). All reads tenant-scoped. Returns null if not found, or
+ * if the invoice is hidden from this viewer (the route answers 404).
  */
 export async function getInvoiceDetailById(
   organizationId: string,
   id: string,
+  vis: Visibility,
 ): Promise<InvoiceDetailView | null> {
   const [inv] = await db
     .select({
@@ -1486,12 +1515,14 @@ export async function getInvoiceDetailById(
       requestSignedAt: serviceRequests.signedAt,
     })
     .from(invoices)
-    .leftJoin(customers, and(eq(customers.id, invoices.customerId), eq(customers.organizationId, organizationId)))
-    .leftJoin(serviceRequests, and(eq(serviceRequests.id, invoices.serviceRequestId), eq(serviceRequests.organizationId, organizationId)))
+    // A hidden customer or request contributes no name, contact or job details.
+    .leftJoin(customers, and(eq(customers.id, invoices.customerId), eq(customers.organizationId, organizationId), visibleRows(customers, vis)))
+    .leftJoin(serviceRequests, and(eq(serviceRequests.id, invoices.serviceRequestId), eq(serviceRequests.organizationId, organizationId), visibleRows(serviceRequests, vis)))
     .leftJoin(users, and(eq(users.id, serviceRequests.assignedTo), eq(users.organizationId, organizationId)))
-    .where(withTenant(invoices, organizationId, eq(invoices.id, id)))
+    .where(withTenant(invoices, organizationId, eq(invoices.id, id), visibleRows(invoices, vis)))
     .limit(1);
 
+  // Line items, payments and refunds below are children of this row: read only once it passed.
   if (!inv) return null;
 
   const lineItems = await db

@@ -4,6 +4,13 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 const listEstimates = vi.fn();
 const createEstimate = vi.fn();
@@ -182,6 +189,12 @@ describe("GET /api/admin/estimates — Sold, not invoiced (M3c)", () => {
     getEstimatePipelineStats.mockResolvedValue({});
     const res = await GET(new NextRequest("https://app.example.com/api/admin/estimates?bucket=not_invoiced"));
     expect(res.status).toBe(200);
-    expect(listEstimates).toHaveBeenCalledWith("org-1", expect.objectContaining({ bucket: "not_invoiced" }));
+    expect(listEstimates).toHaveBeenCalledWith(
+      "org-1",
+      expect.objectContaining({ bucket: "not_invoiced" }),
+      expect.objectContaining({ showHidden: false }),
+    );
+    // The pipeline tiles read the same viewer as the list.
+    expect(getEstimatePipelineStats).toHaveBeenCalledWith("org-1", expect.objectContaining({ showHidden: false }));
   });
 });

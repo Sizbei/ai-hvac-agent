@@ -17,6 +17,7 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { financingApplications, invoices } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "@/lib/admin/visibility";
 import {
   getFinancingProvider,
   type FinancingProvider,
@@ -180,7 +181,8 @@ export async function createFinancingApplication(
 
 /**
  * List financing applications for display, tenant-scoped. Filter by estimate, by
- * the invoice's underlying estimate, or by customer. Newest first.
+ * the invoice's underlying estimate, or by customer. Newest first. A hidden
+ * invoice reads as unknown, so its applications are not listed.
  */
 export async function listFinancingApplications(
   organizationId: string,
@@ -189,6 +191,7 @@ export async function listFinancingApplications(
     readonly estimateId?: string;
     readonly customerId?: string;
   },
+  vis: Visibility,
 ): Promise<FinancingApplicationView[]> {
   let estimateId = params.estimateId ?? null;
 
@@ -196,9 +199,9 @@ export async function listFinancingApplications(
     const [inv] = await db
       .select({ estimateId: invoices.estimateId })
       .from(invoices)
-      .where(withTenant(invoices, organizationId, eq(invoices.id, params.invoiceId)))
+      .where(withTenant(invoices, organizationId, eq(invoices.id, params.invoiceId), visibleRows(invoices, vis)))
       .limit(1);
-    // An unknown invoice (or one with no estimate) has no applications to show.
+    // An unknown or hidden invoice (or one with no estimate) has no applications to show.
     if (!inv || !inv.estimateId) return [];
     estimateId = inv.estimateId;
   }

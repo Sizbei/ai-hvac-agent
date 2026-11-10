@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { VISIBLE_ONLY } from "@/lib/admin/visibility";
 
 vi.mock("server-only", () => ({}));
 
@@ -164,7 +165,7 @@ async function estimateOf(rid: string, eid: string) {
   return (await view(rid)).estimates.find((e) => e.id === eid) ?? null;
 }
 async function notInvoicedIds(): Promise<string[]> {
-  return (await eq.listEstimates(org, { bucket: "not_invoiced", limit: 500 })).estimates.map((e) => e.id);
+  return (await eq.listEstimates(org, { bucket: "not_invoiced", limit: 500 }, VISIBLE_ONLY)).estimates.map((e) => e.id);
 }
 /** create → one catalog line → finalize: the job's open invoice. */
 async function openJobInvoice(rid: string): Promise<string> {

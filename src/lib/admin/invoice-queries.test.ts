@@ -6,6 +6,7 @@ import {
   reconcilePayment,
   listStuckPayments,
 } from "./invoice-queries";
+import { VISIBLE_ONLY } from "./visibility";
 import { db } from "@/lib/db";
 import { MockPaymentProvider } from "@/lib/payments/provider";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -868,7 +869,7 @@ describe("listInvoices", () => {
     ];
     // listInvoices now makes 3 db.select calls: sourceCounts, count, page rows
     mockReadSeq([[], [{ n: rows.length }], rows]);
-    const result = await listInvoices(ORG);
+    const result = await listInvoices(ORG, {}, VISIBLE_ONLY);
     expect(result.invoices).toHaveLength(2);
     expect(result.invoices[0]).toEqual(
       expect.objectContaining({
@@ -884,7 +885,7 @@ describe("listInvoices", () => {
 describe("getInvoiceDetailById", () => {
   it("returns null when the invoice is not found (or belongs to another org)", async () => {
     mockReadSeq([[]]); // header read -> empty
-    const result = await getInvoiceDetailById(ORG, "missing-id");
+    const result = await getInvoiceDetailById(ORG, "missing-id", VISIBLE_ONLY);
     expect(result).toBeNull();
   });
 
@@ -937,7 +938,7 @@ describe("getInvoiceDetailById", () => {
       ],
     ]);
 
-    const result = await getInvoiceDetailById(ORG, "inv-1");
+    const result = await getInvoiceDetailById(ORG, "inv-1", VISIBLE_ONLY);
     expect(result).not.toBeNull();
     expect(result?.lineItems).toHaveLength(1);
     expect(result?.payments).toHaveLength(1);
@@ -962,13 +963,13 @@ describe("getInvoiceDetailById", () => {
       [{ id: "pay-1", amountCents: 4000, status: "succeeded", isDeposit: false, createdAt: new Date(), method: "check", checkNumber: "1042", provider: "manual" }],
       [],
     ]);
-    const result = await getInvoiceDetailById(ORG, "inv-1");
+    const result = await getInvoiceDetailById(ORG, "inv-1", VISIBLE_ONLY);
     expect(result?.payments[0]).toEqual(expect.objectContaining({ method: "check", checkNumber: "1042", provider: "manual" }));
   });
 
   it("returns the invoice's own signature and no request signature once finalized", async () => {
     mockReadSeq([[header("open")], [], []]);
-    const result = await getInvoiceDetailById(ORG, "inv-1");
+    const result = await getInvoiceDetailById(ORG, "inv-1", VISIBLE_ONLY);
     expect(result?.signature).toEqual({ url: "https://r2/inv.png", name: "Pat Doe", signedAt: SIGNED });
     expect(result?.requestSignature).toBeNull();
     // the raw joined request columns stay server-side
@@ -978,7 +979,7 @@ describe("getInvoiceDetailById", () => {
 
   it("returns the request's current signature for a draft", async () => {
     mockReadSeq([[header("draft")], [], []]);
-    const result = await getInvoiceDetailById(ORG, "inv-1");
+    const result = await getInvoiceDetailById(ORG, "inv-1", VISIBLE_ONLY);
     expect(result?.requestSignature).toEqual({ url: "https://r2/req.png", name: "Sam Roe", signedAt: SIGNED });
   });
 });

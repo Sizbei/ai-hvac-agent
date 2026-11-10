@@ -146,6 +146,7 @@ beforeEach(() => {
 });
 
 import { getInvoiceDetailById } from './invoice-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 describe('getInvoiceDetailById', () => {
   it('returns decrypted customer identity + technician + service date on the detail view', async () => {
@@ -174,7 +175,7 @@ describe('getInvoiceDetailById', () => {
     ]);
     selectQueue.push([]); // lineItems
     selectQueue.push([]); // payments
-    const v = await getInvoiceDetailById('org-1', 'i1');
+    const v = await getInvoiceDetailById('org-1', 'i1', VISIBLE_ONLY);
     expect(v?.customerName).toBe('dec(EN)');
     expect(v?.customerAddress).toBe('dec(EA)');
     expect(v?.customerPhone).toBe('dec(EP)');

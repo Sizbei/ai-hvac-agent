@@ -22,6 +22,7 @@ import {
 } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { withTenant } from "@/lib/db/tenant";
+import { SHOW_ALL, visibleRows, visibleRowsSql, type Visibility } from "./visibility";
 import { computeOptionTotals, lineTotalCents } from "./money";
 import { billingInvoiceIdSql, jobBilledSql } from "./estimate-billing-sql";
 
@@ -397,9 +398,12 @@ export interface EstimatePipelineStats {
 /**
  * Aggregate pipeline stats for the estimates board. One SQL round-trip using
  * FILTER clauses (same pattern as getInvoiceSummaryStats in invoice-queries.ts).
+ * Hidden estimates are left out exactly as listEstimates leaves them out, so
+ * each tile (and the win rate) is computed over the rows the board shows.
  */
 export async function getEstimatePipelineStats(
   organizationId: string,
+  vis: Visibility,
 ): Promise<EstimatePipelineStats> {
   const [row] = await db
     .select({
@@ -424,7 +428,7 @@ export async function getEstimatePipelineStats(
       avgOpenAgeDays: sql<number>`coalesce(round(avg(extract(epoch from now() - (${EFFECTIVE_CREATED_AT_SQL})) / 86400) filter (where (${BUCKET_CASE_SQL}) = 'open')), 0)::int`,
     })
     .from(estimates)
-    .where(withTenant(estimates, organizationId));
+    .where(withTenant(estimates, organizationId, visibleRows(estimates, vis)));
 
   return {
     openCents: Number(row?.openCents ?? 0),
@@ -462,7 +466,8 @@ export async function listEstimates(
     readonly serviceRequestId?: string;
     readonly bucket?: 'open' | 'won' | 'lost' | 'draft' | 'not_invoiced';
     readonly search?: string;
-  } = {},
+  },
+  vis: Visibility,
 ): Promise<{ estimates: EstimateListRow[]; total: number }> {
   const page = Math.max(1, opts.page ?? 1);
   const limit = Math.max(1, opts.limit ?? ESTIMATE_PAGE_SIZE);
@@ -475,9 +480,12 @@ export async function listEstimates(
   if (opts.bucket === 'not_invoiced') {
     // Sold, not invoiced (M3c spec §2): native sold, no invoice of ANY state born
     // from it (a voided office invoice means the office handled it, like
-    // Generate), and not on the job's invoice.
+    // Generate), and not on the job's invoice. The existence check sees hidden
+    // invoices too (SHOW_ALL): an estimate already billed on a hidden invoice is
+    // not "not invoiced", and offering Generate again would only hit the
+    // one-invoice-per-estimate guard.
     extraConditions.push(sql`(${estimates.status} = 'sold'::estimate_status AND ${estimates.fieldpulseEstimateId} IS NULL
-      AND NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id = ${organizationId}::uuid AND ni.estimate_id = ${estimates.id})
+      AND NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id = ${organizationId}::uuid AND ni.estimate_id = ${estimates.id} AND ${visibleRowsSql("ni", SHOW_ALL)})
       AND NOT ${jobBilledSql(organizationId, sql`${estimates.id}`)})`);
   } else if (opts.bucket) {
     extraConditions.push(sql`(${BUCKET_CASE_SQL}) = ${opts.bucket}`);
@@ -526,9 +534,10 @@ export async function listEstimates(
         and(
           eq(customers.id, estimates.customerId),
           eq(customers.organizationId, organizationId),
+          visibleRows(customers, vis),
         ),
       )
-      .where(whereClause)
+      .where(and(whereClause, visibleRows(estimates, vis)))
       .orderBy(orderByClause)
       .limit(5000);
 
@@ -556,19 +565,20 @@ export async function listEstimates(
   }
 
   const [countResult, rows] = await Promise.all([
-    db.select({ n: count() }).from(estimates).where(whereClause),
+    db.select({ n: count() }).from(estimates).where(and(whereClause, visibleRows(estimates, vis))),
     db
       .select(rowCols)
       .from(estimates)
-      // Org-scope the join too (defense in depth).
+      // Org-scope the join too (defense in depth). A hidden customer contributes no name.
       .leftJoin(
         customers,
         and(
           eq(customers.id, estimates.customerId),
           eq(customers.organizationId, organizationId),
+          visibleRows(customers, vis),
         ),
       )
-      .where(whereClause)
+      .where(and(whereClause, visibleRows(estimates, vis)))
       .orderBy(orderByClause)
       .limit(limit)
       .offset(offset),
@@ -722,10 +732,14 @@ async function loadOptionsWithLineItems(
   return optionRows.map((o) => ({ ...o, lineItems: byOption.get(o.id) ?? [] }));
 }
 
-/** Admin detail view: estimate header + its options (each with line items). */
+/**
+ * Admin detail view: estimate header + its options (each with line items).
+ * Null when not found or hidden from this viewer (the route answers 404).
+ */
 export async function getEstimateDetailById(
   organizationId: string,
   id: string,
+  vis: Visibility,
 ): Promise<EstimateDetailView | null> {
   const [est] = await db
     .select({
@@ -752,21 +766,25 @@ export async function getEstimateDetailById(
       billingInvoiceId: sql<string | null>`${billingInvoiceIdSql(organizationId, sql`${estimates.id}`)}`,
     })
     .from(estimates)
-    // Org-scope the join too (defense in depth).
+    // Org-scope the join too (defense in depth). A hidden customer contributes no name.
     .leftJoin(
       customers,
       and(
         eq(customers.id, estimates.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
     // At most one invoice per estimate (invoices_estimate_unique), so the
-    // detail can show "View invoice" instead of a second Generate.
+    // detail can show "View invoice" instead of a second Generate. A hidden
+    // invoice still counts (SHOW_ALL): the estimate is billed, and dropping it
+    // would offer a Generate that the unique index refuses.
     .leftJoin(
       invoices,
       and(
         eq(invoices.estimateId, estimates.id),
         eq(invoices.organizationId, organizationId),
+        visibleRows(invoices, SHOW_ALL),
       ),
     )
     // M3c: who sold it (technician for field, admin for office).
@@ -774,9 +792,10 @@ export async function getEstimateDetailById(
       users,
       and(eq(users.id, estimates.soldBy), eq(users.organizationId, organizationId)),
     )
-    .where(withTenant(estimates, organizationId, eq(estimates.id, id)))
+    .where(withTenant(estimates, organizationId, eq(estimates.id, id), visibleRows(estimates, vis)))
     .limit(1);
 
+  // Options and line items are children of this row: read only once it passed.
   if (!est) return null;
 
   const { fieldpulseEstimateId, fieldpulseStatusName, fieldpulseData, nameEncrypted, invoiceId, billingInvoiceId, soldVia, soldByName, ...header } = est;

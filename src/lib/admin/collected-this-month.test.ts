@@ -9,6 +9,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { collectedThisMonthCents, netCollectedCents } from "./invoice-queries";
+import { VISIBLE_ONLY } from "./visibility";
 
 const wheres: SQL[] = [];
 
@@ -46,13 +47,13 @@ describe("netCollectedCents", () => {
 describe("collectedThisMonthCents", () => {
   it("returns received minus refunded from one batched round trip", async () => {
     vi.mocked(db.batch).mockResolvedValue([[{ value: "20000" }], [{ value: "5000" }]] as never);
-    await expect(collectedThisMonthCents(ORG, NOW)).resolves.toBe(15000);
+    await expect(collectedThisMonthCents(ORG, VISIBLE_ONLY, NOW)).resolves.toBe(15000);
     expect(db.batch).toHaveBeenCalledTimes(1);
   });
 
   it("counts fully refunded payments as received and scopes both sides to the org and month", async () => {
     vi.mocked(db.batch).mockResolvedValue([[{ value: null }], [{ value: null }]] as never);
-    await collectedThisMonthCents(ORG, NOW);
+    await collectedThisMonthCents(ORG, VISIBLE_ONLY, NOW);
     const dialect = new PgDialect();
     const [received, refunded] = wheres.map((w) => dialect.sqlToQuery(w));
     expect(received!.sql).toMatch(/"payments"\."status" in/);

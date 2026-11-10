@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import {
   listInvoices,
   getInvoiceSummaryStats,
@@ -27,10 +28,11 @@ const createSchema = z.object({
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:invoices-list:${session.userId}`,
@@ -93,9 +95,9 @@ export async function GET(request: NextRequest) {
     }
 
     const [listResult, stats, collected] = await Promise.all([
-      listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId, unreminded, minCents, maxCents }),
-      getInvoiceSummaryStats(session.organizationId),
-      collectedThisMonthCents(session.organizationId),
+      listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId, unreminded, minCents, maxCents }, viewer),
+      getInvoiceSummaryStats(session.organizationId, viewer),
+      collectedThisMonthCents(session.organizationId, viewer),
     ]);
 
     const response = successResponse({

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import {
   getEstimateDetailById,
   markEstimateSold,
@@ -20,10 +21,11 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:estimate-detail:${session.userId}`,
@@ -38,7 +40,7 @@ export async function GET(
     if (!isUuid(id)) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
-    const estimate = await getEstimateDetailById(session.organizationId, id);
+    const estimate = await getEstimateDetailById(session.organizationId, id, viewer);
     if (!estimate) {
       return errorResponse("Estimate not found", "NOT_FOUND", 404);
     }

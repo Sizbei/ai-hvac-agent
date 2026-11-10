@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { markEstimateSold, listEstimates, getEstimateDetailById } from "./estimate-queries";
+import { VISIBLE_ONLY } from "./visibility";
 import { createInvoiceFromSoldEstimate } from "./invoice-queries";
 import { db } from "@/lib/db";
 
@@ -130,7 +131,7 @@ describe("listEstimates — syncedSource", () => {
       [{ n: 2 }], // count
       pageRows,   // rows
     ]);
-    const { estimates } = await listEstimates(ORG);
+    const { estimates } = await listEstimates(ORG, {}, VISIBLE_ONLY);
     const fp = estimates.find((r) => r.id === "est-fp")!;
     const native = estimates.find((r) => r.id === "est-nat")!;
     expect(fp.syncedSource).toBe("fieldpulse");
@@ -149,7 +150,7 @@ describe("getEstimateDetailById — syncedSource", () => {
       [], // estimateOptions
       [], // line items
     ]);
-    const detail = await getEstimateDetailById(ORG, "est-fp");
+    const detail = await getEstimateDetailById(ORG, "est-fp", VISIBLE_ONLY);
     expect(detail?.syncedSource).toBe("fieldpulse");
   });
 
@@ -159,7 +160,7 @@ describe("getEstimateDetailById — syncedSource", () => {
       [],
       [],
     ]);
-    const detail = await getEstimateDetailById(ORG, "est-1");
+    const detail = await getEstimateDetailById(ORG, "est-1", VISIBLE_ONLY);
     expect(detail?.syncedSource).toBeNull();
   });
 });

@@ -6,6 +6,13 @@ const getAdminSession = vi.fn();
 vi.mock('@/lib/auth/session', () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock('@/lib/auth/viewer', () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 vi.mock('@/lib/admin/invoice-queries', () => ({
   listInvoices: vi.fn().mockResolvedValue({ invoices: [], total: 0, sourceCounts: {} }),
@@ -30,7 +37,12 @@ vi.mock('@/lib/logger', () => ({ logger: { error: vi.fn(), info: vi.fn() } }));
 
 import { NextRequest } from 'next/server';
 import { GET, POST } from './route';
-import { createInvoiceFromSoldEstimate } from '@/lib/admin/invoice-queries';
+import {
+  collectedThisMonthCents,
+  createInvoiceFromSoldEstimate,
+  getInvoiceSummaryStats,
+  listInvoices,
+} from '@/lib/admin/invoice-queries';
 import { logAudit } from '@/lib/admin/audit';
 
 beforeEach(() => {
@@ -49,6 +61,18 @@ describe('GET /api/admin/invoices caching', () => {
     const res = await GET(new NextRequest('https://app.example.com/api/admin/invoices'));
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('reads the list and every money tile with the same viewer', async () => {
+    getAdminSession.mockResolvedValue({
+      userId: 'u1', organizationId: 'org-1', email: 'a@x.com', name: 'A', role: 'admin',
+    });
+    const res = await GET(new NextRequest('https://app.example.com/api/admin/invoices'));
+    expect(res.status).toBe(200);
+    const viewer = expect.objectContaining({ showHidden: false });
+    expect(listInvoices).toHaveBeenLastCalledWith('org-1', expect.any(Object), viewer);
+    expect(getInvoiceSummaryStats).toHaveBeenLastCalledWith('org-1', viewer);
+    expect(collectedThisMonthCents).toHaveBeenLastCalledWith('org-1', viewer);
   });
 });
 

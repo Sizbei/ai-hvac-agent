@@ -137,6 +137,7 @@ beforeEach(() => {
 });
 
 import { listInvoices, voidInvoice, listInvoiceReminders } from './invoice-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 describe('listInvoices', () => {
   it('returns invoices with decrypted customer name + lastReminderSentAt, org-scoped', async () => {
@@ -150,7 +151,7 @@ describe('listInvoices', () => {
         fieldpulseInvoiceId: null, hcpInvoiceId: null, fieldpulseData: null,
         nameEncrypted: 'ENC', lastReminderSentAt: new Date('2026-06-20') },
     ]); // rows
-    const result = await listInvoices('org-1');
+    const result = await listInvoices('org-1', {}, VISIBLE_ONLY);
     const rows = result.invoices;
     expect(rows[0].customerName).toBe('dec(ENC)');
     expect(rows[0].lastReminderSentAt).toEqual(new Date('2026-06-20'));
@@ -238,7 +239,7 @@ describe('listInvoices — unreminded filter', () => {
     selectQueue.push([]); // sourceCounts
     selectQueue.push([{ n: 0 }]); // count
     selectQueue.push([]); // rows
-    await listInvoices('org-1', { unreminded: true });
+    await listInvoices('org-1', { unreminded: true }, VISIBLE_ONLY);
     // Find the count query's WHERE (captured[1]) — all extra conditions are present there too
     const where = JSON.stringify(captured[1].where);
     expect(where).toContain('isNull');
@@ -249,7 +250,7 @@ describe('listInvoices — unreminded filter', () => {
     selectQueue.push([]);
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listInvoices('org-1', { unreminded: false });
+    await listInvoices('org-1', { unreminded: false }, VISIBLE_ONLY);
     const where = JSON.stringify(captured[1].where);
     // The only isNull present should be from the source filter (which isn't active here),
     // so there should be no isNull for lastReminderSentAt
@@ -262,7 +263,7 @@ describe('listInvoices — balance range filters', () => {
     selectQueue.push([]);
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listInvoices('org-1', { minCents: 5000 });
+    await listInvoices('org-1', { minCents: 5000 }, VISIBLE_ONLY);
     const where = JSON.stringify(captured[1].where);
     expect(where).toContain('"gte"');
     expect(where).toContain('5000');
@@ -272,7 +273,7 @@ describe('listInvoices — balance range filters', () => {
     selectQueue.push([]);
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listInvoices('org-1', { maxCents: 20000 });
+    await listInvoices('org-1', { maxCents: 20000 }, VISIBLE_ONLY);
     const where = JSON.stringify(captured[1].where);
     expect(where).toContain('"lte"');
     expect(where).toContain('20000');
@@ -282,7 +283,7 @@ describe('listInvoices — balance range filters', () => {
     selectQueue.push([]);
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listInvoices('org-1', { minCents: 1000, maxCents: 50000 });
+    await listInvoices('org-1', { minCents: 1000, maxCents: 50000 }, VISIBLE_ONLY);
     const where = JSON.stringify(captured[1].where);
     expect(where).toContain('"gte"');
     expect(where).toContain('"lte"');
@@ -295,7 +296,7 @@ describe('listInvoices — balance range filters', () => {
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
     // NaN comes in as undefined from the API layer guard, but test the query layer with -1
-    await listInvoices('org-1', { minCents: -1 });
+    await listInvoices('org-1', { minCents: -1 }, VISIBLE_ONLY);
     const where = JSON.stringify(captured[1].where);
     // Only the tenant condition should be present, no gte
     expect(where).not.toContain('"gte"');
@@ -305,7 +306,7 @@ describe('listInvoices — balance range filters', () => {
     selectQueue.push([]);
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listInvoices('org-1', { maxCents: -500 });
+    await listInvoices('org-1', { maxCents: -500 }, VISIBLE_ONLY);
     const where = JSON.stringify(captured[1].where);
     expect(where).not.toContain('"lte"');
   });

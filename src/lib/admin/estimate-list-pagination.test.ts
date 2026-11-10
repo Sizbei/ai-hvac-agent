@@ -90,11 +90,14 @@ vi.mock('drizzle-orm', () => ({
   inArray: (...a: unknown[]) => ({ kind: 'inArray', args: a }),
   isNull: (c: unknown) => ({ kind: 'isNull', col: c }),
   lt: (...a: unknown[]) => ({ kind: 'lt', args: a }),
-  sql: vi.fn((strings: TemplateStringsArray, ...vals: unknown[]) => ({
-    kind: 'sql',
-    text: strings.join('?'),
-    vals,
-  })),
+  sql: Object.assign(
+    vi.fn((strings: TemplateStringsArray, ...vals: unknown[]) => ({
+      kind: 'sql',
+      text: strings.join('?'),
+      vals,
+    })),
+    { raw: (text: string) => ({ kind: 'raw', text }) },
+  ),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -167,6 +170,7 @@ beforeEach(() => {
 });
 
 import { listEstimates, getEstimatePipelineStats, expireOverdueEstimates } from './estimate-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -179,20 +183,20 @@ const queuePage = (rows: unknown[] = []) => {
 describe('listEstimates', () => {
   it('paginates: page query carries a LIMIT', async () => {
     queuePage();
-    await listEstimates(ORG);
+    await listEstimates(ORG, {}, VISIBLE_ONLY);
     expect(captured.some((c) => c.hasLimit)).toBe(true);
   });
 
   it('is tenant-scoped: every WHERE includes the org id', async () => {
     queuePage();
-    await listEstimates(ORG);
+    await listEstimates(ORG, {}, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(wheres.every((w) => w.includes(ORG))).toBe(true);
   });
 
   it('returns { estimates, total } shape', async () => {
     queuePage([{ id: 'est-1', status: 'open', totalCents: 10000, customerId: null, serviceRequestId: null, createdAt: new Date(), expiresAt: null, signedAt: null, fieldpulseEstimateId: null, fieldpulseStatusName: null, title: null, fieldpulseData: null }]);
-    const result = await listEstimates(ORG);
+    const result = await listEstimates(ORG, {}, VISIBLE_ONLY);
     expect(result).toHaveProperty('estimates');
     expect(result).toHaveProperty('total', 10);
     expect(Array.isArray(result.estimates)).toBe(true);
@@ -200,7 +204,7 @@ describe('listEstimates', () => {
 
   it('count and rows queries share the same WHERE', async () => {
     queuePage();
-    await listEstimates(ORG);
+    await listEstimates(ORG, {}, VISIBLE_ONLY);
     // captured[0] = count query, captured[1] = rows query
     const countWhere = JSON.stringify(captured[0]?.where ?? '');
     const rowsWhere = JSON.stringify(captured[1]?.where ?? '');
@@ -209,7 +213,7 @@ describe('listEstimates', () => {
 
   it('applies customerId filter when provided', async () => {
     queuePage();
-    await listEstimates(ORG, { customerId: 'cid-1' });
+    await listEstimates(ORG, { customerId: 'cid-1' }, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(
       wheres.some((w) => w.includes('"kind":"eq"') && w.includes('est.customerId')),
@@ -218,7 +222,7 @@ describe('listEstimates', () => {
 
   it('applies serviceRequestId filter when provided', async () => {
     queuePage();
-    await listEstimates(ORG, { serviceRequestId: 'sr-1' });
+    await listEstimates(ORG, { serviceRequestId: 'sr-1' }, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(
       wheres.some((w) => w.includes('"kind":"eq"') && w.includes('est.serviceRequestId')),
@@ -227,27 +231,27 @@ describe('listEstimates', () => {
 
   it('bucket=open applies LIMIT', async () => {
     queuePage();
-    await listEstimates(ORG, { bucket: 'open' });
+    await listEstimates(ORG, { bucket: 'open' }, VISIBLE_ONLY);
     expect(captured.some((c) => c.hasLimit)).toBe(true);
   });
 
   it('bucket=open includes open-bucket predicate in WHERE', async () => {
     queuePage();
-    await listEstimates(ORG, { bucket: 'open' });
+    await listEstimates(ORG, { bucket: 'open' }, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(wheres.some((w) => w.includes('open'))).toBe(true);
   });
 
   it('bucket=won includes won-bucket predicate in WHERE', async () => {
     queuePage();
-    await listEstimates(ORG, { bucket: 'won' });
+    await listEstimates(ORG, { bucket: 'won' }, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ''));
     expect(wheres.some((w) => w.includes('won'))).toBe(true);
   });
 
   it("bucket=not_invoiced: sold, native, no invoice of any state, not job-billed (M3c)", async () => {
     queuePage();
-    await listEstimates(ORG, { bucket: "not_invoiced" });
+    await listEstimates(ORG, { bucket: "not_invoiced" }, VISIBLE_ONLY);
     const wheres = captured.map((c) => JSON.stringify(c.where ?? ""));
     expect(wheres.some((w) => w.includes("NOT EXISTS (SELECT 1 FROM invoices ni WHERE ni.organization_id ="))).toBe(true);
     expect(wheres.some((w) => w.includes("jbx.estimate_line_item_id IN"))).toBe(true);
@@ -256,7 +260,7 @@ describe('listEstimates', () => {
 
   it('count and rows queries share tenant org with bucket filter', async () => {
     queuePage();
-    await listEstimates(ORG, { bucket: 'open' });
+    await listEstimates(ORG, { bucket: 'open' }, VISIBLE_ONLY);
     const countWhere = JSON.stringify(captured[0]?.where ?? '');
     const rowsWhere = JSON.stringify(captured[1]?.where ?? '');
     expect(countWhere).toBe(rowsWhere);
@@ -270,7 +274,7 @@ describe('getEstimatePipelineStats', () => {
       wonCents: 0, wonCount: 0, lostCents: 0, lostCount: 0,
       draftCents: 0, draftCount: 0, winRatePct: null, avgOpenAgeDays: 0,
     }]);
-    await getEstimatePipelineStats(ORG);
+    await getEstimatePipelineStats(ORG, VISIBLE_ONLY);
     const whereStr = JSON.stringify(captured[0]?.where ?? '');
     expect(whereStr).toContain(ORG);
   });
@@ -281,7 +285,7 @@ describe('getEstimatePipelineStats', () => {
       wonCents: '20000', wonCount: '5', lostCents: '3000', lostCount: '2',
       draftCents: '0', draftCount: '0', winRatePct: '71', avgOpenAgeDays: '7',
     }]);
-    const stats = await getEstimatePipelineStats(ORG);
+    const stats = await getEstimatePipelineStats(ORG, VISIBLE_ONLY);
     expect(typeof stats.openCents).toBe('number');
     expect(typeof stats.wonCents).toBe('number');
     expect(stats.winRatePct).toBe(71);
@@ -293,7 +297,7 @@ describe('getEstimatePipelineStats', () => {
       wonCents: 0, wonCount: 0, lostCents: 0, lostCount: 0,
       draftCents: 0, draftCount: 0, winRatePct: null, avgOpenAgeDays: 0,
     }]);
-    const stats = await getEstimatePipelineStats(ORG);
+    const stats = await getEstimatePipelineStats(ORG, VISIBLE_ONLY);
     expect(stats.winRatePct).toBeNull();
   });
 });
@@ -323,7 +327,7 @@ describe('listEstimates search filter', () => {
       makeRow({ nameEncrypted: 'John Smith', title: null }),
       makeRow({ id: 'est-2', nameEncrypted: 'Jane Doe', title: null }),
     ]);
-    const result = await listEstimates(ORG, { search: 'john' });
+    const result = await listEstimates(ORG, { search: 'john' }, VISIBLE_ONLY);
     expect(result.estimates).toHaveLength(1);
     expect(result.estimates[0]!.id).toBe('est-1');
     expect(result.total).toBe(1);
@@ -334,7 +338,7 @@ describe('listEstimates search filter', () => {
       makeRow({ nameEncrypted: null, title: 'AC Tune-Up Package' }),
       makeRow({ id: 'est-2', nameEncrypted: null, title: 'Heating Repair' }),
     ]);
-    const result = await listEstimates(ORG, { search: 'tune-up' });
+    const result = await listEstimates(ORG, { search: 'tune-up' }, VISIBLE_ONLY);
     expect(result.estimates).toHaveLength(1);
     expect(result.estimates[0]!.id).toBe('est-1');
     expect(result.total).toBe(1);
@@ -344,7 +348,7 @@ describe('listEstimates search filter', () => {
     selectQueue.push([
       makeRow({ nameEncrypted: 'Alice', title: 'AC repair' }),
     ]);
-    const result = await listEstimates(ORG, { search: 'nonexistent' });
+    const result = await listEstimates(ORG, { search: 'nonexistent' }, VISIBLE_ONLY);
     expect(result.estimates).toHaveLength(0);
     expect(result.total).toBe(0);
   });
@@ -354,7 +358,7 @@ describe('listEstimates search filter', () => {
       makeRow({ nameEncrypted: 'Smith HVAC', title: null }),
       makeRow({ id: 'est-2', nameEncrypted: 'Smith Cooling', title: null }),
     ]);
-    const result = await listEstimates(ORG, { search: 'smith' });
+    const result = await listEstimates(ORG, { search: 'smith' }, VISIBLE_ONLY);
     expect(result.estimates).toHaveLength(2);
     expect(result.total).toBe(2);
   });
@@ -364,7 +368,7 @@ describe('listEstimates bucket filter', () => {
   it('bucket=open applies limit', async () => {
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listEstimates('org-x', { bucket: 'open' });
+    await listEstimates('org-x', { bucket: 'open' }, VISIBLE_ONLY);
     const rowQuery = captured[captured.length - 1];
     expect(rowQuery.hasLimit).toBe(true);
   });
@@ -372,7 +376,7 @@ describe('listEstimates bucket filter', () => {
   it('bucket=open includes open-bucket predicate in WHERE', async () => {
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listEstimates('org-x', { bucket: 'open' });
+    await listEstimates('org-x', { bucket: 'open' }, VISIBLE_ONLY);
     const rowQuery = captured[captured.length - 1];
     const whereStr = JSON.stringify(rowQuery.where);
     expect(whereStr).toContain('open');
@@ -381,7 +385,7 @@ describe('listEstimates bucket filter', () => {
   it('bucket=won includes won-bucket predicate in WHERE', async () => {
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listEstimates('org-x', { bucket: 'won' });
+    await listEstimates('org-x', { bucket: 'won' }, VISIBLE_ONLY);
     const rowQuery = captured[captured.length - 1];
     const whereStr = JSON.stringify(rowQuery.where);
     expect(whereStr).toContain('won');
@@ -390,7 +394,7 @@ describe('listEstimates bucket filter', () => {
   it('count and rows queries share tenant org in WHERE', async () => {
     selectQueue.push([{ n: 0 }]);
     selectQueue.push([]);
-    await listEstimates('org-shared', {});
+    await listEstimates('org-shared', {}, VISIBLE_ONLY);
     const countQ = captured[captured.length - 2];
     const rowQ = captured[captured.length - 1];
     expect(JSON.stringify(countQ.where)).toContain('org-shared');
@@ -450,7 +454,7 @@ describe('getEstimatePipelineStats — bucket classification', () => {
       wonCents: 0, wonCount: 0, lostCents: 0, lostCount: 0,
       draftCents: 0, draftCount: 0, winRatePct: null, avgOpenAgeDays: 0,
     }]);
-    await getEstimatePipelineStats(ORG);
+    await getEstimatePipelineStats(ORG, VISIBLE_ONLY);
     const cols = captured[captured.length - 1]?.selectCols as Record<string, unknown>;
 
     const lostCase = findBucketCase(cols.lostCents);

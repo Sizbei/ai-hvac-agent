@@ -82,6 +82,7 @@ vi.mock('@/lib/db/tenant', () => ({
 // drizzle-orm helpers return tagged structures so we can assert intent without a
 // real SQL engine.
 vi.mock('drizzle-orm', () => ({
+  and: (...a: unknown[]) => ({ kind: 'and', args: a }),
   eq: (...a: unknown[]) => ({ kind: 'eq', args: a }),
   gte: (...a: unknown[]) => ({ kind: 'gte', args: a }),
   lte: (...a: unknown[]) => ({ kind: 'lte', args: a }),
@@ -179,6 +180,7 @@ import {
   getLocationBreakdown,
   getTechnicianScorecards,
 } from './reporting-queries';
+import { VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -238,7 +240,7 @@ describe('getSalesReport', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.grossCollectedCents).toBe(0);
     expect(r.refundedCents).toBe(0);
     expect(r.netCollectedCents).toBe(0);
@@ -254,7 +256,7 @@ describe('getSalesReport', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.grossCollectedCents).toBe(50000);
     expect(r.refundedCents).toBe(12000);
     expect(r.netCollectedCents).toBe(38000);
@@ -287,7 +289,7 @@ describe('getSalesReport', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 3, paid: 2 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.outstandingArCents).toBe(7500);
 
     // The AR query (3rd select) must filter on state = 'open' and must NOT be
@@ -333,7 +335,7 @@ describe('getSalesReport', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 0, paid: 0 },
     });
-    await getSalesReport(ORG);
+    await getSalesReport(ORG, {}, VISIBLE_ONLY);
 
     // 3rd select is the AR query. Its where-conditions (via withTenant) must contain
     // a sql-tagged condition referencing both amountPaidCents and totalCents — the
@@ -359,7 +361,7 @@ describe('getSalesReport', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.nativeArCents).toBe(5000);
     expect(r.syncedArCents).toBe(2500);
     // Total is the SUM of the two source buckets — each open invoice counted once.
@@ -375,7 +377,7 @@ describe('getSalesReport', () => {
       invoices: { created: 0, paid: 0 },
       syncedCollected: '15000', // paid on FSM-synced invoices
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.grossCollectedCents).toBe(40000); // native only, unchanged
     expect(r.syncedCollectedCents).toBe(15000); // synced, reported separately
     // The synced-collected query (6th) filters to invoices WITH an FSM id.
@@ -403,7 +405,7 @@ describe('getSalesReport', () => {
       estimates: { created: 10, sold: 4, expired: 1, open: 5 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.estimatesSold).toBe(4);
     expect(r.estimatesOpen).toBe(5);
     expect(r.estimatesExpired).toBe(1);
@@ -432,7 +434,7 @@ describe('getSalesReport', () => {
       estimates: { created: 3, sold: 1, expired: 1, open: 1 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.closeRatePct).toBe(33.3);
   });
 
@@ -448,7 +450,7 @@ describe('getSalesReport', () => {
       estimates: { created: 10, sold: 3, expired: 2, open: 2, dismissed: 3 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.estimatesDismissed).toBe(3);
     // No created estimate is dropped: every status bucket sums back to created.
     expect(
@@ -478,7 +480,7 @@ describe('getSalesReport', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 }, // no `dismissed` key at all
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.estimatesDismissed).toBe(0);
     expect(r.closeRatePct).toBe(0);
   });
@@ -654,7 +656,7 @@ describe('getLeadSourceBreakdown', () => {
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 0, paid: 0 },
     });
-    const r = await getSalesReport(ORG);
+    const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.grossCollectedCents).toBe(40000);
 
     // The gross payments where (1st capture) must contain isNull(payments.fieldpulsePaymentId).

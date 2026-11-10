@@ -328,6 +328,10 @@
     "reason": "Money writers, reconciliation and id-keyed lookups: must act on every row."
   },
   {
+    "id": "src/lib/admin/invoice-queries.ts#collectedThisMonthCents",
+    "reason": "FILTERED, not exempt (Task 12): both queries inner-join invoices with visibleRows(invoices, vis). The refund query reaches the invoice through payments (refunds -> payments -> invoices), two child reads behind one parent filter, which the one-parent-per-child count cannot express. Pinned by tests/integration/visibility-money.test.ts (collectedThisMonthCents)."
+  },
+  {
     "id": "src/lib/admin/estimate-queries.ts#approveEstimate",
     "reason": "Writer or id-keyed guard: must find the row whatever its flag; not a list display."
   },

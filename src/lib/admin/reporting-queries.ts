@@ -9,7 +9,7 @@
  * neon-http note: SQL aggregates (sum/count) come back as strings (or null for an
  * empty set), so each value is coerced with Number() and coalesced to 0.
  */
-import { eq, gte, isNull, lte, sql, sum, count, avg, inArray } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, sql, sum, count, avg, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   estimates,
@@ -24,6 +24,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "./visibility";
 import { decrypt } from "@/lib/crypto";
 import { locationDisplayLabel } from "./report-format";
 
@@ -93,11 +94,15 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Compute an org's sales/revenue report for a period. Defaults to the last 30
- * days when no range is given. All money in integer cents.
+ * days when no range is given. All money in integer cents. Every figure reads
+ * only rows the viewer sees: invoices and estimates by their own flag, payments
+ * and refunds through their invoice (so net collected and AR match the invoices
+ * page's tiles).
  */
 export async function getSalesReport(
   organizationId: string,
-  period: SalesReportPeriod = {},
+  period: SalesReportPeriod,
+  vis: Visibility,
 ): Promise<SalesReport> {
   const now = new Date();
   const toDate = period.toDate ?? now;
@@ -118,6 +123,14 @@ export async function getSalesReport(
     db
       .select({ value: sum(payments.amountCents) })
       .from(payments)
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          visibleRows(invoices, vis),
+        ),
+      )
       .where(
         withTenant(
           payments,
@@ -133,10 +146,24 @@ export async function getSalesReport(
     // NO fieldpulsePaymentId guard needed here: FP-imported payments (RECORD-ONLY)
     // link only to FP-synced invoices, which refundPayment refuses — so refund rows
     // can never exist against them. If that invariant ever changes, add the same
-    // IS NULL exclusion the gross-collected queries carry.
+    // IS NULL exclusion the gross-collected queries carry. A refund follows its
+    // payment's invoice: refunds on a hidden invoice are not subtracted, just as
+    // that invoice's payments are not counted in gross.
     db
       .select({ value: sum(refunds.amountCents) })
       .from(refunds)
+      .innerJoin(
+        payments,
+        and(eq(payments.id, refunds.paymentId), eq(payments.organizationId, organizationId)),
+      )
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          visibleRows(invoices, vis),
+        ),
+      )
       .where(
         withTenant(
           refunds,
@@ -164,7 +191,7 @@ export async function getSalesReport(
         ),
       })
       .from(invoices)
-      .where(withTenant(invoices, organizationId, eq(invoices.state, "open"), sql`${invoices.amountPaidCents} < ${invoices.totalCents}`)),
+      .where(withTenant(invoices, organizationId, eq(invoices.state, "open"), sql`${invoices.amountPaidCents} < ${invoices.totalCents}`, visibleRows(invoices, vis))),
 
     // Estimate buckets in ONE pass, created within the period. Expiry is lazy
     // (expiresAt is only enforced at approval), so an 'open' estimate whose
@@ -201,6 +228,7 @@ export async function getSalesReport(
           organizationId,
           gte(estimates.createdAt, fromDate),
           lte(estimates.createdAt, toDate),
+          visibleRows(estimates, vis),
         ),
       ),
 
@@ -217,6 +245,7 @@ export async function getSalesReport(
           organizationId,
           gte(invoices.createdAt, fromDate),
           lte(invoices.createdAt, toDate),
+          visibleRows(invoices, vis),
         ),
       ),
 
@@ -235,6 +264,7 @@ export async function getSalesReport(
           sql`(${invoices.fieldpulseInvoiceId} IS NOT NULL OR ${invoices.hcpInvoiceId} IS NOT NULL)`,
           gte(invoices.createdAt, fromDate),
           lte(invoices.createdAt, toDate),
+          visibleRows(invoices, vis),
         ),
       ),
   ] as const);
