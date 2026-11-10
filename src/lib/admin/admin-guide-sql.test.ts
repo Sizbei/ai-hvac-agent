@@ -19,7 +19,7 @@ describe("adminGuideSelectSql", () => {
     expect(text).toContain("SELECT admin_guide_state FROM users WHERE id = $1 AND organization_id = $2");
     expect(text).toContain("fieldpulse_connections WHERE organization_id = $3 AND connected = true");
     expect(text).toContain("SELECT feature_flags FROM organizations WHERE id = $4");
-    expect(text).toMatch(/SELECT name FROM users WHERE organization_id = \$5 AND is_active AND lower\(trim\(email\)\) = ANY\(\$6::text\[\]\) ORDER BY created_at, id LIMIT 1/);
+    expect(text).toMatch(/SELECT NULLIF\(name, email\) FROM users WHERE organization_id = \$5 AND is_active AND lower\(trim\(email\)\) = ANY\(\$6::text\[\]\) ORDER BY created_at, id LIMIT 1/);
     expect(render(q).params).toEqual([USER, ORG, ORG, ORG, ORG, ["owner@x.com"]]);
   });
 

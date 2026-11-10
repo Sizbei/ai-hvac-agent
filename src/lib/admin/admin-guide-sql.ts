@@ -8,7 +8,8 @@ const OLD = sql`CASE WHEN jsonb_typeof(users.admin_guide_state) = 'object' THEN 
 /**
  * The guide read: separate from onboardingSelectSql, never writes. `userId` is
  * null for a stale preview (no subject). `contactEmails` is the normalized
- * PLATFORM_ADMIN_EMAILS list; only the matching user's display name is read.
+ * PLATFORM_ADMIN_EMAILS list; only the matching user's display name is read
+ * (NULL when the name is just the email).
  */
 export function adminGuideSelectSql(p: {
   organizationId: string;
@@ -20,7 +21,7 @@ export function adminGuideSelectSql(p: {
     ? sql`(SELECT admin_guide_state FROM users WHERE id = ${p.userId} AND organization_id = ${o})`
     : sql`NULL::jsonb`;
   const contact = p.contactEmails.length > 0
-    ? sql`(SELECT name FROM users WHERE organization_id = ${o} AND is_active AND lower(trim(email)) = ANY(${sql.param([...p.contactEmails])}::text[]) ORDER BY created_at, id LIMIT 1)`
+    ? sql`(SELECT NULLIF(name, email) FROM users WHERE organization_id = ${o} AND is_active AND lower(trim(email)) = ANY(${sql.param([...p.contactEmails])}::text[]) ORDER BY created_at, id LIMIT 1)`
     : sql`NULL::text`;
   return sql`SELECT
   ${state} AS state,

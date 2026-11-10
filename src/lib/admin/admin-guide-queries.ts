@@ -17,12 +17,14 @@ type Row = Record<string, unknown>;
 
 /**
  * Whose guide the viewer sees: the preview target while previewing, else the
- * session user. A stale preview has no subject. Never from client input.
+ * session user. A stale preview has no subject, and so does `readOnly` with no
+ * resolved preview (a preview cookie the viewer could not resolve). Never from
+ * client input.
  */
-function subjectOf(viewer: ViewerContext): { userId: string | null; role: string } {
+function subjectOf(viewer: ViewerContext, readOnly: boolean): { userId: string | null; role: string } {
   const { preview, session } = viewer;
   if (preview?.status === "active") return { userId: preview.targetUserId, role: preview.targetRole };
-  if (preview?.status === "stale") return { userId: null, role: session.role };
+  if (preview?.status === "stale" || readOnly) return { userId: null, role: session.role };
   return { userId: session.userId, role: session.role };
 }
 
@@ -34,7 +36,7 @@ export async function readAdminGuide(
   viewer: ViewerContext,
   { readOnly }: { readOnly: boolean },
 ): Promise<AdminGuidePayload> {
-  const subject = subjectOf(viewer);
+  const subject = subjectOf(viewer, readOnly);
   const res = await db.execute(
     adminGuideSelectSql({
       organizationId: viewer.session.organizationId,

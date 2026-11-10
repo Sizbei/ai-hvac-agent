@@ -123,6 +123,14 @@ describe("readAdminGuide", () => {
     expect(g).toMatchObject({ welcomeDue: false, readOnly: true, lastLesson: null });
   });
 
+  it("a preview cookie the viewer could not resolve reads as stale: no own state, never due", async () => {
+    queue.push({ rows: [row({ state: { lastLesson: "paid" } })] });
+    const g = await readAdminGuide(viewer({ preview: null }), { readOnly: true });
+    expect(render(executed[0]).params).not.toContain(ME);
+    expect(flat(executed[0])).toContain("NULL::jsonb AS state");
+    expect(g).toMatchObject({ welcomeDue: false, readOnly: true, lastLesson: null, tourStartedAt: null });
+  });
+
   it("no matching platform admin: the generic contact", async () => {
     queue.push({ rows: [row({ contact_name: null })] });
     expect((await readAdminGuide(viewer(), { readOnly: false })).historyContact).toBe("your account administrator");

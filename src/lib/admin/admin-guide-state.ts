@@ -108,6 +108,12 @@ export function buildGuidePayload(input: {
     payLinks: input.payLinks,
     hasFieldPulse: input.hasFieldPulse,
     historyHidden: input.historyHidden,
-    historyContact: input.contactName?.trim() || HISTORY_CONTACT_FALLBACK,
+    historyContact: contactOrFallback(input.contactName),
   };
+}
+
+/** A display name only: users.name can fall back to the email, so anything with "@" is dropped. */
+function contactOrFallback(name: string | null): string {
+  const trimmed = name?.trim() ?? "";
+  return trimmed && !trimmed.includes("@") ? trimmed : HISTORY_CONTACT_FALLBACK;
 }
