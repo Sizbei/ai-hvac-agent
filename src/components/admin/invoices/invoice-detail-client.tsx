@@ -527,7 +527,7 @@ export function InvoiceDetailClient({
           {invoice.customerId && (
             <Link
               href={`/admin/customers/${invoice.customerId}`}
-              className="text-link hover:underline"
+              className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center"
             >
               View customer
             </Link>
@@ -535,7 +535,7 @@ export function InvoiceDetailClient({
           {invoice.serviceRequestId && (
             <Link
               href={`/admin/requests?request=${invoice.serviceRequestId}`}
-              className="text-link hover:underline"
+              className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center"
             >
               View request
             </Link>
@@ -543,7 +543,7 @@ export function InvoiceDetailClient({
           {invoice.estimateId && (
             <Link
               href={`/admin/estimates/${invoice.estimateId}`}
-              className="text-link hover:underline"
+              className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center"
             >
               View estimate
             </Link>

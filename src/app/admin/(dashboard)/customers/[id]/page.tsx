@@ -453,7 +453,7 @@ export default function CustomerDetailPage({
             {customer.phone && (
               <a
                 href={`tel:${customer.phone}`}
-                className="inline-flex h-[30px] items-center gap-1.5 rounded-[4.8px] border border-input bg-surface-raised px-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-[30px] items-center gap-1.5 rounded-[4.8px] max-sm:min-h-11 border border-input bg-surface-raised px-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Phone className="size-4" />
                 Call
@@ -462,7 +462,7 @@ export default function CustomerDetailPage({
             {customer.email && (
               <a
                 href={`mailto:${customer.email}`}
-                className="inline-flex h-[30px] items-center gap-1.5 rounded-[4.8px] border border-input bg-surface-raised px-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-[30px] items-center gap-1.5 rounded-[4.8px] max-sm:min-h-11 border border-input bg-surface-raised px-2.5 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Mail className="size-4" />
                 Email
@@ -475,7 +475,7 @@ export default function CustomerDetailPage({
             {/* Destructive actions in overflow menu */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="inline-flex size-[30px] items-center justify-center rounded-[4.8px] border border-input bg-surface-raised text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                className="inline-flex size-[30px] max-sm:min-h-11 max-sm:min-w-11 items-center justify-center rounded-[4.8px] border border-input bg-surface-raised text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 aria-label="More actions"
               >
                 <MoreHorizontal className="size-4" />
@@ -569,7 +569,7 @@ export default function CustomerDetailPage({
             <DetailRow
               label="Phone"
               value={
-                <a href={`tel:${customer.phone}`} className="text-link hover:underline">
+                <a href={`tel:${customer.phone}`} className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center">
                   {customer.phone}
                 </a>
               }
@@ -580,7 +580,7 @@ export default function CustomerDetailPage({
             <DetailRow
               label="Email"
               value={
-                <a href={`mailto:${customer.email}`} className="text-link hover:underline">
+                <a href={`mailto:${customer.email}`} className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center">
                   {customer.email}
                 </a>
               }
