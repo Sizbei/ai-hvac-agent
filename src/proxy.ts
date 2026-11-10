@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { verifyToken } from "@/lib/auth/config";
 import { allowedOriginsForKey } from "@/lib/widget/key-queries";
 import { originsToFrameAncestors } from "@/lib/widget/origin";
+import { PREVIEW_COOKIE, clearPreviewCookie } from "@/lib/auth/preview-cookie";
+import { previewProxyDecision } from "@/lib/auth/preview-gate";
 
 const ADMIN_SESSION_COOKIE = "hvac_admin_session";
 
@@ -19,6 +21,46 @@ function addSecurityHeaders(response: NextResponse, requestId: string): void {
 }
 
 export async function proxy(request: NextRequest) {
+  const previewCookie = request.cookies.get(PREVIEW_COOKIE)?.value;
+  // No "View as" cookie: exactly the pre-preview path, nothing else runs.
+  if (previewCookie === undefined) {
+    return routeRequest(request);
+  }
+
+  // "View as" is read-only (spec P7): refuse writes while the cookie is valid
+  // and bound to this session; clear a cookie that is not.
+  const decision = await previewProxyDecision({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    sessionToken: request.cookies.get(ADMIN_SESSION_COOKIE)?.value,
+    previewCookie,
+    authSecret: process.env.AUTH_SECRET ?? "",
+  });
+  if (decision.action === "refuse") {
+    const refused = NextResponse.json(
+      {
+        success: false,
+        error: {
+          message: "Read-only while viewing as another user",
+          code: "PREVIEW_READ_ONLY",
+        },
+      },
+      { status: 403 },
+    );
+    addSecurityHeaders(
+      refused,
+      request.headers.get("x-request-id") ?? crypto.randomUUID(),
+    );
+    return refused;
+  }
+  const response = await routeRequest(request);
+  if (decision.action === "clear") {
+    clearPreviewCookie(response.cookies);
+  }
+  return response;
+}
+
+async function routeRequest(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // --- Embeddable chat panel ---
