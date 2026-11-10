@@ -1,5 +1,6 @@
 {
   "buildCommand": "npm run db:migrate && next build",
+  "regions": ["iad1"],
   "crons": [
     {
       "path": "/api/cron/cleanup",
