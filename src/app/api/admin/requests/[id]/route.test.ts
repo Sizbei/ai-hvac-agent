@@ -7,6 +7,16 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/session", () => ({ getAdminSession: vi.fn() }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", async () => {
+  const { getAdminSession } = await import("@/lib/auth/session");
+  return {
+    getViewerContext: async () => {
+      const session = await getAdminSession();
+      return session ? { session, showHidden: false } : null;
+    },
+  };
+});
 vi.mock("@/lib/admin/queries", () => ({
   getRequestById: vi.fn(async () => ({ id: "detail" })),
   updateRequestStatus: vi.fn(),
@@ -42,7 +52,7 @@ vi.mock("@/lib/admin/visit-one-guard", async (orig) => ({
 
 import { PATCH } from "./route";
 import { getAdminSession } from "@/lib/auth/session";
-import { scheduleRequest, updateRequestStatus } from "@/lib/admin/queries";
+import { getRequestById, scheduleRequest, updateRequestStatus } from "@/lib/admin/queries";
 import { completeRequestFromAdmin, holdVisit, readRequestState } from "@/lib/tech/status-writes";
 import { findActiveVisit } from "@/lib/tech/ownership";
 import { logAudit } from "@/lib/admin/audit";
@@ -80,6 +90,8 @@ describe("PATCH /api/admin/requests/[id] — status routing", () => {
     expect((await patch({ status: "on_hold" })).status).toBe(200);
     expect(updateRequestStatus).toHaveBeenCalled();
     expect(holdVisit).not.toHaveBeenCalled();
+    // The read-back goes through the viewer: a hidden row reads back as 404.
+    expect(getRequestById).toHaveBeenCalledWith("org", RID, expect.objectContaining({ showHidden: false }));
   });
 
   it("native completed goes to completeRequestFromAdmin", async () => {

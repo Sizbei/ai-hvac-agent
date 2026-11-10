@@ -4,6 +4,13 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 const getSchedulingCalendar = vi.fn();
 const getMonthCalendar = vi.fn();
@@ -58,9 +65,10 @@ describe("GET /api/admin/calendar", () => {
     expect(getMonthCalendar).toHaveBeenCalledOnce();
     expect(getSchedulingCalendar).not.toHaveBeenCalled();
 
-    const [org, startIso, endIso, gridDays, month] =
+    const [org, startIso, endIso, gridDays, month, , vis] =
       getMonthCalendar.mock.calls[0];
     expect(org).toBe("org-1");
+    expect(vis).toMatchObject({ showHidden: false });
     expect(month).toBe("2026-06");
     expect(gridDays.length % 7).toBe(0);
     // June 2026 grid: leads Sun May 31, ends Sat Jul 4.
@@ -87,6 +95,7 @@ describe("GET /api/admin/calendar", () => {
     expect(getSchedulingCalendar).toHaveBeenCalledOnce();
     const days = getSchedulingCalendar.mock.calls[0][3];
     expect(days).toEqual(["2026-06-10"]);
+    expect(getSchedulingCalendar.mock.calls[0][5]).toMatchObject({ showHidden: false });
   });
 
   it("an unknown view falls back to day", async () => {

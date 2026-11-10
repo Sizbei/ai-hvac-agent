@@ -11,6 +11,14 @@ vi.mock('@/lib/auth/session', () => ({
   getAdminSession: () => mockGetAdminSession(),
 }));
 
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock('@/lib/auth/viewer', () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
+
 vi.mock('@/lib/admin/queries', () => ({
   getDashboardStats: (...args: unknown[]) => mockGetDashboardStats(...args),
 }));
@@ -69,6 +77,6 @@ describe('GET /api/admin/stats', () => {
       inProgress: 2,
       completedToday: 1,
     });
-    expect(mockGetDashboardStats).toHaveBeenCalledWith('org-001');
+    expect(mockGetDashboardStats).toHaveBeenCalledWith('org-001', expect.objectContaining({ showHidden: false }));
   });
 });

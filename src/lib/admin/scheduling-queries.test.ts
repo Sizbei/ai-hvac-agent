@@ -244,6 +244,7 @@ import {
   placeAndAssignRequest,
   autoAssignBookedRequest,
 } from "./scheduling-queries";
+import { VISIBLE_ONLY } from "./visibility";
 import { recordStatusEvent } from "@/lib/admin/status-events";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
@@ -520,7 +521,7 @@ describe("listUnscheduledRequests", () => {
         arrivalWindowEnd: null,
       },
     ]);
-    const result = await listUnscheduledRequests(ORG);
+    const result = await listUnscheduledRequests(ORG, VISIBLE_ONLY);
     expect(result).toEqual([
       {
         id: "u1",
@@ -543,7 +544,7 @@ describe("listUnscheduledRequests", () => {
 
   it("is tenant-isolated", async () => {
     selectQueue.push([]);
-    await listUnscheduledRequests(OTHER_ORG);
+    await listUnscheduledRequests(OTHER_ORG, VISIBLE_ONLY);
     expect(tenantOrgOf(0)).toBe(OTHER_ORG);
   });
 });

@@ -4,6 +4,13 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 const buildNeedsActionCountQuery = vi.fn();
 vi.mock("@/lib/admin/conversation-queries", () => ({
@@ -37,7 +44,10 @@ describe("GET /api/admin/conversations/needs-action-count", () => {
     buildNeedsActionCountQuery.mockResolvedValue([{ value: "7" }]);
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(buildNeedsActionCountQuery).toHaveBeenCalledWith("org-1");
+    expect(buildNeedsActionCountQuery).toHaveBeenCalledWith(
+      "org-1",
+      expect.objectContaining({ showHidden: false }),
+    );
     const body = (await res.json()) as { data: { count: number } };
     expect(body.data.count).toBe(7);
   });

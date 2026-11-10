@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getRequests } from "@/lib/admin/queries";
 import { successResponse, errorResponse, readJsonBody } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -11,10 +11,11 @@ import { hasTimeOff } from "@/lib/admin/shift-types";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:requests-list:${session.userId}`,
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
       assignedTo,
       isAfterHours,
       sort,
-    });
+    }, viewer);
 
     return successResponse({
       requests: result.requests,
@@ -90,10 +91,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:requests-create:${session.userId}`,
@@ -188,7 +190,7 @@ export async function POST(request: NextRequest) {
     const listRow = await getRequests(session.organizationId, {
       search: result.referenceNumber,
       limit: 1,
-    })
+    }, viewer)
       .then(({ requests }) => requests[0] ?? null)
       .catch((readError: unknown) => {
         logger.error(

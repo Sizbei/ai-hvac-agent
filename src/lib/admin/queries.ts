@@ -35,6 +35,7 @@ import {
   urgencyEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "./visibility";
 // Reuse the canonical overdue-invoice predicate — the invoices page and the
 // operations page both compute AR off this exact function. Do not
 // re-implement "overdue" here (see AGENTS.md's definitional-consistency note).
@@ -141,6 +142,7 @@ function resolveRequestOrderBy(sort?: RequestSortKey) {
 export async function getRequests(
   organizationId: string,
   filters: RequestFilters,
+  vis: Visibility,
 ): Promise<{ readonly requests: readonly AdminRequest[]; readonly total: number }> {
   const page = filters.page ?? 1;
   const limit = filters.limit ?? 50;
@@ -194,13 +196,14 @@ export async function getRequests(
   const [countResult] = await db
     .select({ value: count() })
     .from(serviceRequests)
-    .where(baseConditions);
+    .where(and(baseConditions, visibleRows(serviceRequests, vis)));
 
   const total = countResult?.value ?? 0;
 
   // Fetch paginated results with assigned technician name.
-  // LEFT JOIN customers to resolve names for FP-imported jobs (their request row
-  // has customerNameEncrypted=null; the name lives on the linked customers row).
+  // A left join on the customer row resolves names for FP-imported jobs (their
+  // request row has customerNameEncrypted=null; the name lives on the linked
+  // customer). A hidden customer contributes no name.
   const rows = await db
     .select({
       id: serviceRequests.id,
@@ -228,9 +231,10 @@ export async function getRequests(
       and(
         eq(customers.id, serviceRequests.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
-    .where(baseConditions)
+    .where(and(baseConditions, visibleRows(serviceRequests, vis)))
     .orderBy(...resolveRequestOrderBy(filters.sort))
     .limit(limit)
     .offset(offset);
@@ -270,6 +274,7 @@ export async function getRequests(
 export async function getRequestById(
   organizationId: string,
   requestId: string,
+  vis: Visibility,
 ): Promise<AdminRequestDetail | null> {
   const [row] = await db
     .select({
@@ -331,6 +336,7 @@ export async function getRequestById(
       and(
         eq(customers.id, serviceRequests.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
     .where(
@@ -338,9 +344,12 @@ export async function getRequestById(
         serviceRequests,
         organizationId,
         eq(serviceRequests.id, requestId),
+        // A hidden request is "not found" for an org user (the detail GET and the PATCH read-back 404).
+        visibleRows(serviceRequests, vis),
       ),
     );
 
+  // Transcript and notes below are children of this row: read only once it passed.
   if (!row) {
     return null;
   }
@@ -1204,7 +1213,7 @@ export async function updateTechnician(
 // Builds (without awaiting) the single aggregate stats query so it can be
 // awaited directly by getDashboardStats or handed to db.batch() alongside the
 // dashboard's other queries by getDashboardOverview — same SQL either way.
-function buildDashboardStatsQuery(organizationId: string) {
+function buildDashboardStatsQuery(organizationId: string, vis: Visibility) {
   const todayBounds = businessDayBounds(businessIsoDate(new Date()))!;
   const todayStart = todayBounds.start;
 
@@ -1261,7 +1270,7 @@ function buildDashboardStatsQuery(organizationId: string) {
       ),
     })
     .from(serviceRequests)
-    .where(withTenant(serviceRequests, organizationId));
+    .where(withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)));
 }
 
 type DashboardStatsRow = Awaited<
@@ -1289,8 +1298,9 @@ function toDashboardStats(result: DashboardStatsRow | undefined): DashboardStats
 
 export async function getDashboardStats(
   organizationId: string,
+  vis: Visibility,
 ): Promise<DashboardStats> {
-  const [result] = await buildDashboardStatsQuery(organizationId);
+  const [result] = await buildDashboardStatsQuery(organizationId, vis);
   return toDashboardStats(result);
 }
 
@@ -1377,7 +1387,7 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
 // Same isCollectible + overdue semantics as getInvoiceSummaryStats
 // (invoice-queries.ts): state='open' AND total>paid, filtered by the shared
 // overdueWhere() predicate — never a second "overdue" definition.
-function buildDashboardOverdueInvoicesQuery(organizationId: string) {
+function buildDashboardOverdueInvoicesQuery(organizationId: string, vis: Visibility) {
   return db
     .select({
       overdueCount: sql<number>`count(*) filter (where ${overdueWhere(invoices)})::int`,
@@ -1390,6 +1400,7 @@ function buildDashboardOverdueInvoicesQuery(organizationId: string) {
         organizationId,
         eq(invoices.state, "open"),
         sql`${invoices.totalCents} > ${invoices.amountPaidCents}`,
+        visibleRows(invoices, vis),
       ),
     );
 }
@@ -1432,6 +1443,7 @@ export interface DashboardOverviewWithOverdue extends DashboardOverview {
  */
 export async function getDashboardOverview(
   organizationId: string,
+  vis: Visibility,
 ): Promise<DashboardOverviewWithOverdue> {
   const todayBounds = businessDayBounds(businessIsoDate(new Date()))!;
   const todayStart = todayBounds.start;
@@ -1448,7 +1460,7 @@ export async function getDashboardOverview(
     overdueInvoicesRows,
     needsActionRows,
   ] = await db.batch([
-    buildDashboardStatsQuery(organizationId),
+    buildDashboardStatsQuery(organizationId, vis),
 
     // Today's schedule: any open request whose arrival window starts today.
     db
@@ -1463,6 +1475,7 @@ export async function getDashboardOverview(
           gte(serviceRequests.arrivalWindowStart, todayStart),
           lt(serviceRequests.arrivalWindowStart, tomorrowStart),
           inArray(serviceRequests.status, [...OPEN_STATUSES]),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .orderBy(asc(serviceRequests.arrivalWindowStart))
@@ -1488,6 +1501,7 @@ export async function getDashboardOverview(
           or(isNull(serviceRequests.assignedTo), eq(users.isActive, false))!,
           inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
           inArray(serviceRequests.urgency, ["emergency", "high"]),
+          visibleRows(serviceRequests, vis),
         ),
       )
       // Order by urgency rank (emergency before high), then oldest-first so the
@@ -1509,16 +1523,17 @@ export async function getDashboardOverview(
           organizationId,
           eq(serviceRequests.status, "on_hold"),
           isNotNull(serviceRequests.followUpDate),
+          visibleRows(serviceRequests, vis),
         ),
       )
       .orderBy(asc(serviceRequests.followUpDate))
       .limit(DASHBOARD_LIST_LIMIT),
 
-    buildDashboardOverdueInvoicesQuery(organizationId),
+    buildDashboardOverdueInvoicesQuery(organizationId, vis),
 
     // Escalated conversations nobody has handled: the inbox's own query, so
     // the dashboard can never say "All clear" over a gas-smell escalation.
-    buildNeedsActionCountQuery(organizationId),
+    buildNeedsActionCountQuery(organizationId, vis),
   ]);
 
   return {
@@ -1582,6 +1597,7 @@ function placedByRequestQuery(
   organizationId: string,
   statuses: readonly RequestStatus[],
   range: PlacedRange,
+  vis: Visibility,
 ) {
   return db
     .select(placedSelect())
@@ -1593,6 +1609,7 @@ function placedByRequestQuery(
         organizationId,
         ...rangeOn(serviceRequests.arrivalWindowStart, serviceRequests.arrivalWindowEnd, range),
         inArray(serviceRequests.status, [...statuses]),
+        visibleRows(serviceRequests, vis),
       ),
     )
     .orderBy(asc(serviceRequests.arrivalWindowStart));
@@ -1603,6 +1620,7 @@ function placedByVisitQuery(
   organizationId: string,
   statuses: readonly RequestStatus[],
   range: PlacedRange,
+  vis: Visibility,
 ) {
   return db
     .select(placedSelect())
@@ -1618,6 +1636,8 @@ function placedByVisitQuery(
         inArray(serviceRequests.status, [...statuses]),
         sql`${appointments.id} = ${displayVisitIdSql()}`,
         placedByVisitSql(),
+        // Visits are hidden through their request.
+        visibleRows(serviceRequests, vis),
       ),
     );
 }
@@ -1643,7 +1663,8 @@ function mergePlacedRows(
 
 export async function getDispatchBoard(
   organizationId: string,
-  isoDate?: string,
+  isoDate: string | undefined,
+  vis: Visibility,
 ): Promise<DispatchBoard> {
   const date =
     isoDate && businessDayBounds(isoDate)
@@ -1656,8 +1677,8 @@ export async function getDispatchBoard(
   const range: PlacedRange = { start: bounds.start, end: bounds.end, by: "start" };
   const [technicians, requestRows, visitRows] = await Promise.all([
     getTechnicians(organizationId),
-    placedByRequestQuery(organizationId, OPEN_STATUSES, range),
-    placedByVisitQuery(organizationId, OPEN_STATUSES, range),
+    placedByRequestQuery(organizationId, OPEN_STATUSES, range, vis),
+    placedByVisitQuery(organizationId, OPEN_STATUSES, range, vis),
   ]);
 
   // Seed a bucket for each ACTIVE technician first, so jobs assigned to them
@@ -1717,7 +1738,8 @@ export async function getSchedulingCalendar(
   startIso: string,
   endIso: string,
   days: readonly string[],
-  includeCompleted = false,
+  includeCompleted: boolean,
+  vis: Visibility,
 ): Promise<SchedulingCalendar> {
   const start = new Date(startIso);
   const end = new Date(endIso);
@@ -1741,7 +1763,7 @@ export async function getSchedulingCalendar(
     // job spanning a day boundary, or a job opened just before a week view's
     // first midnight). The end bound is STRICT (gt) so a job ending exactly at
     // rangeStart belongs to the prior range, matching the booked-time feed.
-    placedByRequestQuery(organizationId, statuses, range),
+    placedByRequestQuery(organizationId, statuses, range, vis),
     // Unscheduled: open intake not yet fully placed — no tech OR no window.
     db
       .select(dashboardRequestSelect)
@@ -1756,6 +1778,7 @@ export async function getSchedulingCalendar(
             isNull(serviceRequests.assignedTo),
             isNull(serviceRequests.arrivalWindowStart),
           )!,
+          visibleRows(serviceRequests, vis),
         ),
       )
       // Urgency rank first (emergency, then high, then the rest), then
@@ -1771,7 +1794,7 @@ export async function getSchedulingCalendar(
     // Recurring working hours for every tech — drives S4 out-of-hours shading.
     getTechnicianAvailability(organizationId),
     // Requests shown by a later visit, or by the visit a hold ended.
-    placedByVisitQuery(organizationId, statuses, range),
+    placedByVisitQuery(organizationId, statuses, range, vis),
   ]);
 
   const activeTechs = technicians.filter((tech) => tech.isActive);
@@ -1822,7 +1845,8 @@ export async function getMonthCalendar(
   endIso: string,
   gridDays: readonly string[],
   month: string,
-  includeCompleted = false,
+  includeCompleted: boolean,
+  vis: Visibility,
 ): Promise<MonthCalendar> {
   const start = new Date(startIso);
   const end = new Date(endIso);
@@ -1841,8 +1865,8 @@ export async function getMonthCalendar(
     : [...OPEN_STATUSES];
   const range: PlacedRange = { start, end, by: "overlap" };
   const [requestRows, visitRows] = await Promise.all([
-    placedByRequestQuery(organizationId, statuses, range),
-    placedByVisitQuery(organizationId, statuses, range),
+    placedByRequestQuery(organizationId, statuses, range, vis),
+    placedByVisitQuery(organizationId, statuses, range, vis),
   ]);
 
   // Bucket window-ordered rows by the business day their window starts on. A row
@@ -1902,7 +1926,8 @@ function decodeAgendaCursor(
  */
 export async function getAgenda(
   organizationId: string,
-  cursor: string | null = null,
+  cursor: string | null,
+  vis: Visibility,
 ): Promise<AgendaPage> {
   // One SQL expression for the sort key so WHERE / ORDER BY / the returned cursor
   // all agree on what "when" means for a row. A raw sql() expression comes back
@@ -1948,9 +1973,17 @@ export async function getAgenda(
       and(
         eq(customers.id, serviceRequests.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
-    .where(withTenant(serviceRequests, organizationId, ...(keyset ? [keyset] : [])))
+    .where(
+      withTenant(
+        serviceRequests,
+        organizationId,
+        visibleRows(serviceRequests, vis),
+        ...(keyset ? [keyset] : []),
+      ),
+    )
     .orderBy(desc(bookedAt), desc(serviceRequests.id))
     // +1 probes for a next page without a second COUNT query.
     .limit(AGENDA_PAGE_SIZE + 1);
@@ -1990,7 +2023,7 @@ export async function getAgenda(
 
 /**
  * Every booking for one customer, newest first — the drawer's booking history.
- * Sourced from service_requests (not the service_history table, which imported
+ * Sourced from the service_requests table (not service_history, which imported
  * jobs never populate), so imported customers show their real bookings. Name +
  * address fall back to the linked customer. Tenant-scoped; small per customer,
  * so no pagination.
@@ -1998,6 +2031,7 @@ export async function getAgenda(
 export async function getCustomerBookings(
   organizationId: string,
   customerId: string,
+  vis: Visibility,
 ): Promise<readonly AgendaBooking[]> {
   const bookedAt = sql<string>`coalesce(${serviceRequests.arrivalWindowStart}, ${serviceRequests.createdAt})`;
 
@@ -2025,6 +2059,7 @@ export async function getCustomerBookings(
       and(
         eq(customers.id, serviceRequests.customerId),
         eq(customers.organizationId, organizationId),
+        visibleRows(customers, vis),
       ),
     )
     .where(
@@ -2032,6 +2067,7 @@ export async function getCustomerBookings(
         serviceRequests,
         organizationId,
         eq(serviceRequests.customerId, customerId),
+        visibleRows(serviceRequests, vis),
       ),
     )
     .orderBy(desc(bookedAt), desc(serviceRequests.id));
@@ -2066,6 +2102,7 @@ export async function getCustomerBookings(
  */
 export async function countUnscheduledRequests(
   organizationId: string,
+  vis: Visibility,
 ): Promise<number> {
   const [result] = await db
     .select({ value: count() })
@@ -2079,6 +2116,7 @@ export async function countUnscheduledRequests(
           isNull(serviceRequests.assignedTo),
           isNull(serviceRequests.arrivalWindowStart),
         )!,
+        visibleRows(serviceRequests, vis),
       ),
     );
   return result?.value ?? 0;

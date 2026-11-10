@@ -437,7 +437,7 @@
   },
   {
     "id": "src/app/api/admin/customers/[id]/bookings/route.ts#(top)",
-    "reason": "Comment match only; the read itself lives in queries.ts#getCustomerBookings (pending-requests)."
+    "reason": "Comment match only; the read itself lives in queries.ts#getCustomerBookings, which filters it."
   },
   {
     "id": "src/lib/admin/location-queries.ts#upsertCustomerLocation",

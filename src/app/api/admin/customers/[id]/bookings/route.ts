@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getCustomerBookings } from "@/lib/admin/queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -17,10 +17,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:customer-bookings:${session.userId}`,
@@ -35,7 +36,7 @@ export async function GET(
     if (!isUuid(id)) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
-    const bookings = await getCustomerBookings(session.organizationId, id);
+    const bookings = await getCustomerBookings(session.organizationId, id, viewer);
     return successResponse({ bookings });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch customer bookings");

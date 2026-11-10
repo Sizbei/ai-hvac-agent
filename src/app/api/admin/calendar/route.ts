@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getSchedulingCalendar, getMonthCalendar } from "@/lib/admin/queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -37,10 +37,11 @@ function nextIsoDate(isoDate: string): string {
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:calendar:${session.userId}`,
@@ -92,6 +93,7 @@ export async function GET(request: NextRequest) {
         days,
         businessMonthOf(date),
         includeCompleted,
+        viewer,
       );
       return successResponse(monthCalendar);
     }
@@ -102,6 +104,7 @@ export async function GET(request: NextRequest) {
       end.toISOString(),
       days,
       includeCompleted,
+      viewer,
     );
     return successResponse(calendar);
   } catch (error: unknown) {

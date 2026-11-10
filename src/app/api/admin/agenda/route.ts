@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getAgenda } from "@/lib/admin/queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -14,10 +14,11 @@ import { logger } from "@/lib/logger";
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:agenda:${session.userId}`,
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
     }
 
     const cursor = request.nextUrl.searchParams.get("cursor");
-    const page = await getAgenda(session.organizationId, cursor);
+    const page = await getAgenda(session.organizationId, cursor, viewer);
     return successResponse(page);
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch agenda");

@@ -253,6 +253,7 @@ vi.mock('./visit-move-sql', () => ({
 }));
 
 import { and } from 'drizzle-orm';
+import { VISIBLE_ONLY } from './visibility';
 import {
   getRequests,
   getRequestById,
@@ -289,7 +290,7 @@ describe('getRequests', () => {
     // First select = count query, second select = rows query
     selectResolutions = [[{ value: 0 }], []];
 
-    const result = await getRequests(ORG_ID, {});
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
     expect(result).toHaveProperty('requests');
     expect(result).toHaveProperty('total');
     expect(typeof result.total).toBe('number');
@@ -302,7 +303,7 @@ describe('getRequests', () => {
     selectResolutions = [[{ value: 0 }], []];
 
     // Should not throw when status filter is provided
-    const result = await getRequests(ORG_ID, { status: 'pending' });
+    const result = await getRequests(ORG_ID, { status: 'pending' }, VISIBLE_ONLY);
     expect(result).toHaveProperty('requests');
     expect(result).toHaveProperty('total');
   });
@@ -327,7 +328,7 @@ describe('getRequests', () => {
       ],
     ];
 
-    const result = await getRequests(ORG_ID, {});
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
     expect(result.total).toBe(2);
     expect(result.requests).toHaveLength(1);
     expect(result.requests[0]).toHaveProperty('id', 'req-1');
@@ -339,7 +340,7 @@ describe('getRequests', () => {
     const { ilike } = await import('drizzle-orm');
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { search: '  hvac_50%  ' });
+    await getRequests(ORG_ID, { search: '  hvac_50%  ' }, VISIBLE_ONLY);
 
     // Trimmed; "_" and "%" escaped; appended with a trailing "%" for prefix.
     expect(ilike).toHaveBeenCalledWith(
@@ -354,7 +355,7 @@ describe('getRequests', () => {
     vi.mocked(or).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { search: 'cf94' });
+    await getRequests(ORG_ID, { search: 'cf94' }, VISIBLE_ONLY);
     expect(ilike).toHaveBeenCalledWith(expect.anything(), 'cf94%');
     expect(ilike).toHaveBeenCalledWith(expect.anything(), 'HVAC-cf94%');
     expect(or).toHaveBeenCalled();
@@ -365,7 +366,7 @@ describe('getRequests', () => {
     vi.mocked(ilike).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { search: '   ' });
+    await getRequests(ORG_ID, { search: '   ' }, VISIBLE_ONLY);
     expect(ilike).not.toHaveBeenCalled();
   });
 
@@ -393,7 +394,7 @@ describe('getRequests', () => {
       ],
     ];
 
-    const result = await getRequests(ORG_ID, {});
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
     expect(result.requests[0].customerName).toBe('decrypted_enc_customer');
   });
 
@@ -421,7 +422,7 @@ describe('getRequests', () => {
       ],
     ];
 
-    const result = await getRequests(ORG_ID, {});
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
     expect(result.requests[0].syncedSource).toBe('fieldpulse');
   });
 
@@ -449,7 +450,7 @@ describe('getRequests', () => {
       ],
     ];
 
-    const result = await getRequests(ORG_ID, {});
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
     expect(result.requests[0].syncedSource).toBeNull();
   });
 
@@ -477,7 +478,7 @@ describe('getRequests', () => {
       ],
     ];
 
-    const result = await getRequests(ORG_ID, {});
+    const result = await getRequests(ORG_ID, {}, VISIBLE_ONLY);
     expect(result.requests[0].syncedSource).toBe('housecall');
   });
 
@@ -486,7 +487,7 @@ describe('getRequests', () => {
     vi.mocked(eq).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { urgency: 'emergency' });
+    await getRequests(ORG_ID, { urgency: 'emergency' }, VISIBLE_ONLY);
 
     // eq must have been called with the urgency column and 'emergency'
     expect(eq).toHaveBeenCalledWith('sr.urgency', 'emergency');
@@ -497,7 +498,7 @@ describe('getRequests', () => {
     vi.mocked(eq).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { urgency: 'critical' }); // not in enum
+    await getRequests(ORG_ID, { urgency: 'critical' }, VISIBLE_ONLY); // not in enum
 
     // eq should NOT be called with the urgency column
     const urgencyCalls = vi.mocked(eq).mock.calls.filter(
@@ -513,7 +514,7 @@ describe('getRequests', () => {
     selectResolutions = [[{ value: 0 }], []];
 
     const techId = '11111111-2222-3333-4444-555555555555';
-    await getRequests(ORG_ID, { assignedTo: techId });
+    await getRequests(ORG_ID, { assignedTo: techId }, VISIBLE_ONLY);
 
     expect(eq).toHaveBeenCalledWith('sr.assignedTo', techId);
   });
@@ -523,7 +524,7 @@ describe('getRequests', () => {
     vi.mocked(eq).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { assignedTo: 'tech-uuid-123' }); // malformed
+    await getRequests(ORG_ID, { assignedTo: 'tech-uuid-123' }, VISIBLE_ONLY); // malformed
 
     // The join always calls eq('sr.assignedTo', 'u.id'); assert the malformed
     // VALUE was never used as a filter condition.
@@ -539,7 +540,7 @@ describe('getRequests', () => {
     vi.mocked(eq).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { isAfterHours: true });
+    await getRequests(ORG_ID, { isAfterHours: true }, VISIBLE_ONLY);
 
     expect(eq).toHaveBeenCalledWith('sr.isAfterHours', true);
   });
@@ -549,7 +550,7 @@ describe('getRequests', () => {
     vi.mocked(eq).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { isAfterHours: false });
+    await getRequests(ORG_ID, { isAfterHours: false }, VISIBLE_ONLY);
 
     const afterHoursCalls = vi.mocked(eq).mock.calls.filter(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -563,7 +564,7 @@ describe('getRequests', () => {
     vi.mocked(desc).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, {});
+    await getRequests(ORG_ID, {}, VISIBLE_ONLY);
 
     expect(desc).toHaveBeenCalledWith('sr.createdAt');
   });
@@ -573,7 +574,7 @@ describe('getRequests', () => {
     vi.mocked(desc).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { sort: 'newest' });
+    await getRequests(ORG_ID, { sort: 'newest' }, VISIBLE_ONLY);
 
     expect(desc).toHaveBeenCalledWith('sr.createdAt');
   });
@@ -583,7 +584,7 @@ describe('getRequests', () => {
     vi.mocked(asc).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { sort: 'oldest' });
+    await getRequests(ORG_ID, { sort: 'oldest' }, VISIBLE_ONLY);
 
     expect(asc).toHaveBeenCalledWith('sr.createdAt');
   });
@@ -595,7 +596,7 @@ describe('getRequests', () => {
     vi.mocked(desc).mockClear();
     selectResolutions = [[{ value: 0 }], []];
 
-    await getRequests(ORG_ID, { sort: 'urgency' });
+    await getRequests(ORG_ID, { sort: 'urgency' }, VISIBLE_ONLY);
 
     // The CASE expression must be built via sql`...`
     expect(sql).toHaveBeenCalled();
@@ -611,7 +612,7 @@ describe('getRequests', () => {
 
     // Cast to bypass TS — simulates a bad query param reaching the helper
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await getRequests(ORG_ID, { sort: 'invalid' as any });
+    await getRequests(ORG_ID, { sort: 'invalid' as any }, VISIBLE_ONLY);
 
     expect(desc).toHaveBeenCalledWith('sr.createdAt');
   });
@@ -621,7 +622,7 @@ describe('getRequestById', () => {
   it('should return null when request not found', async () => {
     selectResolutions = [[]]; // empty array = no row found
 
-    const result = await getRequestById(ORG_ID, 'nonexistent-id');
+    const result = await getRequestById(ORG_ID, 'nonexistent-id', VISIBLE_ONLY);
     expect(result).toBeNull();
   });
 });
@@ -1118,7 +1119,7 @@ describe('getDashboardStats', () => {
       ],
     ];
 
-    const result = await getDashboardStats(ORG_ID);
+    const result = await getDashboardStats(ORG_ID, VISIBLE_ONLY);
     expect(result.pending).toBe(5);
     expect(result.assignedToday).toBe(3);
     expect(result.inProgress).toBe(2);
@@ -1145,7 +1146,7 @@ describe('getDashboardStats', () => {
       ],
     ];
 
-    const result = await getDashboardStats(ORG_ID);
+    const result = await getDashboardStats(ORG_ID, VISIBLE_ONLY);
     expect(result.afterHoursToday).toBe(0);
   });
 });
@@ -1189,7 +1190,7 @@ describe('getDashboardOverview', () => {
       [{ overdueCount: 3, overdueCents: '450000' }], // overdueInvoices
     ];
 
-    const result = await getDashboardOverview(ORG_ID);
+    const result = await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
     expect(result.stats.pending).toBe(1);
     expect(result.todaySchedule).toHaveLength(1);
     expect(result.todaySchedule[0].referenceNumber).toBe('HVAC-001');
@@ -1208,8 +1209,8 @@ describe('getDashboardOverview', () => {
   it('counts conversations needing action with the inbox query, scoped to the org', async () => {
     needsActionCountMock.mockImplementationOnce(() => Promise.resolve([{ value: '7' }]));
     selectResolutions = [[{ pending: 0 }], [], [], [], []];
-    const result = await getDashboardOverview(ORG_ID);
-    expect(needsActionCountMock).toHaveBeenCalledWith(ORG_ID);
+    const result = await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
+    expect(needsActionCountMock).toHaveBeenCalledWith(ORG_ID, VISIBLE_ONLY);
     expect(result.conversationsNeedingAction).toBe(7);
   });
 
@@ -1233,7 +1234,7 @@ describe('getDashboardOverview', () => {
       [], // overdueInvoices — empty result set (no row)
     ];
 
-    const result = await getDashboardOverview(ORG_ID);
+    const result = await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
     expect(result.overdueInvoices).toEqual({ count: 0, cents: 0 });
   });
 
@@ -1259,7 +1260,7 @@ describe('getDashboardOverview', () => {
       [{ overdueCount: 0, overdueCents: '0' }],
     ];
 
-    await getDashboardOverview(ORG_ID);
+    await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
 
     // Called with the invoices table — the exact predicate the invoices page
     // and getInvoiceSummaryStats use, not a re-implementation.
@@ -1291,7 +1292,7 @@ describe('getDashboardOverview', () => {
       [], // awaitingFollowUp
     ];
 
-    await getDashboardOverview(ORG_ID);
+    await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
     expect(isNull).toHaveBeenCalledWith('sr.assignedTo');
   });
 
@@ -1320,7 +1321,7 @@ describe('getDashboardOverview', () => {
       [], // awaitingFollowUp
     ];
 
-    await getDashboardOverview(ORG_ID);
+    await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
 
     expect(eq).toHaveBeenCalledWith('u.isActive', false);
     // The two branches must be OR'd together, not applied separately. The
@@ -1353,7 +1354,7 @@ describe('getDashboardOverview', () => {
       [],
     ];
 
-    await getDashboardOverview(ORG_ID);
+    await getDashboardOverview(ORG_ID, VISIBLE_ONLY);
 
     expect(batchCallArgs).toHaveLength(1);
     expect(batchCallArgs[0]).toHaveLength(6);
@@ -1400,7 +1401,7 @@ describe('getDispatchBoard', () => {
       ],
     ];
 
-    const board = await getDispatchBoard(ORG_ID, '2026-06-10');
+    const board = await getDispatchBoard(ORG_ID, '2026-06-10', VISIBLE_ONLY);
 
     expect(board.date).toBe('2026-06-10');
     // Only the active tech gets a column.
@@ -1422,7 +1423,7 @@ describe('getDispatchBoard', () => {
       [],
     ];
 
-    const board = await getDispatchBoard(ORG_ID, '2026-06-10');
+    const board = await getDispatchBoard(ORG_ID, '2026-06-10', VISIBLE_ONLY);
     expect(board.columns).toHaveLength(1);
     expect(board.columns[0].jobs).toEqual([]);
     expect(board.unassigned).toEqual([]);
@@ -1460,7 +1461,7 @@ describe('getDispatchBoard', () => {
       ],
     ];
 
-    const board = await getDispatchBoard(ORG_ID, '2026-06-10');
+    const board = await getDispatchBoard(ORG_ID, '2026-06-10', VISIBLE_ONLY);
     const colA = board.columns.find((c) => c.technicianId === TECH_A)!;
     const colB = board.columns.find((c) => c.technicianId === TECH_B)!;
     expect(colA.jobs.map((j) => [j.referenceNumber, j.visitEnded ?? false])).toEqual([
@@ -1480,7 +1481,7 @@ describe('getDispatchBoard', () => {
 
   it('falls back to today for an invalid date string', async () => {
     selectResolutions = [[], []];
-    const board = await getDispatchBoard(ORG_ID, 'not-a-date');
+    const board = await getDispatchBoard(ORG_ID, 'not-a-date', VISIBLE_ONLY);
     // Today's UTC date — matches the YYYY-MM-DD shape, not the bad input.
     expect(board.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(board.date).not.toBe('not-a-date');
@@ -1488,7 +1489,7 @@ describe('getDispatchBoard', () => {
 
   it('rejects overflow calendar dates and falls back to today', async () => {
     selectResolutions = [[], []];
-    const board = await getDispatchBoard(ORG_ID, '2026-02-30');
+    const board = await getDispatchBoard(ORG_ID, '2026-02-30', VISIBLE_ONLY);
     expect(board.date).not.toBe('2026-02-30');
   });
 });
@@ -1545,7 +1546,7 @@ describe('getSchedulingCalendar', () => {
       ],
     ];
 
-    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
 
     expect(calendar.days).toEqual([...DAYS]);
     // Only the active tech gets a lane.
@@ -1582,7 +1583,7 @@ describe('getSchedulingCalendar', () => {
         }),
       ],
     ];
-    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
     expect(calendar.lanes.find((l) => l.technicianId === TECH_A)!.jobs).toEqual([]);
     expect(calendar.lanes.find((l) => l.technicianId === TECH_B)!.jobs.map((j) => j.visitNumber)).toEqual([2]);
   });
@@ -1598,7 +1599,7 @@ describe('getSchedulingCalendar', () => {
       ],
     ];
 
-    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
     expect(calendar.availability).toEqual([
       { id: 'av1', technicianId: TECH_A, dayOfWeek: 1, startMinute: 480, endMinute: 1020 },
     ]);
@@ -1618,7 +1619,7 @@ describe('getSchedulingCalendar', () => {
       [],
     ];
 
-    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
 
     const ordersByUrgency = vi
       .mocked(sql)
@@ -1629,7 +1630,7 @@ describe('getSchedulingCalendar', () => {
   it('throws on an invalid range rather than querying garbage', async () => {
     selectResolutions = [[], [], []];
     await expect(
-      getSchedulingCalendar(ORG_ID, 'not-a-date', END, [...DAYS]),
+      getSchedulingCalendar(ORG_ID, 'not-a-date', END, [...DAYS], false, VISIBLE_ONLY),
     ).rejects.toThrow('Invalid calendar range');
   });
 
@@ -1651,7 +1652,7 @@ describe('getSchedulingCalendar', () => {
     vi.mocked(lt).mockClear();
     vi.mocked(gte).mockClear();
 
-    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
 
     const startInstant = new Date(START);
     const endInstant = new Date(END);
@@ -1684,7 +1685,7 @@ describe('getSchedulingCalendar', () => {
     const { inArray } = await import('drizzle-orm');
     vi.mocked(inArray).mockClear();
 
-    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
 
     // No inArray call should include 'completed' or 'cancelled' for the placed-jobs filter.
     const calls = vi.mocked(inArray).mock.calls;
@@ -1707,7 +1708,7 @@ describe('getSchedulingCalendar', () => {
     const { inArray } = await import('drizzle-orm');
     vi.mocked(inArray).mockClear();
 
-    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true);
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true, VISIBLE_ONLY);
 
     // At least one inArray call should include 'completed' and 'cancelled' (placed-jobs query).
     const calls = vi.mocked(inArray).mock.calls;
@@ -1731,7 +1732,7 @@ describe('getSchedulingCalendar', () => {
     const { inArray } = await import('drizzle-orm');
     vi.mocked(inArray).mockClear();
 
-    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true);
+    await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true, VISIBLE_ONLY);
 
     // The unscheduled queue must NEVER include terminal statuses — it uses
     // UNASSIGNED_OPEN_STATUSES (pending, scheduled) regardless of includeCompleted.
@@ -1763,7 +1764,7 @@ describe('getSchedulingCalendar', () => {
       [],
     ];
 
-    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
     const job = calendar.lanes[0]?.jobs[0];
     expect(job?.syncedSource).toBe('fieldpulse');
   });
@@ -1784,7 +1785,7 @@ describe('getSchedulingCalendar', () => {
       [],
     ];
 
-    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS]);
+    const calendar = await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], false, VISIBLE_ONLY);
     const job = calendar.lanes[0]?.jobs[0];
     expect(job?.syncedSource).toBeNull();
   });
@@ -1834,7 +1835,7 @@ describe('getMonthCalendar', () => {
       ],
     ];
 
-    const month = await getMonthCalendar(ORG_ID, START, END, [...GRID], '2026-06');
+    const month = await getMonthCalendar(ORG_ID, START, END, [...GRID], '2026-06', false, VISIBLE_ONLY);
 
     expect(month.month).toBe('2026-06');
     expect(month.days).toHaveLength(GRID.length);
@@ -1854,14 +1855,14 @@ describe('getMonthCalendar', () => {
 
   it('returns empty job arrays for days with no jobs', async () => {
     selectResolutions = [[]];
-    const month = await getMonthCalendar(ORG_ID, START, END, [...GRID], '2026-06');
+    const month = await getMonthCalendar(ORG_ID, START, END, [...GRID], '2026-06', false, VISIBLE_ONLY);
     expect(month.days.every((d) => d.jobs.length === 0)).toBe(true);
   });
 
   it('throws on an invalid range', async () => {
     selectResolutions = [[]];
     await expect(
-      getMonthCalendar(ORG_ID, 'not-a-date', END, [...GRID], '2026-06'),
+      getMonthCalendar(ORG_ID, 'not-a-date', END, [...GRID], '2026-06', false, VISIBLE_ONLY),
     ).rejects.toThrow();
   });
 });
@@ -1869,13 +1870,13 @@ describe('getMonthCalendar', () => {
 describe('countUnscheduledRequests', () => {
   it('returns the count value from the aggregate query', async () => {
     selectResolutions = [[{ value: 7 }]];
-    const result = await countUnscheduledRequests(ORG_ID);
+    const result = await countUnscheduledRequests(ORG_ID, VISIBLE_ONLY);
     expect(result).toBe(7);
   });
 
   it('defaults to 0 when the aggregate returns no row', async () => {
     selectResolutions = [[]];
-    const result = await countUnscheduledRequests(ORG_ID);
+    const result = await countUnscheduledRequests(ORG_ID, VISIBLE_ONLY);
     expect(result).toBe(0);
   });
 });

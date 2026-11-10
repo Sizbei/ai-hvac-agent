@@ -25,6 +25,7 @@ import {
   sessionChannelEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { SHOW_ALL, visibleRows, type Visibility } from "./visibility";
 import { decrypt } from "@/lib/crypto";
 import { ERASED_PLACEHOLDER } from "./report-format";
 import { notStandInSession } from "./stand-in-session";
@@ -165,7 +166,7 @@ export const needsActionSql = sql<boolean>`(
  * awaited, so callers can put it in their own db.batch. The dashboard (and the
  * nav badge) import THIS, never a copy of the SQL, so the numbers agree.
  */
-export function buildNeedsActionCountQuery(organizationId: string) {
+export function buildNeedsActionCountQuery(organizationId: string, vis: Visibility) {
   return db
     .select({ value: count() })
     .from(customerSessions)
@@ -175,6 +176,7 @@ export function buildNeedsActionCountQuery(organizationId: string) {
         organizationId,
         notStandInSession(customerSessions.token),
         needsActionSql,
+        visibleRows(customerSessions, vis),
       ),
     );
 }
@@ -302,7 +304,8 @@ export async function getConversations(
       .orderBy(desc(lastActivitySql), desc(customerSessions.id))
       .limit(limit)
       .offset(offset),
-    buildNeedsActionCountQuery(organizationId),
+    // TODO(Task 11): pass vis
+    buildNeedsActionCountQuery(organizationId, SHOW_ALL),
   ]);
 
   const total = countResult?.value ?? 0;

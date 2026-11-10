@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import {
   getRequestById,
   updateRequestStatus,
@@ -91,10 +92,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:request-get:${session.userId}`,
@@ -111,7 +113,7 @@ export async function GET(
       return errorResponse("Invalid request ID format", "INVALID_ID", 400);
     }
 
-    const detail = await getRequestById(session.organizationId, id);
+    const detail = await getRequestById(session.organizationId, id, viewer);
     if (!detail) {
       return errorResponse("Request not found", "NOT_FOUND", 404);
     }
@@ -128,10 +130,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const { id } = await params;
     if (!UUID_REGEX.test(id)) {
@@ -360,7 +363,7 @@ export async function PATCH(
       scheduleCleared = effectiveWhen === null;
     }
 
-    const detail = await getRequestById(session.organizationId, id);
+    const detail = await getRequestById(session.organizationId, id, viewer);
     if (!detail) {
       return errorResponse("Request not found", "NOT_FOUND", 404);
     }

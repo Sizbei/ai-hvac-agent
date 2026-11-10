@@ -225,6 +225,14 @@ vi.mock('@/lib/auth/session', () => ({
   deleteAdminSession: vi.fn().mockResolvedValue(undefined),
 }));
 
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock('@/lib/auth/viewer', () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
+
 vi.mock('@/lib/admin/queries', () => ({
   getRequests: (...args: unknown[]) => mockGetRequests(...args),
   assignTechnician: (...args: unknown[]) => mockAssignTechnician(...args),

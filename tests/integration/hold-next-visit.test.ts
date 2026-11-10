@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { VISIBLE_ONLY } from "@/lib/admin/visibility";
 
 vi.mock("server-only", () => ({}));
 
@@ -102,7 +103,7 @@ afterAll(async () => {
 describe("hold → schedule next visit (dev DB)", () => {
   it("a live request is placed by its own columns", async () => {
     const rid = await seedRequest(techA, dayPlus(2));
-    const detail = await q.getRequestById(org, rid);
+    const detail = await q.getRequestById(org, rid, VISIBLE_ONLY);
     expect(detail?.currentVisit).toEqual({ kind: "request" });
     expect(await cv.readVisitEnded(org, rid)).toBe(false);
   }, 60_000);
@@ -117,16 +118,16 @@ describe("hold → schedule next visit (dev DB)", () => {
     expect(v1[0].cancelled_at).not.toBeNull();
     expect(await cv.readVisitEnded(org, rid)).toBe(true);
 
-    const held = await q.getRequestById(org, rid);
+    const held = await q.getRequestById(org, rid, VISIBLE_ONLY);
     expect(held?.status).toBe("on_hold");
     expect(held?.currentVisit).toMatchObject({ kind: "ended", appointmentNumber: 1, technicianId: techA });
 
     // Calendar and dispatch: still in Junie's lane on that day, but as ENDED.
     const range = dayRange(day);
-    const cal = await q.getSchedulingCalendar(org, range.start, range.end, [day]);
+    const cal = await q.getSchedulingCalendar(org, range.start, range.end, [day], false, VISIBLE_ONLY);
     const laneA = cal.lanes.find((l) => l.technicianId === techA)!;
     expect(laneA.jobs.filter((j) => j.id === rid).map((j) => j.visitEnded)).toEqual([true]);
-    const board = await q.getDispatchBoard(org, day);
+    const board = await q.getDispatchBoard(org, day, VISIBLE_ONLY);
     expect(board.columns.find((c) => c.technicianId === techA)!.jobs.find((j) => j.id === rid)?.visitEnded).toBe(true);
 
     // The phone: Junie has no live row on this request any more.
@@ -145,7 +146,7 @@ describe("hold → schedule next visit (dev DB)", () => {
     expect(await cv.readVisitEnded(org, rid)).toBe(false);
 
     // Office: visit #2, Odessa, its own window.
-    const after = await q.getRequestById(org, rid);
+    const after = await q.getRequestById(org, rid, VISIBLE_ONLY);
     expect(after?.currentVisit).toMatchObject({
       kind: "visit", appointmentNumber: 2, technicianId: techB, technicianName: "Probe Odessa",
       arrivalWindowStart: w.start.toISOString(), arrivalWindowEnd: w.end.toISOString(),
@@ -157,12 +158,12 @@ describe("hold → schedule next visit (dev DB)", () => {
 
     // Calendar: Odessa's lane on the new day; nothing left in Junie's lane on the old day.
     const r2 = dayRange(nextDay);
-    const cal2 = await q.getSchedulingCalendar(org, r2.start, r2.end, [nextDay]);
+    const cal2 = await q.getSchedulingCalendar(org, r2.start, r2.end, [nextDay], false, VISIBLE_ONLY);
     expect(cal2.lanes.find((l) => l.technicianId === techB)!.jobs.filter((j) => j.id === rid).map((j) => j.visitNumber)).toEqual([2]);
-    const calOld = await q.getSchedulingCalendar(org, range.start, range.end, [day]);
+    const calOld = await q.getSchedulingCalendar(org, range.start, range.end, [day], false, VISIBLE_ONLY);
     expect(calOld.lanes.flatMap((l) => l.jobs).concat(calOld.unassigned).some((j) => j.id === rid)).toBe(false);
     // The list's technician column says who goes now.
-    const list = await q.getRequests(org, { page: 1, limit: 50 });
+    const list = await q.getRequests(org, { page: 1, limit: 50 }, VISIBLE_ONLY);
     expect(list.requests.find((r) => r.id === rid)?.assignedToName).toBe("Probe Odessa");
   }, 60_000);
 
@@ -174,6 +175,6 @@ describe("hold → schedule next visit (dev DB)", () => {
     const v1 = await run(sql`SELECT p.cancelled_at, a.status FROM appointments p JOIN appointment_assignments a ON a.appointment_id = p.id WHERE p.service_request_id = ${rid}`);
     expect(v1).toEqual([{ cancelled_at: null, status: "completed" }]);
     expect(await cv.readVisitEnded(org, rid)).toBe(true);
-    expect((await q.getRequestById(org, rid))?.currentVisit).toMatchObject({ kind: "ended", technicianId: techA });
+    expect((await q.getRequestById(org, rid, VISIBLE_ONLY))?.currentVisit).toMatchObject({ kind: "ended", technicianId: techA });
   }, 60_000);
 });

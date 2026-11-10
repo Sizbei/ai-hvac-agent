@@ -21,6 +21,7 @@
 import { generateText } from "ai";
 import { listPricebookItems } from "@/lib/admin/pricebook-queries";
 import { getRequestById } from "@/lib/admin/queries";
+import { SHOW_ALL } from "@/lib/admin/visibility";
 import { getExtractionModel } from "./provider";
 import { logger } from "@/lib/logger";
 
@@ -119,7 +120,8 @@ export async function suggestEstimateLineItems(
 
     const [catalog, request] = await Promise.all([
       listPricebookItems(organizationId),
-      getRequestById(organizationId, serviceRequestId),
+      // The AI drafts from any row; the suggest route is the access gate.
+      getRequestById(organizationId, serviceRequestId, SHOW_ALL),
     ]);
 
     if (!request) {

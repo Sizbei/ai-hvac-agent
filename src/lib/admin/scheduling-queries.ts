@@ -38,6 +38,7 @@ import {
   type BookingQualityResult,
 } from "@/lib/ai/dispatch/booking-quality";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "./visibility";
 import { logger } from "@/lib/logger";
 import {
   rankTechnicians,
@@ -336,6 +337,7 @@ export async function getScheduledJobsForRange(
  */
 export async function listUnscheduledRequests(
   organizationId: string,
+  vis: Visibility,
 ): Promise<readonly ScheduledJob[]> {
   const rows = await db
     .select({
@@ -357,6 +359,7 @@ export async function listUnscheduledRequests(
           isNull(serviceRequests.assignedTo),
           isNull(serviceRequests.arrivalWindowStart),
         )!,
+        visibleRows(serviceRequests, vis),
       ),
     )
     .orderBy(asc(serviceRequests.createdAt));

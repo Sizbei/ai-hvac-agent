@@ -11,6 +11,7 @@ import { asc, isNull, like, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows, type Visibility } from "./visibility";
 
 export interface DispatchException {
   readonly id: string;
@@ -25,6 +26,7 @@ const TERMINAL_STATUSES = ["completed", "cancelled"] as const;
 
 export async function getDispatchExceptions(
   organizationId: string,
+  vis: Visibility,
   limit = 20,
 ): Promise<readonly DispatchException[]> {
   const rows = await db
@@ -44,6 +46,7 @@ export async function getDispatchExceptions(
         isNull(serviceRequests.assignedTo),
         like(serviceRequests.autoDispatchOutcome, "queued_%"),
         notInArray(serviceRequests.status, [...TERMINAL_STATUSES]),
+        visibleRows(serviceRequests, vis),
       ),
     )
     .orderBy(asc(serviceRequests.createdAt))

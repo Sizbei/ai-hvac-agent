@@ -1,4 +1,4 @@
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { buildNeedsActionCountQuery } from "@/lib/admin/conversation-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -11,10 +11,11 @@ import { logger } from "@/lib/logger";
  */
 export async function GET() {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:needs-action-count:${session.userId}`,
@@ -25,7 +26,7 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const [row] = await buildNeedsActionCountQuery(session.organizationId);
+    const [row] = await buildNeedsActionCountQuery(session.organizationId, viewer);
     // neon-http may hand count() back as a string.
     return successResponse({ count: Number(row?.value ?? 0) });
   } catch (error: unknown) {

@@ -54,6 +54,7 @@ vi.mock("@/lib/db/schema", () => ({
 }));
 
 import { getDispatchExceptions } from "./dispatch-exceptions-queries";
+import { VISIBLE_ONLY } from "./visibility";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
 
@@ -74,7 +75,7 @@ describe("getDispatchExceptions", () => {
         createdAt: new Date("2026-07-20T10:00:00Z"),
       },
     ]);
-    const rows = await getDispatchExceptions(ORG);
+    const rows = await getDispatchExceptions(ORG, VISIBLE_ONLY);
     expect(rows).toEqual([
       {
         id: "r1",
@@ -97,6 +98,6 @@ describe("getDispatchExceptions", () => {
 
   it("returns [] when nothing is queued", async () => {
     selectQueue.push([]);
-    expect(await getDispatchExceptions(ORG)).toEqual([]);
+    expect(await getDispatchExceptions(ORG, VISIBLE_ONLY)).toEqual([]);
   });
 });

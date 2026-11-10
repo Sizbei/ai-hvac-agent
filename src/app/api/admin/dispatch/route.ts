@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { getDispatchBoard } from "@/lib/admin/queries";
 import { getDispatchExceptions } from "@/lib/admin/dispatch-exceptions-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -14,10 +14,11 @@ import { logger } from "@/lib/logger";
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:dispatch:${session.userId}`,
@@ -30,8 +31,8 @@ export async function GET(request: NextRequest) {
 
     const date = request.nextUrl.searchParams.get("date") ?? undefined;
     const [board, exceptions] = await Promise.all([
-      getDispatchBoard(session.organizationId, date),
-      getDispatchExceptions(session.organizationId),
+      getDispatchBoard(session.organizationId, date, viewer),
+      getDispatchExceptions(session.organizationId, viewer),
     ]);
     return successResponse({
       date: board.date,

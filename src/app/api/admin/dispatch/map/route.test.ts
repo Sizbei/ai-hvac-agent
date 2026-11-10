@@ -4,6 +4,13 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: async () => {
+    const session = await getAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
 
 vi.mock("@/lib/rate-limit", () => ({
   slidingWindow: () => ({ allowed: true }),

@@ -16,6 +16,14 @@ vi.mock('@/lib/auth/session', () => ({
   getAdminSession: () => mockGetAdminSession(),
 }));
 
+// The route reads the viewer; derive it from the session mock (an org user).
+vi.mock('@/lib/auth/viewer', () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
+
 vi.mock('@/lib/admin/queries', () => ({
   getRequests: (...args: unknown[]) => mockGetRequests(...args),
   getRequestById: (...args: unknown[]) => mockGetRequestById(...args),
@@ -103,11 +111,11 @@ describe('GET /api/admin/requests', () => {
     expect(body.data).toHaveProperty('total');
     expect(body.data).toHaveProperty('page');
     expect(body.data).toHaveProperty('limit');
-    expect(mockGetRequests).toHaveBeenCalledWith('org-001', {
-      status: undefined,
-      page: 1,
-      limit: 10,
-    });
+    expect(mockGetRequests).toHaveBeenCalledWith(
+      'org-001',
+      { status: undefined, page: 1, limit: 10 },
+      expect.objectContaining({ showHidden: false }),
+    );
   });
 
   it('should pass status filter to query function', async () => {
@@ -122,6 +130,7 @@ describe('GET /api/admin/requests', () => {
     expect(mockGetRequests).toHaveBeenCalledWith(
       'org-001',
       expect.objectContaining({ status: 'pending' }),
+      expect.objectContaining({ showHidden: false }),
     );
   });
 });

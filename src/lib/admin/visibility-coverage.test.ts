@@ -152,12 +152,12 @@ const lists = loadLists();
 const entries = [...lists.values()].flat();
 
 describe("hidden-history visibility coverage", () => {
-  it("has the five allowlist files, each entry with an id and a reason", () => {
+  it("has the remaining allowlist files, each entry with an id and a reason", () => {
+    // Each sweep deletes its pending list once it is empty (Task 10: requests).
     expect([...lists.keys()]).toEqual([
       "pending-customers.json",
       "pending-insights.json",
       "pending-money.json",
-      "pending-requests.json",
       "permanent.json",
     ]);
     for (const e of entries) {

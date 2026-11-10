@@ -1,5 +1,5 @@
 import { and, desc, eq, gt, inArray, isNotNull, sql, asc } from "drizzle-orm";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import {
@@ -11,6 +11,7 @@ import {
   invoices,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
+import { visibleRows } from "@/lib/admin/visibility";
 import { decrypt } from "@/lib/crypto";
 import { fetchAddressSuggestions } from "@/lib/address/photon";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
@@ -46,10 +47,11 @@ function safeDecrypt(v: string | null): string | null {
  * with open invoices that have a geocoded location. Admin session only.
  */
 export async function GET() {
-  const session = await getAdminSession();
-  if (!session) {
+  const viewer = await getViewerContext();
+  if (!viewer) {
     return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
   }
+  const { session } = viewer;
 
   // Rate-limit per user: same pattern as sibling dispatch/route.ts.
   // The map fires up to 25 live geocodes + decrypts 200+ jobs / 300 AR rows —
@@ -111,6 +113,7 @@ export async function GET() {
           and(
             eq(serviceRequests.customerId, customers.id),
             eq(customers.organizationId, session.organizationId),
+            visibleRows(customers, viewer),
           ),
         )
         .leftJoin(
@@ -125,6 +128,7 @@ export async function GET() {
             serviceRequests,
             session.organizationId,
             inArray(serviceRequests.status, [...IN_FLIGHT_STATUSES]),
+            visibleRows(serviceRequests, viewer),
           ),
         )
         .limit(200),
@@ -174,6 +178,7 @@ export async function GET() {
         .innerJoin(customers, and(
           eq(invoices.customerId, customers.id),
           eq(customers.organizationId, session.organizationId),
+          visibleRows(customers, viewer),
         ))
         .innerJoin(
           customerLocations,
@@ -188,6 +193,7 @@ export async function GET() {
             withTenant(invoices, session.organizationId),
             eq(invoices.state, "open"),
             gt(invoices.totalCents, sql`coalesce(${invoices.amountPaidCents}, 0)`),
+            visibleRows(invoices, viewer),
           ),
         )
         .groupBy(customers.id, customers.nameEncrypted, customerLocations.latitude, customerLocations.longitude)
