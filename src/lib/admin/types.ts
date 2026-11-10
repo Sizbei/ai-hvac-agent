@@ -516,14 +516,15 @@ export interface UpdateTechnicianInput {
   readonly isActive?: boolean;
 }
 
-/** createTechnician outcome. "forbidden": the actor may not create this email
- * (a platform admin's email, see assertMayMutateUser). */
+/** createTechnician outcome. "forbidden": the actor may not create this
+ * technician; "platform_protected": the email is a platform admin's (see
+ * assertMayMutateUser). */
 export type CreateTechnicianResult =
   | { ok: true; technician: TechnicianRecord }
-  | { ok: false; reason: "forbidden" };
+  | { ok: false; reason: "forbidden" | "platform_protected" };
 
 /** updateTechnician outcome. "not_found": no technician with that id in the org;
- * "forbidden": the row or the new email belongs to a platform admin. */
+ * "platform_protected": the row or the new email belongs to a platform admin. */
 export type UpdateTechnicianResult =
   | { ok: true; technician: TechnicianRecord }
-  | { ok: false; reason: "not_found" | "forbidden" };
+  | { ok: false; reason: "not_found" | "forbidden" | "platform_protected" };

@@ -392,7 +392,7 @@ describe('platform-admin protection', () => {
   it('resetStaffPassword refuses a platform-admin target for a non-platform actor', async () => {
     selectQueue.push([{ id: USER, role: 'super_admin', email: PLATFORM_EMAIL }]);
     const r = await resetStaffPassword(ORG, USER, 'takeover-pass', SUPER);
-    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(r).toEqual({ ok: false, reason: 'platform_protected' });
     expect(mockHash).not.toHaveBeenCalled();
   });
 
@@ -406,7 +406,7 @@ describe('platform-admin protection', () => {
   it('updateStaff refuses a role change on a platform admin', async () => {
     selectQueue.push([platformRow()]);
     const r = await updateStaff(ORG, USER, { role: 'admin' }, SUPER);
-    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(r).toEqual({ ok: false, reason: 'platform_protected' });
     expect(updateQueue.length).toBe(0);
   });
 
@@ -415,7 +415,7 @@ describe('platform-admin protection', () => {
     selectQueue.push([{ value: '3' }]); // other admins exist — not a last-admin case
     updateQueue.push([platformRow()]);
     const r = await updateStaff(ORG, USER, { isActive: false }, SUPER);
-    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(r).toEqual({ ok: false, reason: 'platform_protected' });
   });
 
   it('updateStaff still lets a super_admin edit an ordinary admin', async () => {
@@ -431,7 +431,7 @@ describe('platform-admin protection', () => {
       { name: 'Fake', email: ' R@X.com ', password: 'password123', role: 'admin' },
       SUPER,
     );
-    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(r).toEqual({ ok: false, reason: 'platform_protected' });
     expect(mockHash).not.toHaveBeenCalled();
   });
 
@@ -451,7 +451,7 @@ describe('platform-admin protection', () => {
       { email: PLATFORM_EMAIL, role: 'admin', password: 'password123' },
       SUPER,
     );
-    expect(r).toEqual({ ok: false, reason: 'forbidden' });
+    expect(r).toEqual({ ok: false, reason: 'platform_protected' });
     expect(mockHash).not.toHaveBeenCalled();
   });
 

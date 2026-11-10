@@ -1,4 +1,5 @@
 import { getAdminSession } from "@/lib/auth/session";
+import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { getTechnicians, createTechnician } from "@/lib/admin/queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -68,6 +69,13 @@ export async function POST(request: Request) {
       session,
     );
     if (!result.ok) {
+      if (result.reason === "platform_protected") {
+        return errorResponse(
+          PLATFORM_PROTECTED_MESSAGE,
+          "PLATFORM_PROTECTED",
+          403,
+        );
+      }
       return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
     const { technician } = result;

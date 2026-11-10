@@ -100,10 +100,21 @@ describe("PATCH /api/admin/staff/[id] actor", () => {
     );
   });
 
-  it("maps a refusal on a protected user to 403 FORBIDDEN", async () => {
+  it("maps a role refusal to 403 FORBIDDEN", async () => {
     updateStaff.mockResolvedValue({ ok: false, reason: "forbidden" });
     const res = await patch({ name: "Renamed" });
     expect(res.status).toBe(403);
     expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+
+  it("maps a platform admin target to 403 PLATFORM_PROTECTED with owner copy", async () => {
+    updateStaff.mockResolvedValue({ ok: false, reason: "platform_protected" });
+    const res = await patch({ name: "Renamed" });
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("PLATFORM_PROTECTED");
+    expect(json.error.message).toBe(
+      "This account is managed by the platform owner and can’t be changed here.",
+    );
   });
 });

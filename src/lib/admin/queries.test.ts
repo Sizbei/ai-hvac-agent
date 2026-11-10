@@ -1016,7 +1016,7 @@ describe('createTechnician', () => {
         email: ' R@X.com',
         password: 'password1234',
       }, ACTOR);
-      expect(result).toEqual({ ok: false, reason: 'forbidden' });
+      expect(result).toEqual({ ok: false, reason: 'platform_protected' });
       expect(mockHash).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
@@ -1078,7 +1078,7 @@ describe('updateTechnician', () => {
       selectResolutions = [[{ email: 't@x.com' }]];
       updateResolution = [updatedRow];
       const result = await updateTechnician(ORG_ID, 'tech-1', { email: 'R@x.com' }, ACTOR);
-      expect(result).toEqual({ ok: false, reason: 'forbidden' });
+      expect(result).toEqual({ ok: false, reason: 'platform_protected' });
     } finally {
       vi.unstubAllEnvs();
     }
@@ -1091,7 +1091,7 @@ describe('updateTechnician', () => {
       selectResolutions = [[{ email: 'r@x.com' }]];
       updateResolution = [updatedRow];
       const result = await updateTechnician(ORG_ID, 'tech-1', { isActive: false }, ACTOR);
-      expect(result).toEqual({ ok: false, reason: 'forbidden' });
+      expect(result).toEqual({ ok: false, reason: 'platform_protected' });
     } finally {
       vi.unstubAllEnvs();
     }

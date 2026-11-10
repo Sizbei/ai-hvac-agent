@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { resetStaffPassword } from "@/lib/admin/staff-queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -57,6 +58,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       session,
     );
     if (!result.ok) {
+      if (result.reason === "platform_protected") {
+        return errorResponse(
+          PLATFORM_PROTECTED_MESSAGE,
+          "PLATFORM_PROTECTED",
+          403,
+        );
+      }
       if (result.reason === "forbidden") {
         return errorResponse(
           "Only a super admin can reset an admin's password",

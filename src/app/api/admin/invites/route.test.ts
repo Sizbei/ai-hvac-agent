@@ -121,6 +121,18 @@ describe("POST /api/admin/invites", () => {
     expect(res.status).toBe(403);
   });
 
+  it("maps platform_protected → 403 PLATFORM_PROTECTED with owner copy", async () => {
+    getAdminSession.mockResolvedValue(SESSION);
+    createInvite.mockResolvedValue({ ok: false, reason: "platform_protected" });
+    const res = await POST(postReq({ email: "r@x.com", role: "technician" }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("PLATFORM_PROTECTED");
+    expect(json.error.message).toBe(
+      "This account is managed by the platform owner and can’t be changed here.",
+    );
+  });
+
   it("maps email_conflict → 409", async () => {
     getAdminSession.mockResolvedValue(SESSION);
     createInvite.mockResolvedValue({ ok: false, reason: "email_conflict" });

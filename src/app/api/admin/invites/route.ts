@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { createInvite, listInvites } from "@/lib/admin/invites";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -76,6 +77,12 @@ export async function POST(request: NextRequest) {
           return errorResponse(
             "Only a super admin can invite an admin",
             "FORBIDDEN",
+            403,
+          );
+        case "platform_protected":
+          return errorResponse(
+            PLATFORM_PROTECTED_MESSAGE,
+            "PLATFORM_PROTECTED",
             403,
           );
         case "email_conflict":

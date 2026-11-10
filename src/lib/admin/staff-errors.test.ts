@@ -11,6 +11,14 @@ describe("staffErrorMessage", () => {
     expect(staffErrorMessage({ error: { code: "LAST_ADMIN", message: "Cannot remove" } }, "x")).toMatch(/last active admin/);
   });
 
+  it("shows the platform-owner copy for PLATFORM_PROTECTED", () => {
+    expect(
+      staffErrorMessage({ error: { code: "PLATFORM_PROTECTED" } }, "x"),
+    ).toBe(
+      "This account is managed by the platform owner and can\u2019t be changed here.",
+    );
+  });
+
   it("uses the fallback for unknown codes and bad bodies", () => {
     expect(staffErrorMessage({ error: { code: "INTERNAL_ERROR" } }, "Couldn't save.")).toBe("Couldn't save.");
     expect(staffErrorMessage(null, "Couldn't save.")).toBe("Couldn't save.");

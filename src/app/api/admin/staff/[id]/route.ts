@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { isStaffActive, updateStaff } from "@/lib/admin/staff-queries";
 import { getSeatUsage } from "@/lib/admin/seats";
 import { seatsFull } from "@/lib/admin/seat-usage";
@@ -118,6 +119,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       switch (result.reason) {
         case "not_found":
           return errorResponse("User not found", "NOT_FOUND", 404);
+        case "platform_protected":
+          return errorResponse(
+            PLATFORM_PROTECTED_MESSAGE,
+            "PLATFORM_PROTECTED",
+            403,
+          );
         case "forbidden":
           return errorResponse(
             "Only a super admin can manage admin accounts",

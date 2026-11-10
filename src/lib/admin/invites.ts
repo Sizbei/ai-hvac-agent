@@ -85,7 +85,12 @@ export type CreateInviteResult =
   | { ok: true; invite: InviteRecord; token: string }
   | {
       ok: false;
-      reason: "forbidden" | "email_conflict" | "invite_exists" | "seat_limit";
+      reason:
+        | "forbidden"
+        | "platform_protected"
+        | "email_conflict"
+        | "invite_exists"
+        | "seat_limit";
     };
 
 /**
@@ -108,7 +113,7 @@ export async function createInvite(
   // An invite can claim or create a row for its email, so a platform admin's
   // email is never invitable by anyone but a platform admin.
   if (!assertMayMutateUser(actor, { newEmail: input.email }).ok) {
-    return { ok: false, reason: "forbidden" };
+    return { ok: false, reason: "platform_protected" };
   }
 
   const email = normalizeEmail(input.email);
@@ -436,7 +441,10 @@ export async function acceptInvite(
   );
   // A refusal (e.g. a platform admin's email invited by an org admin) never
   // falls through to claiming the existing row.
-  if (!created.ok && created.reason === "forbidden") {
+  if (
+    !created.ok &&
+    (created.reason === "forbidden" || created.reason === "platform_protected")
+  ) {
     return { ok: false, reason: "invalid" };
   }
 
@@ -458,7 +466,10 @@ export async function acceptInvite(
       },
       inviter,
     );
-    if (!claimed.ok && claimed.reason === "forbidden") {
+    if (
+      !claimed.ok &&
+      (claimed.reason === "forbidden" || claimed.reason === "platform_protected")
+    ) {
       return { ok: false, reason: "invalid" };
     }
     if (!claimed.ok) {

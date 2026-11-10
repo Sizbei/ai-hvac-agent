@@ -172,7 +172,10 @@ async function countActiveAdmins(
 
 export type CreateStaffResult =
   | { ok: true; staff: StaffRecord }
-  | { ok: false; reason: "email_conflict" | "forbidden" };
+  | {
+      ok: false;
+      reason: "email_conflict" | "forbidden" | "platform_protected";
+    };
 
 export async function createStaff(
   organizationId: string,
@@ -188,7 +191,7 @@ export async function createStaff(
     return { ok: false, reason: "forbidden" };
   }
   if (!assertMayMutateUser(actor, { newEmail: input.email }).ok) {
-    return { ok: false, reason: "forbidden" };
+    return { ok: false, reason: "platform_protected" };
   }
 
   const email = normalizeEmail(input.email);
@@ -257,7 +260,12 @@ export type UpdateStaffResult =
   | { ok: true; staff: StaffRecord }
   | {
       ok: false;
-      reason: "not_found" | "last_admin" | "no_changes" | "forbidden";
+      reason:
+        | "not_found"
+        | "last_admin"
+        | "no_changes"
+        | "forbidden"
+        | "platform_protected";
     };
 
 export async function updateStaff(
@@ -299,10 +307,10 @@ export async function updateStaff(
   const cannotManageTarget = !canManageRole(actor.role, current.role);
   const cannotAssignRole =
     input.role !== undefined && !canAssignRole(actor.role, input.role);
-  const platformProtected = !assertMayMutateUser(actor, {
-    email: current.email,
-  }).ok;
-  if (cannotManageTarget || cannotAssignRole || platformProtected) {
+  if (!assertMayMutateUser(actor, { email: current.email }).ok) {
+    return { ok: false, reason: "platform_protected" };
+  }
+  if (cannotManageTarget || cannotAssignRole) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -355,7 +363,7 @@ export async function updateStaff(
 
 export type ResetPasswordResult =
   | { ok: true }
-  | { ok: false; reason: "not_found" | "forbidden" };
+  | { ok: false; reason: "not_found" | "forbidden" | "platform_protected" };
 
 /** Reset a staff member's password to a new value. The plaintext password is
  * NEVER logged or returned — only the hash is persisted.
@@ -388,10 +396,10 @@ export async function resetStaffPassword(
   // Policy in authz.ts: managing an admin-tier target's credentials requires
   // super_admin. Without this a normal admin could plant a password on a
   // Google-only super_admin and then log in as them.
-  if (
-    !canManageRole(actor.role, current.role) ||
-    !assertMayMutateUser(actor, { email: current.email }).ok
-  ) {
+  if (!assertMayMutateUser(actor, { email: current.email }).ok) {
+    return { ok: false, reason: "platform_protected" };
+  }
+  if (!canManageRole(actor.role, current.role)) {
     return { ok: false, reason: "forbidden" };
   }
 
@@ -412,7 +420,7 @@ export async function resetStaffPassword(
 
 export type ClaimPasswordlessStaffResult =
   | { ok: true; staff: { id: string; email: string; name: string } }
-  | { ok: false; reason: "not_claimable" | "forbidden" };
+  | { ok: false; reason: "not_claimable" | "forbidden" | "platform_protected" };
 
 /**
  * Set a first password on an EXISTING password-less user — the invite-accept
@@ -428,8 +436,8 @@ export type ClaimPasswordlessStaffResult =
  * both claim; the loser reports not_claimable.
  *
  * `actor` is the invite's inviter (plan ruling 6). It must be allowed to manage
- * the user's role, and only a platform admin may claim a platform admin's row
- * (otherwise "forbidden").
+ * the user's role ("forbidden"), and only a platform admin may claim a platform
+ * admin's row ("platform_protected").
  */
 export async function claimPasswordlessStaff(
   organizationId: string,
@@ -453,10 +461,10 @@ export async function claimPasswordlessStaff(
   if (!user) {
     return { ok: false, reason: "not_claimable" };
   }
-  if (
-    !canManageRole(actor.role, user.role) ||
-    !assertMayMutateUser(actor, { email: user.email }).ok
-  ) {
+  if (!assertMayMutateUser(actor, { email: user.email }).ok) {
+    return { ok: false, reason: "platform_protected" };
+  }
+  if (!canManageRole(actor.role, user.role)) {
     return { ok: false, reason: "forbidden" };
   }
   if (

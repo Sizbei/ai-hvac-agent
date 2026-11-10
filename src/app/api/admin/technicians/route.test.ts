@@ -76,13 +76,16 @@ describe("POST /api/admin/technicians", () => {
     );
   });
 
-  it("POST 403 FORBIDDEN when the email is a platform-admin email", async () => {
-    createTechnician.mockResolvedValue({ ok: false, reason: "forbidden" });
+  it("POST 403 PLATFORM_PROTECTED when the email is a platform-admin email", async () => {
+    createTechnician.mockResolvedValue({ ok: false, reason: "platform_protected" });
     const res = await post({ ...BODY, email: "r@x.com" });
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.success).toBe(false);
-    expect(json.error.code).toBe("FORBIDDEN");
+    expect(json.error.code).toBe("PLATFORM_PROTECTED");
+    expect(json.error.message).toBe(
+      "This account is managed by the platform owner and can’t be changed here.",
+    );
     expect(logAudit).not.toHaveBeenCalled();
   });
 });

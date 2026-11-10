@@ -697,7 +697,7 @@ describe('platform-admin protection and the inviter as actor', () => {
       { email: ' R@X.com ', role: 'technician' },
       SUPER_ACTOR,
     );
-    expect(res).toEqual({ ok: false, reason: 'forbidden' });
+    expect(res).toEqual({ ok: false, reason: 'platform_protected' });
     expect(insertQueue.length).toBe(0);
   });
 
@@ -780,7 +780,7 @@ describe('platform-admin protection and the inviter as actor', () => {
   it('acceptInvite returns invalid when createStaff refuses (platform-protected email)', async () => {
     selectQueue.push([liveRow('admin', PLATFORM_EMAIL)]);
     selectQueue.push([inviterRow()]);
-    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    mockCreateStaff.mockResolvedValue({ ok: false, reason: 'platform_protected' });
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res).toEqual({ ok: false, reason: 'invalid' });
     // A refusal never falls through to claiming the existing row.
@@ -792,7 +792,7 @@ describe('platform-admin protection and the inviter as actor', () => {
     selectQueue.push([liveRow('admin', PLATFORM_EMAIL)]);
     selectQueue.push([inviterRow()]);
     mockCreateStaff.mockResolvedValue({ ok: false, reason: 'email_conflict' });
-    mockClaimPasswordlessStaff.mockResolvedValue({ ok: false, reason: 'forbidden' });
+    mockClaimPasswordlessStaff.mockResolvedValue({ ok: false, reason: 'platform_protected' });
     const res = await acceptInvite('t', { name: 'N', password: 'password1' });
     expect(res).toEqual({ ok: false, reason: 'invalid' });
   });

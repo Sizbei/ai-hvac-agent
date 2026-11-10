@@ -1,4 +1,5 @@
 import { getAdminSession } from "@/lib/auth/session";
+import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { updateTechnician } from "@/lib/admin/queries";
 import { logAudit } from "@/lib/admin/audit";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -61,6 +62,13 @@ export async function PATCH(
       session,
     );
     if (!result.ok) {
+      if (result.reason === "platform_protected") {
+        return errorResponse(
+          PLATFORM_PROTECTED_MESSAGE,
+          "PLATFORM_PROTECTED",
+          403,
+        );
+      }
       if (result.reason === "forbidden") {
         return errorResponse("Forbidden", "FORBIDDEN", 403);
       }

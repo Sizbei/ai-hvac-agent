@@ -70,11 +70,15 @@ describe("PATCH /api/admin/technicians/[id]", () => {
     );
   });
 
-  it("PATCH 403 FORBIDDEN when changing an email to a platform-admin email", async () => {
-    updateTechnician.mockResolvedValue({ ok: false, reason: "forbidden" });
+  it("PATCH 403 PLATFORM_PROTECTED when changing an email to a platform-admin email", async () => {
+    updateTechnician.mockResolvedValue({ ok: false, reason: "platform_protected" });
     const res = await patch({ email: "r@x.com" });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    const json = await res.json();
+    expect(json.error.code).toBe("PLATFORM_PROTECTED");
+    expect(json.error.message).toBe(
+      "This account is managed by the platform owner and can’t be changed here.",
+    );
     expect(logAudit).not.toHaveBeenCalled();
   });
 

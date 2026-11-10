@@ -84,12 +84,24 @@ describe("POST /api/admin/staff actor", () => {
     );
   });
 
-  it("maps a refusal (e.g. a platform-admin email) to 403 FORBIDDEN", async () => {
+  it("maps a role refusal to 403 FORBIDDEN", async () => {
     getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
     createStaff.mockResolvedValue({ ok: false, reason: "forbidden" });
     const res = await POST(postReq());
     expect(res.status).toBe(403);
     expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+
+  it("maps a platform-admin email to 403 PLATFORM_PROTECTED with owner copy", async () => {
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    createStaff.mockResolvedValue({ ok: false, reason: "platform_protected" });
+    const res = await POST(postReq());
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("PLATFORM_PROTECTED");
+    expect(json.error.message).toBe(
+      "This account is managed by the platform owner and can’t be changed here.",
+    );
   });
 });
 

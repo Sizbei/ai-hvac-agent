@@ -1099,7 +1099,7 @@ export async function createTechnician(
   actor: MutationActor,
 ): Promise<CreateTechnicianResult> {
   if (!assertMayMutateUser(actor, { newEmail: input.email }).ok) {
-    return { ok: false, reason: "forbidden" };
+    return { ok: false, reason: "platform_protected" };
   }
 
   const passwordHash = await hash(input.password, 12);
@@ -1162,7 +1162,7 @@ export async function updateTechnician(
       newEmail: input.email,
     }).ok
   ) {
-    return { ok: false, reason: "forbidden" };
+    return { ok: false, reason: "platform_protected" };
   }
 
   const updates: Record<string, unknown> = {
