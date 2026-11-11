@@ -471,6 +471,22 @@ export async function getCustomers(
   };
 }
 
+/** One-row check that the customer exists and this viewer may see it. Use it
+ * where a route only needs "is this a customer of yours" — getCustomerById
+ * reads the whole profile (8 queries). */
+export async function customerVisibleInOrg(
+  organizationId: string,
+  customerId: string,
+  vis: Visibility,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: customers.id })
+    .from(customers)
+    .where(withTenant(customers, organizationId, eq(customers.id, customerId), visibleRows(customers, vis)))
+    .limit(1);
+  return row != null;
+}
+
 export async function getCustomerById(
   organizationId: string,
   customerId: string,

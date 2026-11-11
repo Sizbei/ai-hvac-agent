@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getViewerContext } from "@/lib/auth/viewer";
-import { getCustomerById } from "@/lib/admin/crm-queries";
+import { customerVisibleInOrg, getCustomerById } from "@/lib/admin/crm-queries";
 import { isUuid } from "@/lib/validation/uuid";
 import {
   enrollCustomer,
@@ -44,12 +44,15 @@ export async function GET(
     if (!isUuid(id)) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
-    const customer = await getCustomerById(session.organizationId, id, viewer);
-    if (!customer) {
+    // Both reads are keyed by the same ids, so they run together; the
+    // membership is discarded when the customer is not this viewer's to see.
+    const [exists, membership] = await Promise.all([
+      customerVisibleInOrg(session.organizationId, id, viewer),
+      getActiveMembership(session.organizationId, id),
+    ]);
+    if (!exists) {
       return errorResponse("Customer not found", "NOT_FOUND", 404);
     }
-
-    const membership = await getActiveMembership(session.organizationId, id);
     // Surface the member's scheduled/generated maintenance visits (read-only) so
     // the detail card can list them. Only when there's an active membership.
     const visits = membership
