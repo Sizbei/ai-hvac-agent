@@ -4,13 +4,17 @@ const h = vi.hoisted(() => ({
   getTechSession: vi.fn(),
   slidingWindow: vi.fn(),
   listPricebookItemsForAdmin: vi.fn(),
+  listTechMaterialItems: vi.fn(),
 }));
 vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: h.getTechSession }));
 vi.mock("@/lib/rate-limit", async (orig) => ({
   ...(await orig<typeof import("@/lib/rate-limit")>()),
   slidingWindow: h.slidingWindow,
 }));
-vi.mock("@/lib/admin/pricebook-queries", () => ({ listPricebookItemsForAdmin: h.listPricebookItemsForAdmin }));
+vi.mock("@/lib/admin/pricebook-queries", () => ({
+  listPricebookItemsForAdmin: h.listPricebookItemsForAdmin,
+  listTechMaterialItems: h.listTechMaterialItems,
+}));
 
 import { GET } from "./route";
 import { RATE_LIMITS } from "@/lib/rate-limit";
@@ -25,6 +29,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.getTechSession.mockResolvedValue({ userId: "u1", organizationId: "o1" });
   h.slidingWindow.mockReturnValue({ allowed: true, remaining: 1, resetMs: 1 });
+  h.listTechMaterialItems.mockResolvedValue([
+    { id: "id-material-1", name: "material 1", type: "material", priceCents: 1000 },
+    { id: "id-equipment-1", name: "equipment 1", type: "equipment", priceCents: 1000 },
+  ]);
   h.listPricebookItemsForAdmin.mockImplementation(async (_org: string, o: { type?: string }) => ({
     items: o.type ? [item(o.type, 1)] : [item("service", 1), item("material", 2), item("equipment", 3)],
   }));
@@ -81,9 +89,9 @@ describe("GET /api/tech/pricebook (materials picker, unchanged)", () => {
   it("returns material and equipment items only, id/name/type/priceCents", async () => {
     const res = await GET(req());
     expect(res.status).toBe(200);
-    expect(h.listPricebookItemsForAdmin).toHaveBeenCalledTimes(2);
-    expect(h.listPricebookItemsForAdmin).toHaveBeenCalledWith("o1", { includeInactive: false, type: "material", limit: 20000 });
-    expect(h.listPricebookItemsForAdmin).toHaveBeenCalledWith("o1", { includeInactive: false, type: "equipment", limit: 20000 });
+    // One narrow query, never the admin list (which carries cost and the FieldPulse blob).
+    expect(h.listTechMaterialItems).toHaveBeenCalledWith("o1", 20000);
+    expect(h.listPricebookItemsForAdmin).not.toHaveBeenCalled();
     expect((await res.json()).data.items).toEqual([
       { id: "id-material-1", name: "material 1", type: "material", priceCents: 1000 },
       { id: "id-equipment-1", name: "equipment 1", type: "equipment", priceCents: 1000 },

@@ -434,13 +434,11 @@ async function loadTravelSignals(
   // DISTINCT ON query finds, per tech, their latest same-business-day non-cancelled
   // assigned job whose window starts before THIS job's window (read inside the
   // query via requestId) and has cached coords. A windowless scored job → no chain.
-  const chainOrigins = await loadChainOrigins(
-    organizationId,
-    requestId,
-    technicianIds,
-  );
-
-  const anchors = await loadTechAnchors(organizationId, technicianIds);
+  // The chain lookup and the anchors are independent: fetch them together.
+  const [chainOrigins, anchors] = await Promise.all([
+    loadChainOrigins(organizationId, requestId, technicianIds),
+    loadTechAnchors(organizationId, technicianIds),
+  ]);
   for (const id of technicianIds) {
     const origin = chainOrigins.get(id) ?? anchors.get(id);
     if (origin) {
@@ -560,7 +558,7 @@ async function loadChainOrigins(
     FROM service_requests scored
     JOIN service_requests pred
       ON pred.organization_id = ${organizationId}
-      AND pred.assigned_to = ANY(${technicianIds as string[]})
+      AND pred.assigned_to = ANY(${sql.param([...technicianIds])}::uuid[])
       AND pred.id <> scored.id
       AND pred.status <> 'cancelled'
       AND pred.arrival_window_start IS NOT NULL

@@ -210,19 +210,18 @@ export async function getRequests(
     ...extraConditions,
   );
 
-  // Count total matching records
-  const [countResult] = await db
+  // Count total matching records — sent together with the page query below
+  // (two round trips at once, not one after the other).
+  const countQuery = db
     .select({ value: count() })
     .from(serviceRequests)
     .where(and(baseConditions, visibleRows(serviceRequests, vis)));
-
-  const total = countResult?.value ?? 0;
 
   // Fetch paginated results with assigned technician name.
   // A left join on the customer row resolves names for FP-imported jobs (their
   // request row has customerNameEncrypted=null; the name lives on the linked
   // customer). A hidden customer contributes no name.
-  const rows = await db
+  const rowsQuery = db
     .select({
       id: serviceRequests.id,
       status: serviceRequests.status,
@@ -254,6 +253,9 @@ export async function getRequests(
     .orderBy(...resolveRequestOrderBy(filters.sort))
     .limit(limit)
     .offset(offset);
+
+  const [[countResult], rows] = await Promise.all([countQuery, rowsQuery]);
+  const total = countResult?.value ?? 0;
 
   const requests: readonly AdminRequestListRow[] = rows.map((row) => ({
     id: row.id,

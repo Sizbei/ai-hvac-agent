@@ -1,7 +1,7 @@
 /**
  * Stage 8 — pricebook + tax queries. Money in integer cents; tax in basis points.
  */
-import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pricebookItems, taxRates } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -73,6 +73,44 @@ export async function listPricebookItems(
       withTenant(pricebookItems, organizationId, eq(pricebookItems.active, true)),
     )
     .orderBy(asc(pricebookItems.name));
+}
+
+/** A physical-goods row for the technician's material picker. */
+export interface TechMaterialRow {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly priceCents: number;
+}
+
+/**
+ * Active material + equipment items for the technician's material picker:
+ * ONE query, four columns. (It used to run the full admin list twice — count,
+ * type facet and every column including the FieldPulse blob — and ship the
+ * result to a phone.) Materials first, each group by name.
+ */
+export async function listTechMaterialItems(
+  organizationId: string,
+  limit: number,
+): Promise<readonly TechMaterialRow[]> {
+  return db
+    .select({
+      id: pricebookItems.id,
+      name: pricebookItems.name,
+      type: pricebookItems.type,
+      priceCents: pricebookItems.priceCents,
+    })
+    .from(pricebookItems)
+    .where(
+      withTenant(
+        pricebookItems,
+        organizationId,
+        eq(pricebookItems.active, true),
+        inArray(pricebookItems.type, ["material", "equipment"]),
+      ),
+    )
+    .orderBy(desc(pricebookItems.type), asc(pricebookItems.name))
+    .limit(limit);
 }
 
 /**

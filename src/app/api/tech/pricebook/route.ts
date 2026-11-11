@@ -12,7 +12,7 @@
 import type { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
-import { listPricebookItemsForAdmin } from "@/lib/admin/pricebook-queries";
+import { listPricebookItemsForAdmin, listTechMaterialItems } from "@/lib/admin/pricebook-queries";
 import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -48,38 +48,14 @@ export async function GET(request: NextRequest) {
     if (params.get("scope") === "invoice") {
       return await invoiceSearch(session.organizationId, rateKeyFor(session), params.get("q") ?? "");
     }
-    // Fetch all physical goods by type — no pagination needed here since this
-    // is a small picker and we filter server-side before returning.
-    const TECH_LIMIT = 20000;
-    const VALID_TYPES = ["material", "equipment"] as const;
-    const [materialPage, equipmentPage] = await Promise.all([
-      listPricebookItemsForAdmin(session.organizationId, {
-        includeInactive: false,
-        type: VALID_TYPES[0],
-        limit: TECH_LIMIT,
-      }),
-      listPricebookItemsForAdmin(session.organizationId, {
-        includeInactive: false,
-        type: VALID_TYPES[1],
-        limit: TECH_LIMIT,
-      }),
-    ]);
-    // Warn if either result was truncated (hit the limit).
-    if (materialPage.items.length === TECH_LIMIT) {
-      logger.warn({ orgId: session.organizationId, type: "material" }, "Tech pricebook material result hit limit — catalog may be truncated");
-    }
-    if (equipmentPage.items.length === TECH_LIMIT) {
-      logger.warn({ orgId: session.organizationId, type: "equipment" }, "Tech pricebook equipment result hit limit — catalog may be truncated");
-    }
     // Only physical goods (material / equipment) belong in the job-material
     // picker. 'service' items are labor line items priced very differently —
     // exposing them here let a tech book a service-priced row as a material.
-    const items = [...materialPage.items, ...equipmentPage.items].map((i) => ({
-      id: i.id,
-      name: i.name,
-      type: i.type,
-      priceCents: i.priceCents,
-    }));
+    const TECH_LIMIT = 20000;
+    const items = await listTechMaterialItems(session.organizationId, TECH_LIMIT);
+    if (items.length === TECH_LIMIT) {
+      logger.warn({ orgId: session.organizationId }, "Tech pricebook result hit limit — catalog may be truncated");
+    }
     return successResponse({ items });
   } catch (error) {
     logger.error({ error }, "Failed to load tech pricebook");
