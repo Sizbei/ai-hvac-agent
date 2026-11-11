@@ -848,3 +848,12 @@ errors, `npx vitest run` → no drop from the live baseline.
     refresh, once a day.
   - Editing a schedule or adding a note on a FieldPulse-linked request writes
     to the FieldPulse job with no warning.
+
+## Deploy record: FieldPulse money corrected (2026-11-11, late)
+- **GitHub had switched off the scheduled workflows** (`fp-nightly-sync`, `keep-warm`, `sub-daily-crons`) after 60 days without repo activity, so no FieldPulse sync ran from Oct 13. They were re-enabled and a full sync run (43021230602). If the numbers look stale again, check `gh workflow list` first.
+- **Collected money** now counts payments by payment date, FieldPulse and native (`src/lib/admin/collected-cash.ts`). The Reports headline "Collected (last N days)" replaced "Net revenue".
+- **Invoice state** now comes from FieldPulse's status workflow (`status_id` → type), not the amounts (commit b4a826f). Before this, 13 never-sent drafts ($59,261) and 14 voided invoices ($56,407) were counted as owed.
+- Prod run: `fp-truth-backfill.mts --part invoices --prod --apply` updated 536 rows (a second dry run plans 0). An open-invoice re-pull (`pullOpenFieldpulseInvoices`) updated 204 rows with 0 failures. The `fp-hide-deleted-jobs.mts --invoices` dry run found 0 open invoices deleted in FieldPulse, so nothing was hidden.
+- Verified: visible open AR is **$192,586.59** across 195 invoices, equal to FieldPulse's Σ `amount_unpaid` on Invoiced + Sent + Partially Paid. 0 open rows carry a Draft/Paid/Void status. Invoices, Reports and Dashboard agree when viewed as Chick.
+- Lifetime FieldPulse payments on record: 2,747 payments, $2,840,773.89, May 8 2023 – Nov 9 2026. No page shows this figure.
+- Open: `accounting-export.ts` has no state filter (drafts and voids appear in the export). New dev-tooling npm advisories (promptfoo, vitest, drizzle-kit) appeared today; none ship to the site, and the audit CI job is advisory.
