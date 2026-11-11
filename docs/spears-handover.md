@@ -662,3 +662,21 @@ It exits 0 with "0 findings" when clean, and 1 otherwise.
 
 Gates before any commit: `npx tsc --noEmit` → 0, `npx eslint <changed>` → 0
 errors, `npx vitest run` → no drop from the live baseline.
+
+## Deploy record (final)
+
+| Deploy | When (UTC) | Commit | Vercel deployment | Notes |
+|---|---|---|---|---|
+| D1 | 2026-11-10 15:25 | e10d86e | ai-hvac-agent-elmzekrhq | 0059 applied; org renamed; demo admin off; owner_email set |
+| D2 | 2026-11-10 21:07 | 0ec6142 | ai-hvac-agent-afgn5d5a7 | history mode marking; onboarding reset |
+| D3 | 2026-11-11 02:58 | e3fba8d | ai-hvac-agent-70g3fhs7e | 0060 applied; P8 marking re-applied; history cutoff; onboarding reset |
+| D4 | 2026-11-11 04:01 | f4e831d | ai-hvac-agent-7ty85q4zg | 0061 applied (activity un-hides live work); final fix wave |
+
+- **Rollback:** `vercel rollback ai-hvac-agent-70g3fhs7e-rchenworkmail-3397s-projects.vercel.app` goes back to D3. Migrations stay applied, and they are all additive.
+- **Prod checks after D4:**
+  - Smoke passed.
+  - View as Chick checked the banner, welcome row, Staff (no demo users), Platform 404, setup and tour at 390, and Requests showing 220. It wrote nothing.
+  - Chick's account is active and the invite is ready.
+- **60-minute watch (Task 43):** 7 passes from 04:07Z to 05:08Z, every smoke check ok, exit 0.
+- **Gap:** `vercel logs` returned no lines, so 5xx errors were **not** counted. Check Vercel → Logs by hand for the first day, or fix CLI log access.
+- **Visible to Chick on prod:** a few FieldPulse jobs named "Test" (Oct 13). They are real FieldPulse records in Spears' account, so delete them in FieldPulse if they're unwanted.
