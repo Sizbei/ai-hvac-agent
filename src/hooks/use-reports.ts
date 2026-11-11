@@ -11,6 +11,8 @@ export interface SalesReport {
   readonly refundedCents: number;
   readonly netCollectedCents: number;
   readonly fieldpulseCollectedCents: number;
+  readonly lifetimeCollectedCents: number;
+  readonly lifetimeSinceDate: string | null;
   readonly outstandingArCents: number;
   readonly nativeArCents: number;
   readonly syncedArCents: number;

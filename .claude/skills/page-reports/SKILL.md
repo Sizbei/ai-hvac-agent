@@ -65,7 +65,9 @@ New York midnight (`lastNDaysWindow`, `src/lib/admin/collected-cash.ts`).
   (`collectedSource`, `collected-cash.ts`): FP payment rows only on FP
   invoices, native payments/refunds only on native invoices; invoice
   `amount_paid_cents` is never added. HCP stores no payments, so it is not
-  in collected. Lead-source revenue uses the same rule (by lead cohort). Lead source `unknown` reads "Not recorded"
+  in collected. "Collected, all time" (`lifetimeCollectedCents`) is the same
+  rule with no date bound (refunds included); its sublabel names the month of
+  the first counted payment (`lifetimeSublabel`, New York time). Lead-source revenue uses the same rule (by lead cohort). Lead source `unknown` reads "Not recorded"
   (`leadSourceLabel`); close-rate sublabel "N sold of M estimates".
 
 **Gotchas:**

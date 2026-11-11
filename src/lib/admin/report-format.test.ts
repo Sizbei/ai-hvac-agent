@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel, collectedTile, closeRateSublabel, leadSourceLabel } from "./report-format";
+import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel, collectedTile, closeRateSublabel, leadSourceLabel, lifetimeSublabel } from "./report-format";
 
 describe("formatRate", () => {
   it("renders a dash when nothing was decided", () => {
@@ -86,5 +86,16 @@ describe("leadSourceLabel", () => {
   it("maps known codes and humanizes unmapped ones", () => {
     expect(leadSourceLabel("repeat_customer")).toBe("Repeat customer");
     expect(leadSourceLabel("trade_show")).toBe("Trade show");
+  });
+});
+
+describe("lifetimeSublabel", () => {
+  it("names the month of the first payment in New York time", () => {
+    // 2023-05-01T02:00Z is still April 30 in New York.
+    expect(lifetimeSublabel("2023-05-01T02:00:00.000Z")).toBe("Since April 2023 · FieldPulse + here, less refunds");
+    expect(lifetimeSublabel("2023-05-08T15:00:00.000Z")).toBe("Since May 2023 · FieldPulse + here, less refunds");
+  });
+  it("says so when nothing has been collected", () => {
+    expect(lifetimeSublabel(null)).toBe("No payments recorded yet");
   });
 });
