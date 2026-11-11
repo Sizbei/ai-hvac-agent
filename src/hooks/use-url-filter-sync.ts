@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { toQueryString, fromQueryString } from '@/lib/admin/url-filters';
+import { toQueryString, fromQueryString, filterSyncSearch } from '@/lib/admin/url-filters';
 
 /**
  * Two-way sync between a page's filter state and the URL query string, using the
@@ -13,7 +13,8 @@ import { toQueryString, fromQueryString } from '@/lib/admin/url-filters';
  *   `onRestore` once so the page can seed its filter state (survives refresh +
  *   makes filtered views shareable).
  * - On every change to the serialized `params`: replaceState the URL (no
- *   navigation, no scroll, no new history entry).
+ *   navigation, no scroll, no new history entry). The quick tour's `from`,
+ *   `lesson` and `replay` params are kept (see `filterSyncSearch`).
  *
  * `params` should map query-key → already-stringified value, with '' for any
  * filter at its default (those are dropped from the URL by toQueryString).
@@ -35,12 +36,14 @@ export function useUrlFilterSync(
 
   // Write the URL whenever the serialized params change — but only after the
   // initial restore has run, so we never clobber the incoming URL with defaults.
+  // `qs` is the serialized `params`: the effect re-runs exactly when it changes.
   const qs = toQueryString(params);
   useEffect(() => {
     if (!restoredRef.current) return;
-    const next = window.location.pathname + qs;
+    const next = window.location.pathname + filterSyncSearch(params, window.location.search);
     if (next !== window.location.pathname + window.location.search) {
       window.history.replaceState(null, '', next);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qs]);
 }

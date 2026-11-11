@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ import {
   optionalGroup,
   PHASE_TITLES,
   phasesOf,
+  requiredMeta,
   showFinished,
   subtitleFor,
 } from '@/lib/admin/setup-view';
@@ -104,14 +106,18 @@ function SetupContent({
   );
 }
 
-/** Header line (onboarding spec D3): jumps to the tour section. */
+/**
+ * Header line (onboarding spec D3): jumps to the tour section. A router Link,
+ * not a bare `#learn` anchor: a browser fragment entry has no router state, so
+ * the back gesture from a "Show me" page would change the URL but not the page.
+ */
 function TourInvite() {
   return (
     <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
       New here?{' '}
-      <a href="#learn" className="font-medium text-link underline-offset-4 hover:underline">
+      <Link href="#learn" className="font-medium text-link underline-offset-4 hover:underline">
         Take the quick tour
-      </a>
+      </Link>
     </p>
   );
 }
@@ -145,7 +151,7 @@ function SetupHeader({ data, invite }: { data: OnboardingPayload | null; invite:
           className="min-w-0 max-w-48 flex-1"
         />
         <span className="shrink-0 font-mono text-[13px] tabular-nums text-foreground">
-          {requiredDone} of {requiredTotal}
+          {requiredMeta(data)}
         </span>
       </div>
     </div>

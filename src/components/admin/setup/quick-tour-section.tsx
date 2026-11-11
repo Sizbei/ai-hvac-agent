@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { CalendarDays, Check, Inbox, Receipt, Smartphone, Users, type LucideIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { IconChip } from '@/components/admin/ui/icon-chip';
 import { ProgressBar } from '@/components/admin/ui/progress-bar';
@@ -149,9 +149,9 @@ export function QuickTourSection({ tour, slow }: QuickTourSectionProps) {
               Back
             </Button>
             <div className="ml-auto flex items-center gap-2">
-              <Button variant="outline" render={<Link href={withReplay(lesson.href, replaying)} />}>
+              <Link href={withReplay(lesson.href, replaying)} className={buttonVariants({ variant: 'outline' })}>
                 Show me
-              </Button>
+              </Link>
               <Button onClick={last ? finish : () => tour.go(index + 1)}>{last ? 'Finish' : 'Next'}</Button>
             </div>
           </div>

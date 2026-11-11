@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { ContextBadge } from '@/components/admin/ui/context-badge';
@@ -12,7 +12,7 @@ import { useSetupPlacement } from '@/components/admin/setup-placement-context';
 import { useOrgName } from '@/components/admin/org-name-context';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
-import { nextRows } from '@/lib/admin/setup-view';
+import { nextRows, requiredMeta } from '@/lib/admin/setup-view';
 import {
   cardTitle,
   cardView,
@@ -63,9 +63,9 @@ function WelcomeRow({
       <p className="text-[13px] text-muted-foreground">{row.line}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 pt-1">
         <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 sm:w-auto">
-          <Button className="w-full sm:w-auto" render={<Link href={row.primary.href} />}>
+          <Link href={row.primary.href} className={buttonVariants({ className: 'w-full sm:w-auto' })}>
             {row.primary.label}
-          </Button>
+          </Link>
           {row.meta && (
             <span className="font-mono text-[13px] tabular-nums text-muted-foreground">{row.meta}</span>
           )}
@@ -91,9 +91,9 @@ function UpNext({ step, variant }: { step: DerivedStep; variant: 'outline' | 'de
         <p className="text-[13px] text-muted-foreground">{step.instruction}</p>
       ) : action.kind === 'link' ? (
         <div>
-          <Button variant={action.variant} className="w-full sm:w-auto" render={<Link href={action.href} />}>
+          <Link href={action.href} className={buttonVariants({ variant: action.variant, className: 'w-full sm:w-auto' })}>
             {action.label}
-          </Button>
+          </Link>
         </div>
       ) : null}
     </div>
@@ -209,12 +209,11 @@ export function SetupCard() {
   const welcomeOnly = state.view === 'welcome-only';
   const upNext = payload.steps.find((s) => s.id === payload.upNext);
   const more = nextRows(payload, 3).filter((s) => s.id !== payload.upNext).slice(0, 2);
-  const { requiredDone, requiredTotal } = payload.progress;
 
   return (
     <SectionCard
       title={cardTitle(state.view)}
-      meta={welcomeOnly ? undefined : `${requiredDone} of ${requiredTotal}`}
+      meta={welcomeOnly ? undefined : requiredMeta(payload)}
       action={
         welcomeOnly || welcome.hideCardDismiss ? undefined : (
           <Button

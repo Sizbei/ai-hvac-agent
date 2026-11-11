@@ -7,6 +7,7 @@ import {
   optionalGroup,
   optionalMeta,
   phasesOf,
+  requiredMeta,
   rowActionsFor,
   showFinished,
   setupStepForTab,
@@ -81,6 +82,11 @@ describe("phasesOf", () => {
       ["book_first_request", "tech_sign_in"],
     ]);
     expect(phases.map((p) => p.meta)).toEqual(["1 of 1", "0 of 1", "0 of 2"]);
+  });
+
+  it("retitles phase 3 once the first request is booked", () => {
+    expect(phasesOf(payload(["book_first_request"]))[2].title).toBe("Run requests");
+    expect(phasesOf(payload(["phone_hours"]))[2].title).toBe("Run your first request");
   });
 
   it("numbers required rows 1-4 in order", () => {
@@ -177,6 +183,12 @@ describe("subtitleFor / dismissedNote", () => {
     expect(dismissedNote(payload())).toBeNull();
   });
 
+  it("drops the first-request wording once a request is booked", () => {
+    expect(subtitleFor(payload(["phone_hours", "book_first_request"]))).toBe(
+      "A few steps left to finish setting up. Steps complete on their own · about 10 min, plus your technician's sign-in",
+    );
+  });
+
   it("shortens the subtitle and adds the note when dismissed", () => {
     const p = payload([], { dismissedAt: NOW });
     expect(subtitleFor(p)).toBe("Steps complete on their own.");
@@ -238,5 +250,14 @@ describe("setupStepForTab", () => {
     for (const tab of ["team", "", "constructor", "__proto__", "toString", "hasOwnProperty"]) {
       expect(setupStepForTab(tab)).toBeUndefined();
     }
+  });
+});
+
+describe("requiredMeta", () => {
+  it("names the noun next to the count", () => {
+    expect(requiredMeta(payload(["phone_hours", "add_technician", "book_first_request"]))).toBe(
+      "3 of 4 required steps",
+    );
+    expect(requiredMeta(payload())).toBe("0 of 4 required steps");
   });
 });
