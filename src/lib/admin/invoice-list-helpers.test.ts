@@ -24,8 +24,8 @@ describe('pageLabel', () => {
 });
 
 describe('collectedThisMonthSublabel', () => {
-  it('says synced payments are not included when the org has synced invoices', () => {
-    expect(collectedThisMonthSublabel(true)).toBe('Paid here since the 1st · FieldPulse/HCP not included');
+  it('names FieldPulse payments and payments taken here when the org has synced invoices', () => {
+    expect(collectedThisMonthSublabel(true)).toBe('Since the 1st · FieldPulse payments + payments taken here');
   });
   it('keeps the plain line otherwise', () => {
     expect(collectedThisMonthSublabel(false)).toBe('Received since the 1st, less refunds');

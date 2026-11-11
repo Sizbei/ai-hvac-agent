@@ -180,8 +180,10 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
   the receipt + drain themselves are by design (M3b).
 - Payment chips via `paymentStatusLabel` (Received / Partly refunded /
   Refunded), refund reasons via `refundReasonLabel`; never raw enums.
-- "Collected this month" = received (succeeded + refunded rows) − refunds
-  given this month, native only, one `db.batch` (`collected-this-month.test.ts`).
+- "Collected this month" = FieldPulse payments (succeeded, by payment date)
+  + native received (succeeded + refunded rows) − native refunds, from the
+  1st at New York midnight, one `db.batch` (`collected-this-month.test.ts`,
+  rule in `src/lib/admin/collected-cash.ts`).
 - Phone list: `INVOICE_ROW_GRID` shows customer+age, balance, chevron below
   `sm`; Created shows the year outside the current year (`shortIssuedDate`).
 - Document amount due is red only when past the due date
@@ -218,8 +220,8 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Line quantities via `lineQuantityLabel` (`src/lib/admin/line-quantity.ts`):
   the integer column rounds FieldPulse's 4.55 hrs to 5; the exact quantity is
   recovered from total / unit price when rounding explains the gap.
-- Collected this month stays native-only; with synced invoices its sublabel
-  says FieldPulse/HCP is not included (`collectedThisMonthSublabel`).
+- With synced invoices the Collected sublabel names both sources
+  (`collectedThisMonthSublabel`).
 
 **Gotchas:**
 - The SummaryBand is suppressed during initial load (`!isLoading`) to avoid the

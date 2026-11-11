@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { closeRateSublabel, formatRate, leadSourceLabel, netRevenueTile, visibleLeadSources } from '@/lib/admin/report-format';
+import { closeRateSublabel, formatRate, leadSourceLabel, collectedTile, visibleLeadSources } from '@/lib/admin/report-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
@@ -30,6 +30,7 @@ import { DataTableShell } from '@/components/admin/ui/data-table-shell';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { BarChart2, MapPin, Users } from 'lucide-react';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { lastNDaysWindow } from '@/lib/admin/collected-cash';
 
 const PRESETS = [
   { label: 'Last 30 days', days: 30 },
@@ -43,9 +44,10 @@ export default function ReportsPage() {
 
   // Recompute the range only when the preset changes (a fresh Date each render
   // would refetch on every render via the hook's from/to dependency).
+  // Days start at New York midnight (business timezone), so "last 30 days" is
+  // today and the 29 days before it.
   const range = useMemo(() => {
-    const to = new Date();
-    const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+    const { from, to } = lastNDaysWindow(new Date(), days);
     return { from: from.toISOString(), to: to.toISOString() };
   }, [days]);
 
@@ -58,6 +60,7 @@ export default function ReportsPage() {
     isRevalidating,
     error,
   } = useReports(range);
+  const collected = report ? collectedTile(report, days) : null;
 
   return (
     <PageShell>
@@ -93,9 +96,9 @@ export default function ReportsPage() {
       {/* Primary KPIs */}
       <StatStrip>
         <StatCard
-          label="Net revenue (period)"
-          value={report ? formatCentsExact(netRevenueTile(report).valueCents) : '—'}
-          sublabel={report ? netRevenueTile(report).sublabel : undefined}
+          label={collected?.label ?? `Collected (last ${days} days)`}
+          value={collected ? formatCentsExact(collected.valueCents) : '—'}
+          sublabel={collected?.sublabel}
           icon={DollarSign}
           intent="success"
           loading={isLoading}

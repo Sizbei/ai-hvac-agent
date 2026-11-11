@@ -10,7 +10,7 @@ export interface SalesReport {
   readonly grossCollectedCents: number;
   readonly refundedCents: number;
   readonly netCollectedCents: number;
-  readonly syncedCollectedCents: number;
+  readonly fieldpulseCollectedCents: number;
   readonly outstandingArCents: number;
   readonly nativeArCents: number;
   readonly syncedArCents: number;

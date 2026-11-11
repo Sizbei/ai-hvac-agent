@@ -45,17 +45,19 @@ describe("netCollectedCents", () => {
 });
 
 describe("collectedThisMonthCents", () => {
-  it("returns received minus refunded from one batched round trip", async () => {
-    vi.mocked(db.batch).mockResolvedValue([[{ value: "20000" }], [{ value: "5000" }]] as never);
-    await expect(collectedThisMonthCents(ORG, VISIBLE_ONLY, NOW)).resolves.toBe(15000);
+  it("returns native received minus refunded plus FieldPulse payments from one batched round trip", async () => {
+    vi.mocked(db.batch).mockResolvedValue([[{ value: "20000" }], [{ value: "5000" }], [{ value: "700000" }]] as never);
+    await expect(collectedThisMonthCents(ORG, VISIBLE_ONLY, NOW)).resolves.toBe(715000);
     expect(db.batch).toHaveBeenCalledTimes(1);
   });
 
   it("counts fully refunded payments as received and scopes both sides to the org and month", async () => {
-    vi.mocked(db.batch).mockResolvedValue([[{ value: null }], [{ value: null }]] as never);
+    vi.mocked(db.batch).mockResolvedValue([[{ value: null }], [{ value: null }], [{ value: null }]] as never);
     await collectedThisMonthCents(ORG, VISIBLE_ONLY, NOW);
     const dialect = new PgDialect();
     const [received, refunded] = wheres.map((w) => dialect.sqlToQuery(w));
+    // Month starts at New York midnight on the 1st (04:00Z in EDT), not UTC.
+    expect(received!.params).toContain("2026-11-01T04:00:00.000Z");
     expect(received!.sql).toMatch(/"payments"\."status" in/);
     expect(received!.params).toEqual(
       expect.arrayContaining([ORG, "succeeded", "refunded"]),
@@ -64,5 +66,15 @@ describe("collectedThisMonthCents", () => {
     expect(refunded!.sql).toMatch(/"refunds"\."organization_id" = /);
     expect(refunded!.sql).toMatch(/"refunds"\."created_at" >= /);
     expect(refunded!.params).toContain(ORG);
+  });
+
+  it("counts FieldPulse payment rows by payment date, settled only", async () => {
+    vi.mocked(db.batch).mockResolvedValue([[{ value: null }], [{ value: null }], [{ value: null }]] as never);
+    await collectedThisMonthCents(ORG, VISIBLE_ONLY, NOW);
+    const fp = new PgDialect().sqlToQuery(wheres[2]!);
+    expect(fp.sql).toMatch(/"fieldpulse_payment_id" is not null/);
+    expect(fp.sql).toMatch(/"payments"\."created_at" >= /);
+    expect(fp.params).toEqual(expect.arrayContaining([ORG, "succeeded"]));
+    expect(fp.params).not.toContain("refunded");
   });
 });

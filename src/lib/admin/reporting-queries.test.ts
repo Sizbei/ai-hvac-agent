@@ -116,6 +116,7 @@ vi.mock('@/lib/db/schema', () => ({
   },
   payments: {
     amountCents: 'payments.amountCents',
+    amountRefundedCents: 'payments.amountRefundedCents',
     status: 'payments.status',
     createdAt: 'payments.createdAt',
     organizationId: 'payments.org',
@@ -185,7 +186,7 @@ import { SHOW_ALL, VISIBLE_ONLY } from './visibility';
 const ORG = '00000000-0000-0000-0000-000000000001';
 
 // Selects run via Promise.all in this fixed order:
-//   1 gross  2 refund  3 ar(native+synced)  4 estimates  5 invoices  6 syncedCollected
+//   1 gross  2 refund  3 ar(native+synced)  4 estimates  5 invoices  6 fieldpulseCollected
 interface Seed {
   gross: number | string | null;
   refund: number | string | null;
@@ -199,8 +200,8 @@ interface Seed {
     dismissed?: number | string;
   };
   invoices: { created: number | string; paid: number | string };
-  /** Amount paid on FSM-synced invoices created in the period. */
-  syncedCollected?: number | string | null;
+  /** FieldPulse payment rows received in the period. */
+  fieldpulseCollected?: number | string | null;
 }
 
 function seed(s: Seed): void {
@@ -213,7 +214,7 @@ function seed(s: Seed): void {
   selectQueue.push([{ native: ar.native, synced: ar.synced }]);
   selectQueue.push([s.estimates]);
   selectQueue.push([s.invoices]);
-  selectQueue.push([{ value: s.syncedCollected ?? null }]);
+  selectQueue.push([{ value: s.fieldpulseCollected ?? null }]);
 }
 
 beforeEach(() => {
@@ -368,30 +369,49 @@ describe('getSalesReport', () => {
     expect(r.outstandingArCents).toBe(7500);
   });
 
-  it('surfaces synced collected revenue separately from native gross', async () => {
+  it('surfaces FieldPulse payments received in the period separately from native gross', async () => {
     seed({
-      gross: '40000', // native succeeded payments
+      gross: '40000', // native payments on native invoices
       refund: 0,
       ar: 0,
       estimates: { created: 0, sold: 0, expired: 0, open: 0 },
       invoices: { created: 0, paid: 0 },
-      syncedCollected: '15000', // paid on FSM-synced invoices
+      fieldpulseCollected: '15000', // FieldPulse payment rows
     });
     const r = await getSalesReport(ORG, {}, VISIBLE_ONLY);
     expect(r.grossCollectedCents).toBe(40000); // native only, unchanged
-    expect(r.syncedCollectedCents).toBe(15000); // synced, reported separately
-    // The synced-collected query (6th) filters to invoices WITH an FSM id.
-    const syncedWhere = captured[5].where;
+    expect(r.fieldpulseCollectedCents).toBe(15000);
+    const fp = captured[5];
+    // Reads PAYMENT rows by payment date — never invoice amount_paid_cents.
+    const refs = (v: Record<string, unknown>, col: string) =>
+      Object.values(v).some((x) => x === col || (Array.isArray(x) && x.includes(col)));
+    expect(hasTag([fp.columns, fp.where], (v) => refs(v, 'invoices.amountPaidCents'))).toBe(false);
+    expect(hasTag(fp.columns, (v) => refs(v, 'payments.amountRefundedCents'))).toBe(true);
     expect(
-      hasTag(
-        syncedWhere,
-        (v) =>
-          v.kind === 'sql' &&
-          Array.isArray(v.values) &&
-          (v.values as unknown[]).includes('invoices.fieldpulseInvoiceId') &&
-          (v.values as unknown[]).includes('invoices.hcpInvoiceId'),
-      ),
+      hasTag(fp.where, (v) => v.kind === 'sql' && Array.isArray(v.values) && (v.values as unknown[]).includes('payments.fieldpulsePaymentId')),
     ).toBe(true);
+    expect(hasTag(fp.where, (v) => v.kind === 'eq' && (v.args as unknown[])[1] === 'succeeded')).toBe(true);
+    expect(hasTag(fp.where, (v) => v.kind === 'gte' && (v.args as unknown[])[0] === 'payments.createdAt')).toBe(true);
+    // Only on FieldPulse invoices.
+    expect(
+      hasTag(fp.joins, (v) => v.kind === 'sql' && Array.isArray(v.values) && (v.values as unknown[]).includes('invoices.fieldpulseInvoiceId')),
+    ).toBe(true);
+  });
+
+  it('counts native payments and refunds only on native invoices (no double count with FieldPulse)', async () => {
+    seed({
+      gross: 0,
+      refund: 0,
+      ar: 0,
+      estimates: { created: 0, sold: 0, expired: 0, open: 0 },
+      invoices: { created: 0, paid: 0 },
+    });
+    await getSalesReport(ORG, {}, VISIBLE_ONLY);
+    for (const q of [captured[0], captured[1]]) {
+      expect(hasTag(q.joins, (v) => v.kind === 'isNull' && v.c === 'invoices.fieldpulseInvoiceId')).toBe(true);
+      expect(hasTag(q.joins, (v) => v.kind === 'isNull' && v.c === 'invoices.hcpInvoiceId')).toBe(true);
+    }
+    expect(hasTag(captured[1].where, (v) => v.kind === 'isNull' && v.c === 'payments.fieldpulsePaymentId')).toBe(true);
   });
 
   it('close rate = sold / (open + sold + expired); a past-expiry open estimate is bucketed expired by the query', async () => {
@@ -646,6 +666,18 @@ describe('getLeadSourceBreakdown', () => {
           ),
       ),
     ).toBe(true);
+  });
+
+  it('lead-source revenue counts FieldPulse payments only on FieldPulse invoices', async () => {
+    selectQueue.push([], [], [], []);
+    await getLeadSourceBreakdown(ORG, {}, VISIBLE_ONLY);
+    const payJoin = (captured[2].joins as Record<string, unknown>[]).find(
+      (j) => j?.kind === 'sql' && (j.values as unknown[]).includes('payments.fieldpulsePaymentId'),
+    )!;
+    expect(payJoin.text as string).toMatch(/IS NOT NULL AND \? IS NOT NULL/);
+    expect(payJoin.values as unknown[]).toEqual(
+      expect.arrayContaining(['invoices.fieldpulseInvoiceId', 'invoices.hcpInvoiceId']),
+    );
   });
 
   it('getSalesReport gross collected excludes FP payments (isNull guard)', async () => {

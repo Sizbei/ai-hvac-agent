@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel, netRevenueTile, closeRateSublabel, leadSourceLabel } from "./report-format";
+import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel, collectedTile, closeRateSublabel, leadSourceLabel } from "./report-format";
 
 describe("formatRate", () => {
   it("renders a dash when nothing was decided", () => {
@@ -58,16 +58,17 @@ describe("formatRatio", () => {
   });
 });
 
-describe("netRevenueTile", () => {
-  it("adds FieldPulse/HCP paid-to-date to money collected here and names both", () => {
-    const t = netRevenueTile({ grossCollectedCents: 338785, refundedCents: 5000, netCollectedCents: 333785, syncedCollectedCents: 246107797 });
-    expect(t.valueCents).toBe(246441582);
-    expect(t.sublabel).toBe("$2,461,077.97 paid to date on FieldPulse/HCP invoices issued in the period · $3,337.85 received here in the period, less refunds");
+describe("collectedTile", () => {
+  it("adds FieldPulse payments to money taken here and names both", () => {
+    const t = collectedTile({ grossCollectedCents: 338785, refundedCents: 5000, netCollectedCents: 333785, fieldpulseCollectedCents: 9_876_543 }, 30);
+    expect(t.label).toBe("Collected (last 30 days)");
+    expect(t.valueCents).toBe(10_210_328);
+    expect(t.sublabel).toBe("$98,765.43 FieldPulse payments + $3,337.85 taken here, less refunds");
   });
 
-  it("without synced money reads as before", () => {
-    const t = netRevenueTile({ grossCollectedCents: 10000, refundedCents: 2500, netCollectedCents: 7500, syncedCollectedCents: 0 });
-    expect(t).toEqual({ valueCents: 7500, sublabel: "$100.00 collected − $25.00 refunded" });
+  it("without FieldPulse money reads as before", () => {
+    const t = collectedTile({ grossCollectedCents: 10000, refundedCents: 2500, netCollectedCents: 7500, fieldpulseCollectedCents: 0 }, 90);
+    expect(t).toEqual({ label: "Collected (last 90 days)", valueCents: 7500, sublabel: "$100.00 collected − $25.00 refunded" });
   });
 });
 
