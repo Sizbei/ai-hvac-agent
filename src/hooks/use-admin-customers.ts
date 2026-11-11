@@ -132,21 +132,29 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
   return { customers, total, propertyTypes, isLoading, error, refetch } as const;
 }
 
+// Last profile seen per customer: reopening one (or refetching after an edit)
+// keeps it on screen while the fresh copy loads, instead of a skeleton.
+const customerDetailCache = createSwrCache<CustomerDetail>(60_000);
+
 export function useCustomerDetail(customerId: string) {
-  const [customer, setCustomer] = useState<CustomerDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [customer, setCustomer] = useState<CustomerDetail | null>(
+    () => customerDetailCache.get(customerId)?.data ?? null,
+  );
+  const [isLoading, setIsLoading] = useState(() => customerDetailCache.get(customerId) === null);
   const [error, setError] = useState<string | null>(null);
 
   const fetch_ = useCallback(async () => {
-    setIsLoading(true);
+    if (customerDetailCache.get(customerId) === null) setIsLoading(true);
     try {
       const res = await adminFetch(`/api/admin/customers/${customerId}`);
       const json = await res.json().catch(() => null);
       if (json?.success) {
         setCustomer(json.data);
+        customerDetailCache.set(customerId, json.data);
         setError(null); // clear any prior failure so a recovered refetch isn't stuck showing an error
       } else if (res.status === 404) {
         // No error text: the page shows its own "Customer not found" state.
+        customerDetailCache.invalidate(customerId);
         setCustomer(null);
         setError(null);
       } else {

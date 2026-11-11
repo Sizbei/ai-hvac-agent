@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SchedulingCalendar } from '@/lib/admin/types';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
+import { createSwrCache } from '@/lib/admin/swr-cache';
 
 export type CalendarView = 'day' | 'week' | 'month' | 'agenda';
 
@@ -14,6 +15,10 @@ interface UseSchedulingCalendarResult {
 }
 
 const POLL_INTERVAL_MS = 30_000;
+
+// Last calendar seen per date/view: a return visit paints it at once while the
+// fresh one loads, instead of a skeleton.
+const calendarCache = createSwrCache<SchedulingCalendar>(30_000);
 
 /**
  * Fetches and polls the scheduling calendar for a business-tz date (YYYY-MM-DD)
@@ -33,8 +38,11 @@ export function useSchedulingCalendar(
    * (rendered muted/non-draggable). Default false = today's behavior. */
   includeCompleted = false,
 ): UseSchedulingCalendarResult {
-  const [calendar, setCalendar] = useState<SchedulingCalendar | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const cacheKey = `${date}:${view}:${includeCompleted ? 1 : 0}`;
+  const [calendar, setCalendar] = useState<SchedulingCalendar | null>(
+    () => (enabled ? (calendarCache.get(cacheKey)?.data ?? null) : null),
+  );
+  const [isLoading, setIsLoading] = useState(() => !enabled || calendarCache.get(cacheKey) === null);
   const [error, setError] = useState<string | null>(null);
   // Latest-wins: each call increments this counter; a response only applies if
   // its captured run id still matches the current value when it resolves.
@@ -78,6 +86,7 @@ export function useSchedulingCalendar(
           prevDataRef.current = next;
           setCalendar(body.data);
         }
+        calendarCache.set(cacheKey, body.data);
         setError(null);
       }
     } catch (err) {
@@ -86,7 +95,7 @@ export function useSchedulingCalendar(
         setError('Couldn’t load the calendar.');
       }
     }
-  }, [date, view, enabled, includeCompleted]);
+  }, [date, view, enabled, includeCompleted, cacheKey]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -94,13 +103,15 @@ export function useSchedulingCalendar(
     // so a fetch started before `enabled` flipped to false can't setState on the
     // now-disabled hook when it resolves.
     isMountedRef.current = true;
-    setIsLoading(true);
-    // Clear the previous range so the page shows its skeleton (guarded on
-    // isLoading && !calendar) instead of stale lanes while the new range loads.
-    setCalendar(null);
-    // Reset the equality guard so the new range's data always repaints even if
-    // it serializes identically to the range we just cleared.
-    prevDataRef.current = null;
+    // Show this range's last-seen calendar if we have one; otherwise clear the
+    // previous range so the page shows its skeleton (guarded on
+    // isLoading && !calendar) instead of another range's lanes.
+    const cached = calendarCache.get(cacheKey)?.data ?? null;
+    setIsLoading(cached === null);
+    setCalendar(cached);
+    // Reset the equality guard to what is on screen, so the fresh calendar
+    // always repaints when it differs.
+    prevDataRef.current = cached ? JSON.stringify(cached) : null;
     void fetchCalendar().finally(() => {
       if (isMountedRef.current) setIsLoading(false);
     });
@@ -113,7 +124,7 @@ export function useSchedulingCalendar(
       isMountedRef.current = false;
       clearInterval(intervalId);
     };
-  }, [fetchCalendar, enabled]);
+  }, [fetchCalendar, enabled, cacheKey]);
 
   return { calendar, isLoading, error, refetch: fetchCalendar };
 }

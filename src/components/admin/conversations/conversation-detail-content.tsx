@@ -29,6 +29,11 @@ import {
   type MessageAuthor,
 } from '@/lib/admin/conversation-display';
 import type { ConversationDetail } from '@/lib/admin/conversation-types';
+import { createSwrCache } from '@/lib/admin/swr-cache';
+
+// Last transcript seen per conversation: going back to one you already opened
+// shows it at once while the fresh copy loads, instead of a skeleton.
+const conversationDetailCache = createSwrCache<ConversationDetail>(30_000);
 
 /**
  * Shared inner content for a single conversation: loads the detail, renders the
@@ -153,7 +158,9 @@ export function ConversationDetailContent({
   onChanged,
   canDelete = false,
 }: ConversationDetailContentProps) {
-  const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [detail, setDetail] = useState<ConversationDetail | null>(
+    () => (conversationId ? (conversationDetailCache.get(conversationId)?.data ?? null) : null),
+  );
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -177,7 +184,9 @@ export function ConversationDetailContent({
       return;
     }
 
-    setIsLoadingDetail(true);
+    const cached = conversationDetailCache.get(conversationId)?.data ?? null;
+    if (cached) setDetail(cached);
+    setIsLoadingDetail(cached === null);
     setDetailError(null);
     setIsConfirmOpen(false);
     setDeleteError(null);
@@ -206,6 +215,7 @@ export function ConversationDetailContent({
         };
         if (active && body.success) {
           setDetail(body.data);
+          conversationDetailCache.set(conversationId!, body.data);
         }
       } catch {
         if (active) setDetailError("Couldn't reach the server. Check your connection and try again.");
@@ -228,7 +238,10 @@ export function ConversationDetailContent({
       const res = await fetch(`/api/admin/conversations/${conversationId}`);
       if (!res.ok) return;
       const body = (await res.json()) as { success: boolean; data: ConversationDetail };
-      if (body.success) setDetail(body.data);
+      if (body.success) {
+        setDetail(body.data);
+        conversationDetailCache.set(conversationId, body.data);
+      }
     } catch {
       // The reply already succeeded server-side; a refresh failure here just
       // means the transcript won't visibly update until the next reload.
@@ -291,6 +304,7 @@ export function ConversationDetailContent({
       }
 
       setIsConfirmOpen(false);
+      if (conversationId) conversationDetailCache.invalidate(conversationId);
       onDeleted?.();
       onClose();
     } catch {
@@ -316,11 +330,12 @@ export function ConversationDetailContent({
         return;
       }
       const body = (await res.json()) as { success: boolean; data: { handledAt: string | null } };
-      setDetail((prev) =>
-        prev
-          ? { ...prev, handledAt: body.data.handledAt, needsAction: !handled }
-          : prev,
-      );
+      setDetail((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, handledAt: body.data.handledAt, needsAction: !handled };
+        if (conversationId) conversationDetailCache.set(conversationId, next);
+        return next;
+      });
       onChanged?.();
     } catch {
       setHandledError("Couldn't reach the server. Please try again.");
