@@ -3,7 +3,13 @@
  * money/ops decision that must be explainable, cheap, and hallucination-free.
  * All weights are constants (ML-tunable later). See the design spec.
  */
+import { formatCents } from "@/lib/admin/ops-insights-format";
 import { humanizeCode, inSentence, jobTypeLabel } from "@/lib/admin/request-labels";
+
+/** Reasons read as short sentences: first letter capitalised, nothing else touched. */
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 export interface DispatchSignals {
   readonly job: {
@@ -152,7 +158,7 @@ export function scoreTechnician(
       1 - Math.min(tech.travelMinutes, TRAVEL_CAP_MIN) / TRAVEL_CAP_MIN,
     );
     score = travelScore * W_TRAVEL + composite * (1 - W_TRAVEL);
-    travelReason = `~${Math.round(tech.travelMinutes)} min drive`;
+    travelReason = `${Math.round(tech.travelMinutes)} min drive`;
   } else if (tech.travelKm != null && Number.isFinite(tech.travelKm)) {
     const travelScore = Math.max(
       0,
@@ -187,17 +193,17 @@ export function scoreTechnician(
       ? `${plural(tech.skillJobsCompleted, `prior ${skillLabel(job)} request`, `prior ${skillLabel(job)} requests`)}`
       : `no prior ${skillLabel(job)} experience`,
   );
-  if (tech.avgRating != null) reasons.push(`${tech.avgRating.toFixed(1)}★`);
+  if (tech.avgRating != null) reasons.push(`${tech.avgRating.toFixed(1)}★ rating`);
   if (tech.conversionRate > 0) reasons.push(`${Math.round(tech.conversionRate * 100)}% close rate`);
   if (tech.avgJobRevenueCents > 0) {
-    reasons.push(`$${Math.round(tech.avgJobRevenueCents / 100)} avg ticket`);
+    reasons.push(`${formatCents(tech.avgJobRevenueCents)} avg ticket`);
   }
   reasons.push(plural(tech.sameDayJobCount, 'request that day', 'requests that day'));
 
   return {
     technicianId: tech.technicianId,
     score,
-    reasons,
+    reasons: reasons.map(sentenceCase),
     skillMatched,
     travelKm: tech.travelKm ?? null,
     travelMinutes: tech.travelMinutes ?? null,
@@ -252,7 +258,7 @@ export function rankTechnicians(
         return {
           ...ranked,
           reasons: [
-            `no matching-category history — ranked on availability/travel`,
+            sentenceCase("no matching history, so ranked on availability and travel"),
             ...ranked.reasons,
           ],
         };

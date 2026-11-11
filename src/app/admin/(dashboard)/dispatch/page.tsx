@@ -196,6 +196,7 @@ export default function DispatchPage() {
             title="Unassigned"
             isUnassigned
             jobs={board?.unassigned ?? []}
+            unscheduledCount={board?.unscheduledCount ?? 0}
             onSelect={setSelectedRequestId}
           />
           {busyColumnsFirst(board?.columns ?? []).map((column) => (
@@ -210,7 +211,7 @@ export default function DispatchPage() {
             <EmptyState
               icon={Users}
               title="No active technicians"
-              description="Add technicians under Staff to start dispatching jobs."
+              description="Add technicians under Staff to start dispatching requests."
               className="mx-auto"
               action={
                 <EmptyStateAction

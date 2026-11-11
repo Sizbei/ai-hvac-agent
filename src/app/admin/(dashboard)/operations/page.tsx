@@ -91,7 +91,7 @@ export default function OperationsPage() {
     <PageShell>
       <PageHeader
         title="Operations"
-        subtitle="How fast you reach customers, how long jobs take, and how quickly you get paid."
+        subtitle="How fast you reach customers, how long requests take, and how quickly you get paid."
         actions={
           <div className="flex gap-2">
             {PRESETS.map((preset) => (
@@ -206,6 +206,7 @@ export default function OperationsPage() {
           </div>
         ) : (
           <>
+            <SectionHeading as="h3" title="Native invoices — by age" className="mb-3" />
             <div className="space-y-3">
               {[
                 { tag: '0–30 d', cents: aging?.bucket0to30Cents ?? 0, intent: 'success' as const, label: '0 to 30 days' },

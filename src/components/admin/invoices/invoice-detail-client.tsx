@@ -461,7 +461,7 @@ export function InvoiceDetailClient({
         actions={
           <>
             <InvoiceStateBadge state={invoice.state} />
-            <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
+            <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} dueDate={invoice.dueDate?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
             {invoice.syncedSource && (
               <SyncPill source={invoice.syncedSource} size="md" />
             )}

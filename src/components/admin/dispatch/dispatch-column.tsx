@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { User, Inbox } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { UrgencyBadge } from '@/components/admin/urgency-badge';
@@ -9,6 +10,7 @@ import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { EMPTY_LANE_COPY, UNASSIGNED_EMPTY_COPY, unscheduledLinkLabel } from '@/lib/admin/dispatch-empty';
 
 interface DispatchColumnProps {
   readonly title: string;
@@ -16,6 +18,8 @@ interface DispatchColumnProps {
   readonly isUnassigned?: boolean;
   readonly jobs: readonly DashboardRequest[];
   readonly onSelect: (id: string) => void;
+  /** Open requests not yet placed; links the empty unassigned pile to the calendar. */
+  readonly unscheduledCount?: number;
 }
 
 /**
@@ -99,7 +103,9 @@ export function DispatchColumn({
   isUnassigned = false,
   jobs,
   onSelect,
+  unscheduledCount = 0,
 }: DispatchColumnProps) {
+  const unscheduledLink = isUnassigned ? unscheduledLinkLabel(unscheduledCount) : null;
   const Icon = isUnassigned ? Inbox : User;
   return (
     <Card className="flex w-72 shrink-0 flex-col p-0">
@@ -118,9 +124,16 @@ export function DispatchColumn({
       </div>
 
       {jobs.length === 0 ? (
-        <p className="py-8 text-center text-xs text-muted-foreground">
-          {isUnassigned ? 'Nothing to place' : 'No jobs'}
-        </p>
+        <div className="space-y-1 py-8 text-center text-xs text-muted-foreground">
+          <p>{isUnassigned ? UNASSIGNED_EMPTY_COPY : EMPTY_LANE_COPY}</p>
+          {unscheduledLink && (
+            <p>
+              <Link href="/admin/calendar" className="font-medium text-primary underline-offset-2 hover:underline">
+                {unscheduledLink}
+              </Link>
+            </p>
+          )}
+        </div>
       ) : (
         <div className="space-y-2 p-3">
           {jobs.map((job) => (

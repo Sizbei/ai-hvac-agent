@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +10,8 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
+import { ErrorState } from '@/components/admin/ui/error-state';
+import { detailLoadFailure, type DetailLoadFailure } from '@/lib/admin/detail-load';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { FormFieldEditor } from '@/components/admin/forms/form-field-editor';
@@ -61,7 +64,8 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
   const [submissionCount, setSubmissionCount] = useState(0);
   const [loaded, setLoaded] = useState<BuilderForm | null>(initialId === null ? newBuilderForm() : null);
   const [draft, setDraft] = useState<BuilderForm | null>(loaded);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadFailed, setLoadFailed] = useState<DetailLoadFailure | null>(null);
+  const lastLoadStatus = useRef<number | null>(null);
   const [jobTypes, setJobTypes] = useState<readonly JobTypeRecord[] | null>(null);
   const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
@@ -91,6 +95,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
 
   const loadRow = useCallback(async (id: string): Promise<{ form: FormRecord; submissionCount: number } | null> => {
     const r = await call(`/api/admin/settings/forms/${id}`);
+    lastLoadStatus.current = r.status;
     const data = (r.body as { success?: boolean; data?: { form: FormRecord; submissionCount: number } } | null);
     return r.status === 200 && data?.success && data.data ? data.data : null;
   }, []);
@@ -105,7 +110,7 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     void (async () => {
       const row = await loadRow(initialId);
       if (row) applyRow(row);
-      else setLoadFailed(true);
+      else setLoadFailed(detailLoadFailure(lastLoadStatus.current));
     })();
   }, [initialId, loadRow, applyRow]);
 
@@ -284,7 +289,19 @@ export function FormBuilderClient({ formId: initialId }: { readonly formId: stri
     return (
       <PageShell narrow>
         <PageHeader title="Form" back={{ href: '/admin/settings?tab=forms', label: 'Back to forms' }} />
-        <p role="alert" className="text-sm text-destructive">Couldn&apos;t load this form.</p>
+        {loadFailed === 'not_found' ? (
+          <ErrorState
+            title="Form not found"
+            description="This form may have been removed, or the link is out of date."
+            action={
+              <Link href="/admin/settings?tab=forms">
+                <Button variant="outline">Back to forms</Button>
+              </Link>
+            }
+          />
+        ) : (
+          <p role="alert" className="text-sm text-destructive">Couldn’t load this form.</p>
+        )}
       </PageShell>
     );
   }

@@ -99,6 +99,7 @@ import type {
   RequestNote,
 } from "./types";
 import { hash } from "bcryptjs";
+import { displayCustomerName } from "@/lib/admin/customer-name-display";
 
 function safeDecrypt(ciphertext: string | null): string | null {
   if (!ciphertext) {
@@ -260,9 +261,10 @@ export async function getRequests(
     referenceNumber: row.referenceNumber,
     // FP-imported jobs have null customerNameEncrypted; fall back to the
     // name on the linked customers row.
-    customerName:
+    customerName: displayCustomerName(
       safeDecrypt(row.customerNameEncrypted) ??
-      safeDecrypt(row.customerNameFromCustomer),
+        safeDecrypt(row.customerNameFromCustomer),
+    ),
     syncedSource:
       row.fieldpulseJobId != null
         ? "fieldpulse"
@@ -426,9 +428,10 @@ export async function getRequestById(
     referenceNumber: row.referenceNumber,
     // FP-imported jobs have null customerNameEncrypted; fall back to the
     // name on the linked customers row.
-    customerName:
+    customerName: displayCustomerName(
       safeDecrypt(row.customerNameEncrypted) ??
-      safeDecrypt(row.customerNameFromCustomer),
+        safeDecrypt(row.customerNameFromCustomer),
+    ),
     // FP/HCP-imported jobs carry no per-request PII — the contact details live
     // on the linked customers row. Fall back to it (same pattern as the name)
     // so the detail sheet shows phone/email/address for imported bookings.
@@ -1376,9 +1379,10 @@ function toDashboardRequest(row: DashboardRequestRow): DashboardRequest {
     referenceNumber: row.referenceNumber,
     // Imported jobs carry no per-request name; fall back to the linked customer
     // (correlated subquery in dashboardRequestSelect) so cards never show "Unknown".
-    customerName:
+    customerName: displayCustomerName(
       safeDecrypt(row.customerNameEncrypted) ??
-      safeDecrypt(row.customerNameFromCustomer),
+        safeDecrypt(row.customerNameFromCustomer),
+    ),
     issueType: row.issueType,
     urgency: row.urgency,
     status: row.status,
@@ -1686,10 +1690,26 @@ export async function getDispatchBoard(
   // Job cards carry the raw assignedTo id (and the current visit) so we can
   // bucket jobs into technician columns.
   const range: PlacedRange = { start: bounds.start, end: bounds.end, by: "start" };
-  const [technicians, requestRows, visitRows] = await Promise.all([
+  const [technicians, requestRows, visitRows, unscheduledRows] = await Promise.all([
     getTechnicians(organizationId),
     placedByRequestQuery(organizationId, OPEN_STATUSES, range, vis),
     placedByVisitQuery(organizationId, OPEN_STATUSES, range, vis),
+    // Same predicate as the calendar's unscheduled rail (getSchedulingCalendar).
+    db
+      .select({ value: count() })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
+          or(
+            isNull(serviceRequests.assignedTo),
+            isNull(serviceRequests.arrivalWindowStart),
+          )!,
+          visibleRows(serviceRequests, vis),
+        ),
+      ),
   ]);
 
   // Seed a bucket for each ACTIVE technician first, so jobs assigned to them
@@ -1721,6 +1741,7 @@ export async function getDispatchBoard(
     date,
     columns,
     unassigned,
+    unscheduledCount: unscheduledRows[0]?.value ?? 0,
   };
 }
 
@@ -2010,9 +2031,10 @@ export async function getAgenda(
   const bookings: readonly AgendaBooking[] = pageRows.map((row) => ({
     id: row.id,
     referenceNumber: row.referenceNumber,
-    customerName:
+    customerName: displayCustomerName(
       safeDecrypt(row.customerNameEncrypted) ??
-      safeDecrypt(row.customerNameFromCustomer),
+        safeDecrypt(row.customerNameFromCustomer),
+    ),
     address:
       safeDecrypt(row.addressEncrypted) ?? safeDecrypt(row.addressFromCustomer),
     issueType: row.issueType,
@@ -2086,9 +2108,10 @@ export async function getCustomerBookings(
   return rows.map((row) => ({
     id: row.id,
     referenceNumber: row.referenceNumber,
-    customerName:
+    customerName: displayCustomerName(
       safeDecrypt(row.customerNameEncrypted) ??
-      safeDecrypt(row.customerNameFromCustomer),
+        safeDecrypt(row.customerNameFromCustomer),
+    ),
     address:
       safeDecrypt(row.addressEncrypted) ?? safeDecrypt(row.addressFromCustomer),
     issueType: row.issueType,

@@ -69,6 +69,6 @@ it('daysPastDue counts whole days past the due date, 0 when not past', () => {
 
 it('ageLabel reads naturally for fresh invoices', () => {
   expect(ageLabel(0)).toBe('Issued today');
-  expect(ageLabel(1)).toBe('1 day');
-  expect(ageLabel(12)).toBe('12 days');
+  expect(ageLabel(1)).toBe('Issued 1 day ago');
+  expect(ageLabel(12)).toBe('Issued 12 days ago');
 });

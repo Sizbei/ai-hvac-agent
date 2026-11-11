@@ -276,7 +276,7 @@ export function DispatchMap() {
           <p className="text-[13px] font-semibold text-foreground">Dispatch map</p>
           {data && (
             <p className="text-xs text-muted-foreground">
-              <span className="font-mono tabular-nums">{data.jobs.length}</span> job
+              <span className="font-mono tabular-nums">{data.jobs.length}</span> request
               {data.jobs.length !== 1 ? 's' : ''}
               {unassignedCount > 0 && (
                 <span className="ml-1 font-medium text-warning-strong">
@@ -306,7 +306,7 @@ export function DispatchMap() {
         <Layers className="ml-1 size-3.5 shrink-0 text-foreground-faint" />
         {(
           [
-            { key: 'jobs', label: 'Jobs' },
+            { key: 'jobs', label: 'Requests' },
             { key: 'ar', label: 'Money owed' },
             { key: 'both', label: 'Both' },
           ] as { key: LayerMode; label: string }[]

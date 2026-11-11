@@ -13,3 +13,13 @@ describe("detailLoadFailure", () => {
     expect(detailLoadFailure(null)).toBe("failed");
   });
 });
+
+import { REQUEST_DETAIL_COPY } from "./detail-load";
+
+describe("REQUEST_DETAIL_COPY", () => {
+  it("keeps the not-found copy free of any retry language", () => {
+    expect(REQUEST_DETAIL_COPY.not_found).toBe("This request no longer exists or isn’t in your organization.");
+    expect(REQUEST_DETAIL_COPY.failed).toBe("Couldn’t load this request.");
+    expect(detailLoadFailure(404)).toBe("not_found");
+  });
+});

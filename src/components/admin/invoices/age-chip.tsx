@@ -40,10 +40,11 @@ export function daysPastDue(inv: InvoiceAgeDates, now: Date = new Date()): numbe
   return inv.dueDate != null ? daysBetween(new Date(inv.dueDate), now) : 0;
 }
 
-/** "Issued today" / "1 day" / "12 days" — never "0 days" or "1 days". */
+/** "Issued today" / "Issued 1 day ago" / "Issued 12 days ago" — says what the
+ * number measures, so it is never mistaken for days overdue. */
 export function ageLabel(days: number): string {
   if (days <= 0) return 'Issued today';
-  return days === 1 ? '1 day' : `${days} days`;
+  return days === 1 ? 'Issued 1 day ago' : `Issued ${days} days ago`;
 }
 
 // Status chip per the redesign spec: 3 px radius, 20 px tall, semantic

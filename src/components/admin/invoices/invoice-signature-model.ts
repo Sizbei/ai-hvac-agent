@@ -42,7 +42,7 @@ export function signatureBlock(
   let label = 'Customer signature';
   if (input.state === 'draft') {
     sig = input.requestSignature;
-    label = 'Job signature (not yet on the invoice)';
+    label = 'Request signature (not yet on the invoice)';
   } else if (FINALIZED.has(input.state)) {
     sig = input.signature;
   }

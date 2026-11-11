@@ -4,7 +4,7 @@ import { Wind } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCentsExact } from '@/lib/admin/money-format';
 import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
-import { invoiceDocModel } from './invoice-document-model';
+import { docDateLabel, invoiceDocModel } from './invoice-document-model';
 import { signatureBlock, type DocumentSignature } from './invoice-signature-model';
 
 export interface OrgIdentity {
@@ -84,8 +84,8 @@ export function InvoiceDocument({
             {m.serviceDate && (
               <MetaRow label="Service date" value={fmt(m.serviceDate)} />
             )}
-            <MetaRow label="Invoice date" value={fmt(m.invoiceDate)} />
-            <MetaRow label="Due date" value={m.derivedNetTerms ? `${fmt(m.dueDate)} · Net 30` : fmt(m.dueDate)} />
+            <MetaRow label="Invoice date" value={docDateLabel(m.invoiceDate, m.invoiceDateIsSource)} />
+            <MetaRow label="Due date" value={m.derivedNetTerms ? `${docDateLabel(m.dueDate, m.invoiceDateIsSource)} · Net 30` : docDateLabel(m.dueDate, true)} />
             {/* Amount due — prominent row */}
             <div className="flex items-center justify-between gap-6 border-t-[1.5px] px-4 py-3">
               <span className="text-sm font-bold text-foreground">Amount due</span>
@@ -106,7 +106,7 @@ export function InvoiceDocument({
           <div className="mt-8 flex flex-wrap justify-between gap-8">
             {m.showTechnician && (
               <div>
-                <PartyLabel>Job performed by</PartyLabel>
+                <PartyLabel>Performed by</PartyLabel>
                 <p className="text-sm font-semibold text-foreground">
                   {invoice.technicianName}
                 </p>

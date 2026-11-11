@@ -48,3 +48,14 @@ it('a balance that is not yet due is not overdue (no red on a fresh invoice)', (
   expect(invoiceDocModel(base, now).isOverdue).toBe(false);
   expect(invoiceDocModel(base, new Date('2026-06-01')).isOverdue).toBe(true);
 });
+
+import { docDateLabel } from './invoice-document-model';
+
+it('renders a UTC-pinned source date on its own day, whatever the viewer zone', () => {
+  // Midnight UTC is the evening before in US zones; pinned dates must not slip.
+  expect(docDateLabel(new Date('2026-08-11T00:00:00.000Z'), true)).toBe('Aug 11, 2026');
+});
+it('flags a source-issued invoice date vs a native row-creation date', () => {
+  expect(invoiceDocModel({ ...base, issuedAt: new Date('2026-08-11T00:00:00Z') }).invoiceDateIsSource).toBe(true);
+  expect(invoiceDocModel(base).invoiceDateIsSource).toBe(false);
+});

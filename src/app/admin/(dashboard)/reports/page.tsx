@@ -274,7 +274,7 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
   return (
     <SectionCard
       title="By location"
-      description="Jobs and rating rolled up by service location. Revenue is billed (invoiced), not cash collected."
+      description="Requests and rating rolled up by service location. Revenue is billed (invoiced), not cash collected."
     >
       {isLoading ? (
         <div className="space-y-2">
@@ -286,7 +286,7 @@ function LocationTable({ rows, isLoading }: LocationTableProps) {
         <DataTableShell
           columns={[
             { key: 'location', header: 'Location', cell: (row) => <span className="font-medium">{row.label}</span> },
-            { key: 'jobs', header: 'Jobs', cell: (row) => <span className="tabular-nums">{row.jobs}</span>, className: 'text-right' },
+            { key: 'jobs', header: 'Requests', cell: (row) => <span className="tabular-nums">{row.jobs}</span>, className: 'text-right' },
             { key: 'avgRating', header: 'Avg rating', cell: (row) => <span className="tabular-nums">{formatRating(row.avgRating)}</span>, className: PHONE_HIDDEN },
             { key: 'revenue', header: 'Revenue', cell: (row) => <span className="font-medium tabular-nums">{formatCentsExact(row.revenueCents)}</span>, className: 'text-right' },
           ]}
@@ -314,7 +314,7 @@ function TechnicianTable({ rows, isLoading }: TechnicianTableProps) {
   return (
     <SectionCard
       title="Technician scorecards"
-      description="Jobs, labor, and rating per technician. Revenue is billed (invoiced), not cash collected. Completed reads “done of assigned”. A dash means the data wasn't captured for that metric."
+      description="Requests, labor, and rating per technician. Revenue is billed (invoiced), not cash collected. Completed reads “done of assigned”. A dash means the data wasn't captured for that metric."
     >
       {isLoading ? (
         <div className="space-y-2">
