@@ -793,3 +793,33 @@ errors, `npx vitest run` → no drop from the live baseline.
 - **60-minute watch (Task 43):** 7 passes from 04:07Z to 05:08Z, every smoke check ok, exit 0.
 - **Gap:** `vercel logs` returned no lines, so 5xx errors were **not** counted. Check Vercel → Logs by hand for the first day, or fix CLI log access.
 - **Visible to Chick on prod:** a few FieldPulse jobs named "Test" (Oct 13). They are real FieldPulse records in Spears' account, so delete them in FieldPulse if they're unwanted.
+
+## Deploy record: FieldPulse history shown (2026-11-11)
+
+- D5 `cf8079b` → `ai-hvac-agent-4wn1nkwea`. FieldPulse history is shown with
+  polished display, the Spears logo, the walkthrough video, a professional
+  sweep and the go-live scripts. Smoke tests pass; the logo and video are served.
+- Prod run, in the documented order (undo records in `~/.hvac-golive/`
+  on rchen's machine). Before the run, the columns the scripts touch were
+  backed up to `~/.hvac-golive/prod-backup-before-fp-show-*.json`.
+  1. `--unhide-fieldpulse`: 3,033 invoices, 104 estimates, 269 requests and
+     2,517 customers restored. One native-only customer was left hidden.
+  2. junk: 16 requests, 6 invoices (including FieldPulse invoice 20923248,
+     $27.38 open on the "Test" job), 6 estimates, 4 sessions, 8 customers and
+     4 pricebook items hidden. Kept for review: the paid $110 invoice on
+     "Buy a paint bucket" (FieldPulse 21372544, real money, so not hidden) and
+     2 customers with priced work.
+  3. backfill: 211 estimate statuses (48 sold, all with recorded acceptance;
+     26 rejected or lost), 2,201 customers set to commercial, 3 requests and
+     2,673 customers re-dated earlier, and 1 after-hours flag corrected.
+  4. deleted jobs: 62 requests whose FieldPulse job is gone are hidden, plus 5
+     sessions.
+  5. polish: 12 demo pricebook items and Comfort Club turned off, 13 template
+     names fixed, brand colour set to `#16264a`. `logo_url` is set to
+     `/brand/spears-logo.png` on prod.
+- Visible to Chick after the run: 411 requests, 2,727 customers, 3,265
+  invoices and 206 estimates. Open AR reads $371,948.70 across 237 invoices,
+  of which $323,515.99 is overdue (from FieldPulse); worth a sanity check with
+  Chick.
+- Checked as Chick on prod: dashboard, setup with video, requests, customers
+  (390 px), invoices and calendar.
