@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { BANNER_DONE, bannerText, cardFinished, cardHidden, cardTitle, cardView, upNextAction } from "./setup-card-view";
+import {
+  BANNER_DONE,
+  bannerText,
+  cardFinished,
+  cardHidden,
+  cardTitle,
+  cardView,
+  skeletonTitle,
+  upNextAction,
+} from "./setup-card-view";
 import type { AdminGuidePayload } from "./admin-guide-state";
 import { STEP_DEFS, type DerivedStep, type OnboardingPayload } from "./onboarding-steps";
 
@@ -187,6 +196,16 @@ describe("cardTitle", () => {
     expect(cardTitle("full")).toBe("Setup guide");
     expect(cardTitle("finished")).toBe("Setup guide");
     expect(cardTitle("skeleton")).toBe("Setup guide");
+  });
+});
+
+describe("skeletonTitle", () => {
+  it("is the title the loaded card lands on: the checklist's unless this session hid it", () => {
+    expect(skeletonTitle({})).toBe("Setup guide");
+    // A demo-org session that dismissed or finished the checklist can only land
+    // on the welcome row, titled "Getting started".
+    expect(skeletonTitle({ dismissed: true })).toBe("Getting started");
+    expect(skeletonTitle({ completedSeen: true })).toBe("Getting started");
   });
 });
 

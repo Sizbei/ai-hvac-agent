@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getViewerContext } from "@/lib/auth/viewer";
 import { listReviews, getReviewStats } from "@/lib/reviews/review-queries";
+import { historyContactOrFallback } from "@/lib/admin/admin-guide-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
@@ -28,17 +29,21 @@ export async function GET(request: NextRequest) {
     const rawLimit = Number(sp.get('limit') ?? '50');
     const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 200) : 50;
 
-    const [{ reviews, total }, stats] = await Promise.all([
+    const reviewTextsOn = viewer.features.reviewRequests;
+    const [{ reviews, total }, stats, historyContact] = await Promise.all([
       listReviews(session.organizationId, { page, limit }, viewer),
       getReviewStats(session.organizationId, viewer),
+      reviewTextsOn ? null : historyContactOrFallback(session.organizationId),
     ]);
 
-    // The page words its empty state by the org's switch (P8 M9).
+    // The page words its subtitle and empty state by the org's switch (P8 M9);
+    // when off it names who can turn review texts on.
     return successResponse({
       reviews,
       total,
       stats,
-      reviewTextsOn: viewer.features.reviewRequests,
+      reviewTextsOn,
+      historyContact,
     });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to load reviews");

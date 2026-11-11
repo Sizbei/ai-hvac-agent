@@ -1,6 +1,8 @@
 'use client';
 
 import { staffErrorMessage } from '@/lib/admin/staff-errors';
+import { seatLimitError } from '@/lib/admin/billing-entry';
+import { useBillingEntry } from '@/components/admin/billing-entry-context';
 import { inviteResultView, type InviteResultView } from '@/lib/admin/invite-result-view';
 import { useState, useEffect, useRef } from 'react';
 import { Copy, Check } from 'lucide-react';
@@ -40,6 +42,7 @@ export function InviteDialog({
   onSuccess,
   canInviteAdmins,
 }: InviteDialogProps) {
+  const seatLimitCopy = seatLimitError(useBillingEntry());
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<InviteRole>('technician');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -79,7 +82,7 @@ export function InviteDialog({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.success) {
-        setError(staffErrorMessage(body, "Couldn’t create the invite. Please try again."));
+        setError(staffErrorMessage(body, "Couldn’t create the invite. Please try again.", seatLimitCopy));
         return;
       }
       setResult(

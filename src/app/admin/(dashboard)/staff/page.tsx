@@ -24,7 +24,9 @@ import { useOpenFromParam } from '@/hooks/use-open-from-param';
 import { refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { BannerEvent } from '@/lib/admin/setup-card-view';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
-import { SEAT_LIMIT_COPY, seatsFull, seatUsageCopy } from '@/lib/admin/seat-usage';
+import { seatsFull, seatUsageCopy } from '@/lib/admin/seat-usage';
+import { seatLimitNotice, showsBillingLink } from '@/lib/admin/billing-entry';
+import { useBillingEntry } from '@/components/admin/billing-entry-context';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 import { listViewState } from '@/lib/admin/list-view-state';
@@ -36,6 +38,8 @@ export default function StaffPage() {
   const { staff, currentUserId, seats, isLoading, error, refetch } = useAdminStaff();
   // Same rule the server applies to invites and direct creation.
   const noFreeSeats = seats !== null && seatsFull(seats);
+  // Same view as /admin/settings/billing: plans link, or who handles billing.
+  const billingEntry = useBillingEntry();
   // The current user appears in their own staff list; derive whether they're a
   // super_admin so the UI only offers admin-tier role options to those allowed
   // to assign them. The server is the authoritative guard regardless.
@@ -143,8 +147,8 @@ export default function StaffPage() {
           {noFreeSeats && (
             <>
               {' '}
-              {SEAT_LIMIT_COPY}
-              {canManageAdmins && (
+              {seatLimitNotice(billingEntry)}
+              {showsBillingLink(billingEntry) && (
                 <>
                   {' '}
                   <Link href="/admin/settings/billing" className="font-medium underline underline-offset-2">

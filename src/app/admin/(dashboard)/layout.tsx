@@ -7,6 +7,7 @@ import { getViewerContext } from '@/lib/auth/viewer';
 import { previewBannerLine } from '@/lib/admin/preview-banner-copy';
 import { shownPreview } from '@/lib/admin/preview-sync';
 import { chipIdentity, seesPlatformUi } from '@/lib/admin/preview-view';
+import { resolveBillingEntry } from '@/lib/admin/billing-entry-server';
 import { db } from '@/lib/db';
 import { organizations, organizationSettings } from '@/lib/db/schema';
 import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
@@ -48,7 +49,10 @@ export default async function DashboardLayout({
     redirect('/admin/login');
   }
   const { session } = viewer;
-  const [{ billingAttention, orgName, mapEnabled }, setupPlacement] = await orgReads;
+  const [[{ billingAttention, orgName, mapEnabled }, setupPlacement], billingEntry] = await Promise.all([
+    orgReads,
+    resolveBillingEntry(viewer),
+  ]);
 
   // While previewing, the chip shows the target (m14); the banner names the real viewer's mode.
   const chip = chipIdentity(session, viewer.preview);
@@ -59,6 +63,7 @@ export default async function DashboardLayout({
       adminName={chip.name}
       adminEmail={chip.email}
       platformUi={seesPlatformUi(viewer)}
+      billingEntry={billingEntry}
       role={viewer.uiRole}
       preview={
         viewer.preview

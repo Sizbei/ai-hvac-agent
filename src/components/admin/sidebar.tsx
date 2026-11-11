@@ -444,14 +444,17 @@ export function Sidebar({
             {showQuickTour &&
               (isCollapsed ? (
                 <Tooltip>
-                  <TooltipTrigger render={<div />}>
-                    <Link
-                      href={QUICK_TOUR_HREF}
-                      aria-label="Quick tour"
-                      className={cn(RAIL_ROW, 'mb-2 justify-center px-0')}
-                    >
-                      <Compass className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" aria-hidden="true" />
-                    </Link>
+                  {/* The link IS the trigger, so keyboard focus opens the tooltip too. */}
+                  <TooltipTrigger
+                    render={
+                      <Link
+                        href={QUICK_TOUR_HREF}
+                        aria-label="Quick tour"
+                        className={cn(RAIL_ROW, 'mb-2 justify-center px-0')}
+                      />
+                    }
+                  >
+                    <Compass className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" aria-hidden="true" />
                   </TooltipTrigger>
                   <TooltipContent side="right">Quick tour</TooltipContent>
                 </Tooltip>

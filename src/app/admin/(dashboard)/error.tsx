@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { ErrorState } from '@/components/admin/ui/error-state';
 
@@ -25,9 +25,9 @@ export default function AdminError({
         action={
           <div className="flex flex-wrap justify-center gap-3">
             <Button onClick={reset}>Try again</Button>
-            <Button variant="outline" render={<Link href="/admin" />}>
+            <Link href="/admin" className={buttonVariants({ variant: 'outline' })}>
               Go to dashboard
-            </Button>
+            </Link>
           </div>
         }
       />

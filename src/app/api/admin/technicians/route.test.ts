@@ -5,9 +5,15 @@ vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
 
+const getViewerContext = vi.fn();
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: () => getViewerContext(),
+}));
+
 const createTechnician = vi.fn();
+const getTechnicians = vi.fn();
 vi.mock("@/lib/admin/queries", () => ({
-  getTechnicians: vi.fn(),
+  getTechnicians: (...a: unknown[]) => getTechnicians(...a),
   createTechnician: (...a: unknown[]) => createTechnician(...a),
 }));
 
@@ -24,7 +30,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn() } }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const SESSION = {
   userId: "11111111-1111-1111-1111-111111111111",
@@ -87,5 +93,24 @@ describe("POST /api/admin/technicians", () => {
       "This account is managed by the platform owner and can’t be changed here.",
     );
     expect(logAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/admin/technicians", () => {
+  it("401 without a viewer", async () => {
+    getViewerContext.mockResolvedValue(null);
+    expect((await GET()).status).toBe(401);
+    expect(getTechnicians).not.toHaveBeenCalled();
+  });
+
+  it("passes the viewer's visibility (org viewers never see retired demo users)", async () => {
+    getViewerContext.mockResolvedValue({ session: SESSION, showHidden: false });
+    getTechnicians.mockResolvedValue([]);
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(getTechnicians).toHaveBeenCalledWith(
+      SESSION.organizationId,
+      expect.objectContaining({ showHidden: false }),
+    );
   });
 });

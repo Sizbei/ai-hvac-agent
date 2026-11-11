@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
-import { reviewTextsOnFrom } from '@/lib/admin/review-switch-copy';
+import { historyContactFrom, reviewTextsOnFrom } from '@/lib/admin/review-switch-copy';
 
 export interface ReviewRow {
   readonly id: string;
@@ -35,18 +35,21 @@ interface UseReviewsResult {
   readonly stats: ReviewStats | null;
   /** The org's reviewRequests switch; true until the server says otherwise. */
   readonly reviewTextsOn: boolean;
+  /** Who can turn review texts on; set only while they are off. */
+  readonly historyContact: string | null;
   readonly isLoading: boolean;
   readonly error: string | null;
   readonly refetch: () => Promise<void>;
 }
 
-/** Loads the org's review requests + aggregate stats. No polling — read at
+/** Loads the org's review texts + aggregate stats. No polling — read at
  *  human pace. Modeled on use-reports. */
 export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<ReviewStats | null>(null);
   const [reviewTextsOn, setReviewTextsOn] = useState(true);
+  const [historyContact, setHistoryContact] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Monotonic run counter (latest-wins): a rapid page/param change supersedes an
@@ -72,6 +75,7 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
         setTotal(body.data.total);
         setStats(body.data.stats);
         setReviewTextsOn(reviewTextsOnFrom(body));
+        setHistoryContact(historyContactFrom(body));
       } else {
         setError(body.error?.message ?? 'Could not load reviews.');
       }
@@ -90,5 +94,5 @@ export function useReviews(params: UseReviewsParams = {}): UseReviewsResult {
     void fetchReviews();
   }, [fetchReviews]);
 
-  return { reviews, total, stats, reviewTextsOn, isLoading, error, refetch: fetchReviews };
+  return { reviews, total, stats, reviewTextsOn, historyContact, isLoading, error, refetch: fetchReviews };
 }

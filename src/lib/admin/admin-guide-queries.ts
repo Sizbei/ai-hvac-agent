@@ -4,10 +4,12 @@ import { db } from "@/lib/db";
 import { platformAdminEmails } from "@/lib/auth/authz";
 import type { ViewerContext } from "@/lib/auth/viewer";
 import { parseFeatures } from "@/lib/tenancy/feature-flags";
+import { errorCode, logger } from "@/lib/logger";
 import { adminGuidePatchSql, adminGuideSelectSql } from "./admin-guide-sql";
 import {
   buildGuidePayload,
   contactOrFallback,
+  HISTORY_CONTACT_FALLBACK,
   guidePatchWrites,
   parseAdminGuideState,
   type AdminGuidePayload,
@@ -69,6 +71,16 @@ export async function readHistoryContact(organizationId: string): Promise<string
   );
   const row = (res.rows[0] ?? {}) as Row;
   return contactOrFallback(typeof row.contact_name === "string" ? row.contact_name : null);
+}
+
+/** `readHistoryContact` for "… handled by" / "Ask {name} …" copy: the generic fallback on a read error. */
+export async function historyContactOrFallback(organizationId: string): Promise<string> {
+  try {
+    return await readHistoryContact(organizationId);
+  } catch (error) {
+    logger.error({ code: errorCode(error), organizationId }, "History contact read failed");
+    return HISTORY_CONTACT_FALLBACK;
+  }
 }
 
 /** PATCH: one UPDATE on the user's own row, every time (no no-op skip). */

@@ -105,13 +105,18 @@ single global form). FAQs use separate create/update/delete helpers.
 
 **Invariants:**
 - The `integrations` tab hosts several self-hiding panels: `AiModelPanel` renders
-  null on 403 (super_admin only); `BillingLinkPanel` renders null on 403
-  (super_admin/platform-admin only); `PlatformLinkPanel` renders null on 403
+  null on 403 (super_admin only); `BillingLinkPanel` reads `useBillingEntry()`
+  (`src/components/admin/billing-entry-context.tsx`, set by the layout from
+  `resolveBillingEntry`, `src/lib/admin/billing-entry-server.ts`): the plans
+  link on "panel", "Billing is handled by {name}." on "handled", null on
+  "redirect"; `PlatformLinkPanel` renders null on 403
   (platform-admin only) and also while "View as" is on (`usePlatformUi()`,
   `src/components/admin/platform-ui-context.tsx`). Never add a role check in
   the page — panels self-gate.
-- `settings/billing` is a server component; `billingPageView`
-  (`src/lib/admin/preview-view.ts`) over `getViewerContext()`: the platform admin
+- `settings/billing` is a server component; `resolveBillingEntry` →
+  `billingPageView` (`src/lib/admin/preview-view.ts`) over `getViewerContext()`.
+  The Staff "See plans" link and the seat-limit copy (`src/lib/admin/billing-entry.ts`)
+  follow the same view, so a platform-managed org never reads "upgrade the plan": the platform admin
   not previewing → the panel; a super_admin `uiRole` → the panel, except in the
   platform's own org (`isPlatformManagedOrg`) where it shows "Billing is handled
   by {name}." (`readHistoryContact`, never an email); else redirect to

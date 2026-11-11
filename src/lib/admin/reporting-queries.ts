@@ -25,6 +25,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { visibleRows, type Visibility } from "./visibility";
+import { withoutRetiredDemoUsers } from "./retired-demo-users";
 import { decrypt } from "@/lib/crypto";
 import { locationDisplayLabel } from "./report-format";
 
@@ -726,6 +727,7 @@ export async function getTechnicianScorecards(
       .select({
         technicianId: serviceRequests.assignedTo,
         name: users.name,
+        email: users.email,
         assigned: count(),
         completed: count(
           sql`CASE WHEN ${serviceRequests.status} = 'completed' THEN 1 END`,
@@ -745,7 +747,7 @@ export async function getTechnicianScorecards(
           visibleRows(serviceRequests, vis),
         ),
       )
-      .groupBy(serviceRequests.assignedTo, users.name),
+      .groupBy(serviceRequests.assignedTo, users.name, users.email),
 
     // 2. Revenue: invoice totals on the tech's jobs. ALL sides org-scoped.
     //    SOURCE NOTE: billed revenue across BOTH native and synced invoices (each
@@ -830,7 +832,7 @@ export async function getTechnicianScorecards(
     );
   }
 
-  return jobRows
+  return withoutRetiredDemoUsers(jobRows, vis)
     .filter((r): r is typeof r & { technicianId: string } => r.technicianId != null)
     .map((r) => {
       const technicianId = r.technicianId;

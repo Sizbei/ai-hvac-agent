@@ -86,6 +86,7 @@ import {
   normalizeEmail,
   BCRYPT_COST,
 } from './staff-queries';
+import { SHOW_ALL, VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 const USER = '00000000-0000-0000-0000-0000000000aa';
@@ -148,13 +149,13 @@ describe('normalizeEmail', () => {
 describe('listStaff', () => {
   it('returns an empty array when there are no staff', async () => {
     selectQueue.push([]);
-    const staff = await listStaff(ORG);
+    const staff = await listStaff(ORG, SHOW_ALL);
     expect(staff).toEqual([]);
   });
 
   it('maps rows to StaffRecord with ISO dates', async () => {
     selectQueue.push([row(), row({ id: 'x', role: 'technician', name: 'Bob' })]);
-    const staff = await listStaff(ORG);
+    const staff = await listStaff(ORG, SHOW_ALL);
     expect(staff).toHaveLength(2);
     expect(staff[0]).toEqual({
       id: USER,
@@ -171,7 +172,7 @@ describe('listStaff', () => {
 
   it('sets isFpSynced:true and hasLogin:false for an FP-synced passwordless tech', async () => {
     selectQueue.push([row({ fieldpulseUserId: '12345', passwordHash: null })]);
-    const [record] = await listStaff(ORG);
+    const [record] = await listStaff(ORG, SHOW_ALL);
     expect(record.isFpSynced).toBe(true);
     expect(record.hasLogin).toBe(false);
     expect(record).not.toHaveProperty('passwordHash');
@@ -179,10 +180,22 @@ describe('listStaff', () => {
 
   it('sets isFpSynced:false and hasLogin:true for a native user with a password hash', async () => {
     selectQueue.push([row({ fieldpulseUserId: null, passwordHash: '$2a$12$fakehash' })]);
-    const [record] = await listStaff(ORG);
+    const [record] = await listStaff(ORG, SHOW_ALL);
     expect(record.isFpSynced).toBe(false);
     expect(record.hasLogin).toBe(true);
     expect(record).not.toHaveProperty('passwordHash');
+  });
+
+  it('hides retired demo users from an org viewer', async () => {
+    selectQueue.push([row(), row({ id: 'd', email: 'admin@demo-hvac.com', isActive: false })]);
+    const staff = await listStaff(ORG, VISIBLE_ONLY);
+    expect(staff.map((s) => s.id)).toEqual([USER]);
+  });
+
+  it('keeps retired demo users for the platform owner', async () => {
+    selectQueue.push([row(), row({ id: 'd', email: 'admin@demo-hvac.com', isActive: false })]);
+    const staff = await listStaff(ORG, SHOW_ALL);
+    expect(staff.map((s) => s.id)).toEqual([USER, 'd']);
   });
 });
 

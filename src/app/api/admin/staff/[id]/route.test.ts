@@ -59,7 +59,9 @@ describe("PATCH /api/admin/staff/[id] reactivation seat gate", () => {
     getSeatUsage.mockResolvedValue({ used: 3, limit: 2 });
     const res = await patch({ name: "Ux Tester", isActive: true });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("SEAT_LIMIT_REACHED");
+    const json = await res.json();
+    expect(json.error.code).toBe("SEAT_LIMIT_REACHED");
+    expect(json.error.message).toBe("Your plan has no free seats.");
     expect(updateStaff).not.toHaveBeenCalled();
     expect(isStaffActive).toHaveBeenCalledWith(SESSION.organizationId, TARGET);
     expect(getSeatUsage).toHaveBeenCalledWith(SESSION.organizationId);

@@ -54,7 +54,7 @@ const CONSENT_MESSAGE_PREFIX = 'Cannot message this customer: ';
 const CONSENT_REASON_COPY: Record<string, string> = {
   do_not_contact: 'This customer has asked not to be contacted.',
   'channel_disabled:sms': 'This customer has turned off text message notifications.',
-  review_requests_off: 'Review requests are turned off for this account.',
+  review_requests_off: 'Review texts are off for this account.',
 };
 
 /** Extracts the raw consent reason embedded in a CONSENT_BLOCKED message, or

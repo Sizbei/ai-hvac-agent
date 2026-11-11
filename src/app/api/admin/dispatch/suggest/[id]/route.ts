@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { suggestTechnicians } from "@/lib/admin/scheduling-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
@@ -19,17 +19,18 @@ const UUID_REGEX =
  */
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const { id } = await params;
     if (!UUID_REGEX.test(id)) {
       return errorResponse("Invalid request ID format", "INVALID_ID", 400);
     }
 
-    const suggestions = await suggestTechnicians(session.organizationId, id, 3);
+    const suggestions = await suggestTechnicians(session.organizationId, id, 3, viewer);
     return successResponse({ suggestions });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to load technician suggestions");

@@ -56,7 +56,7 @@ function postReq() {
 beforeEach(() => {
   vi.clearAllMocks();
   getAdminSession.mockResolvedValue(SESSION);
-  getViewerContext.mockResolvedValue({ session: SESSION, preview: null });
+  getViewerContext.mockResolvedValue({ session: SESSION, preview: null, showHidden: false });
 });
 
 describe("POST /api/admin/staff seat gate", () => {
@@ -64,7 +64,10 @@ describe("POST /api/admin/staff seat gate", () => {
     getSeatUsage.mockResolvedValue({ used: 2, limit: 2 });
     const res = await POST(postReq());
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("SEAT_LIMIT_REACHED");
+    const json = await res.json();
+    expect(json.error.code).toBe("SEAT_LIMIT_REACHED");
+    // The org may be platform-managed: never tell it to upgrade.
+    expect(json.error.message).toBe("Your plan has no free seats.");
     expect(createStaff).not.toHaveBeenCalled();
     expect(getSeatUsage).toHaveBeenCalledWith(SESSION.organizationId);
   });
@@ -136,6 +139,7 @@ describe("GET /api/admin/staff", () => {
   it("marks the View as target as \"you\" while previewing (m14)", async () => {
     getViewerContext.mockResolvedValue({
       session: SESSION,
+      showHidden: false,
       preview: { status: "active", targetUserId: "t1", targetName: "Chick", targetEmail: "c@x.com", targetRole: "super_admin", exp: 1 },
     });
     listStaff.mockResolvedValue([]);
@@ -143,6 +147,13 @@ describe("GET /api/admin/staff", () => {
     const body = await (await GET()).json();
     expect(body.data.currentUserId).toBe("t1");
     // The list stays the session org's.
-    expect(listStaff).toHaveBeenCalledWith(SESSION.organizationId);
+    expect(listStaff).toHaveBeenCalledWith(SESSION.organizationId, expect.objectContaining({ showHidden: false }));
+  });
+
+  it("passes the viewer's visibility so org viewers never see retired demo users", async () => {
+    listStaff.mockResolvedValue([]);
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    await GET();
+    expect(listStaff).toHaveBeenCalledWith(SESSION.organizationId, expect.objectContaining({ showHidden: false }));
   });
 });

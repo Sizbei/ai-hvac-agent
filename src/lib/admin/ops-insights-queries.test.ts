@@ -60,7 +60,7 @@ vi.mock('./org-time-zone', () => ({
 }));
 
 import { getOpsInsights } from './ops-insights-queries';
-import { VISIBLE_ONLY } from './visibility';
+import { SHOW_ALL, VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -74,6 +74,7 @@ function seed(opts: {
   tech: {
     technicianId: string | null;
     technicianName: string | null;
+    email?: string | null;
     total: number | string;
     active: number | string;
     completed: number | string;
@@ -264,5 +265,21 @@ describe('getOpsInsights', () => {
       active: 3,
       completed: 0,
     });
+  });
+
+  it('drops a retired demo technician from the load for an org viewer only', async () => {
+    const tech = [
+      { technicianId: 't1', technicianName: 'Alice', email: 'alice@spears.com', total: '5', active: '1', completed: '4' },
+      { technicianId: 'd1', technicianName: 'Sarah Chen', email: 'sarah.chen@demo-hvac.com', total: '3', active: '3', completed: '0' },
+      { technicianId: null, technicianName: null, email: null, total: '2', active: '2', completed: '0' },
+    ];
+    seed({ issue: [], urgency: [], status: [], last7: 0, tech });
+    const org = await getOpsInsights(ORG, VISIBLE_ONLY);
+    expect(org.technicianLoad.map((t) => t.technicianId)).toEqual([null, 't1']);
+    expect(org.technicianLoad[0]).not.toHaveProperty('email');
+
+    seed({ issue: [], urgency: [], status: [], last7: 0, tech });
+    const owner = await getOpsInsights(ORG, SHOW_ALL);
+    expect(owner.technicianLoad.map((t) => t.technicianId)).toEqual(['d1', null, 't1']);
   });
 });

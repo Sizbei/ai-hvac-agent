@@ -26,7 +26,11 @@ are aggregated in the API query. No polling — manual page navigation.
   while the org's `reviewRequests` switch is on). When the switch is off the
   empty state reads "Review texts are off for this account." — the API returns
   `reviewTextsOn` (from `getViewerContext().features`) and the copy lives in
-  `src/lib/admin/review-switch-copy.ts` (tested).
+  `src/lib/admin/review-switch-copy.ts` (tested). The subtitle is switch-aware
+  too: off, it reads "Review texts are off for this account. Ask {name} to turn
+  them on." (`historyContact` from the API, `historyContactOrFallback`, only
+  while off). The UI says "review texts" everywhere (stat, template label,
+  platform switch, reply error).
   This path (technician marks complete → `createReviewRequest` →
   `queueCommunicationJob`) has no admin session in the loop, so the
   `isDemoAccount(session)` guards on other outbound routes can't cover it —

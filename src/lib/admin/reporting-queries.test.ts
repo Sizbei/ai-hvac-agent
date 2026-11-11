@@ -180,7 +180,7 @@ import {
   getLocationBreakdown,
   getTechnicianScorecards,
 } from './reporting-queries';
-import { VISIBLE_ONLY } from './visibility';
+import { SHOW_ALL, VISIBLE_ONLY } from './visibility';
 
 const ORG = '00000000-0000-0000-0000-000000000001';
 
@@ -803,6 +803,7 @@ function seedTech(s: {
   jobs: {
     technicianId: string | null;
     name: string;
+    email?: string | null;
     assigned: number | string;
     completed: number | string;
   }[];
@@ -817,6 +818,21 @@ function seedTech(s: {
 }
 
 describe('getTechnicianScorecards', () => {
+  it('drops retired demo technicians for an org viewer, keeps them for the platform owner', async () => {
+    const jobs = [
+      { technicianId: 'tech-1', name: 'Sam', email: 'sam@spears.com', assigned: 1, completed: 1 },
+      { technicianId: 'demo-1', name: 'Mike Johnson', email: 'mike.johnson@demo-hvac.com', assigned: 4, completed: 2 },
+    ];
+    seedTech({ jobs, revenue: [], labor: [], rating: [] });
+    const orgRows = await getTechnicianScorecards(ORG, {}, VISIBLE_ONLY);
+    expect(orgRows.map((r) => r.technicianId)).toEqual(['tech-1']);
+    expect(orgRows[0]).not.toHaveProperty('email');
+
+    seedTech({ jobs, revenue: [], labor: [], rating: [] });
+    const ownerRows = await getTechnicianScorecards(ORG, {}, SHOW_ALL);
+    expect(ownerRows.map((r) => r.technicianId).sort()).toEqual(['demo-1', 'tech-1']);
+  });
+
   it('aggregates revenue, completed, labor hours, and rating per tech', async () => {
     seedTech({
       jobs: [{ technicianId: 'tech-1', name: 'Sam', assigned: 5, completed: 3 }],

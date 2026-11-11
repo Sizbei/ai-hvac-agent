@@ -243,9 +243,11 @@ import {
   rescheduleRequest,
   placeAndAssignRequest,
   autoAssignBookedRequest,
+  suggestTechnicians,
 } from "./scheduling-queries";
-import { VISIBLE_ONLY } from "./visibility";
+import { SHOW_ALL, VISIBLE_ONLY } from "./visibility";
 import { recordStatusEvent } from "@/lib/admin/status-events";
+import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
 const OTHER_ORG = "00000000-0000-0000-0000-000000000002";
@@ -1199,5 +1201,32 @@ describe("unscheduleRequest refusals (spec §5.4)", () => {
     expect(await unscheduleRequest(ORG, REQ, gate)).toEqual({ ok: false, reason: "request_terminal", currentStatus: "completed" });
     selectQueue.push([]);
     expect(await unscheduleRequest(ORG, REQ, gate)).toEqual({ ok: false, reason: "request_not_found" });
+  });
+});
+
+describe("suggestTechnicians (retired demo users)", () => {
+  const T1 = "00000000-0000-0000-0000-0000000000d1";
+  const DEMO = "00000000-0000-0000-0000-0000000000d2";
+  function queueSuggest(): void {
+    selectQueue.push([
+      { id: T1, email: "dana@spears.com" },
+      { id: DEMO, email: "mike.johnson@demo-hvac.com" },
+    ]); // active techs
+    selectQueue.push([{ scheduledDate: new Date("2026-11-12T15:00:00Z") }]); // request day
+    selectQueue.push([{ jobType: "no_cool", systemType: "central_ac", urgency: "standard" }]); // classification
+  }
+
+  it("never scores a retired demo technician for an org viewer", async () => {
+    queueSuggest();
+    rankedState.order = [T1];
+    await suggestTechnicians(ORG, REQ, 3, VISIBLE_ONLY);
+    expect(vi.mocked(loadDispatchSignals).mock.calls.at(-1)?.[1]).toEqual([T1]);
+  });
+
+  it("still scores them for the platform owner", async () => {
+    queueSuggest();
+    rankedState.order = [T1, DEMO];
+    await suggestTechnicians(ORG, REQ, 3, SHOW_ALL);
+    expect(vi.mocked(loadDispatchSignals).mock.calls.at(-1)?.[1]).toEqual([T1, DEMO]);
   });
 });

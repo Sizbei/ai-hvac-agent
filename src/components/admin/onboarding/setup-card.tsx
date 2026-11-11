@@ -17,6 +17,7 @@ import { nextRows, requiredMeta } from '@/lib/admin/setup-view';
 import {
   cardTitle,
   cardView,
+  skeletonTitle,
   upNextAction,
   readDemoFlags,
   writeDemoFlags,
@@ -146,7 +147,7 @@ export function SetupCard() {
   if (state.view === 'nothing' || hidden) return null;
   if (state.view === 'skeleton' || !shown) {
     return (
-      <SectionCard title="Setup guide">
+      <SectionCard title={skeletonTitle(flags)}>
         <div className="flex flex-col gap-2" aria-hidden="true">
           <Skeleton className="h-3 w-16" />
           <Skeleton className="h-4 w-64" />

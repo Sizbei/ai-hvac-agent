@@ -256,7 +256,7 @@ vi.mock('./visit-move-sql', () => ({
 }));
 
 import { and } from 'drizzle-orm';
-import { VISIBLE_ONLY } from './visibility';
+import { SHOW_ALL, VISIBLE_ONLY } from './visibility';
 import {
   getRequests,
   getRequestById,
@@ -962,7 +962,7 @@ describe('getTechnicians', () => {
       },
     ]];
 
-    const result = await getTechnicians(ORG_ID);
+    const result = await getTechnicians(ORG_ID, SHOW_ALL);
     expect(Array.isArray(result)).toBe(true);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
@@ -981,7 +981,7 @@ describe('getTechnicians', () => {
       { id: 't2', name: 'B', email: 'b@x.com', isActive: false, createdAt: now },
     ]];
 
-    const result = await getTechnicians(ORG_ID);
+    const result = await getTechnicians(ORG_ID, SHOW_ALL);
     for (const tech of result) {
       expect(tech).toHaveProperty('id');
       expect(tech).toHaveProperty('name');
@@ -990,6 +990,17 @@ describe('getTechnicians', () => {
       expect(tech).toHaveProperty('createdAt');
       expect(typeof tech.createdAt).toBe('string');
     }
+  });
+
+  it('hides retired demo technicians from an org viewer only', async () => {
+    const now = new Date();
+    const rows = [
+      { id: 't1', name: 'A', email: 'a@x.com', isActive: true, createdAt: now },
+      { id: 't2', name: 'Mike', email: 'mike.johnson@demo-hvac.com', isActive: true, createdAt: now },
+    ];
+    selectResolutions = [rows, rows];
+    expect((await getTechnicians(ORG_ID, VISIBLE_ONLY)).map((t) => t.id)).toEqual(['t1']);
+    expect((await getTechnicians(ORG_ID, SHOW_ALL)).map((t) => t.id)).toEqual(['t1', 't2']);
   });
 });
 

@@ -39,6 +39,7 @@ import {
 import { withTenant } from "@/lib/db/tenant";
 import { visibleRows, type Visibility } from "./visibility";
 import { needsPlacementWhere } from "./unscheduled-sql";
+import { withoutRetiredDemoUsers } from "./retired-demo-users";
 import { logger } from "@/lib/logger";
 import {
   rankTechnicians,
@@ -1264,14 +1265,15 @@ async function rankedTechnicianOrder(
 export async function suggestTechnicians(
   organizationId: string,
   requestId: string,
-  limit = 3,
+  limit: number,
+  vis: Visibility,
 ): Promise<RankedTech[]> {
   // Active-techs list and the request's scheduledDate are independent reads.
   // Note: on the empty-techs path the req read is wasted — acceptable trade
   // to avoid a conditional waterfall on the (rare) non-empty path.
-  const [techs, [req]] = await Promise.all([
+  const [techRows, [req]] = await Promise.all([
     db
-      .select({ id: users.id })
+      .select({ id: users.id, email: users.email })
       .from(users)
       .where(
         withTenant(
@@ -1287,6 +1289,7 @@ export async function suggestTechnicians(
         withTenant(serviceRequests, organizationId, eq(serviceRequests.id, requestId)),
       ),
   ]);
+  const techs = withoutRetiredDemoUsers(techRows, vis);
   if (techs.length === 0) return [];
   const isoDay = (req?.scheduledDate ?? new Date()).toISOString().slice(0, 10);
 

@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
           );
         case "seat_limit":
           return errorResponse(
-            "Your plan's staff limit has been reached. Upgrade your plan to add more team members.",
+            "Your plan has no free seats.",
             "SEAT_LIMIT_REACHED",
             403,
           );

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   dismissedNote,
+  heroActionVariant,
   heroFor,
   justDone,
   nextRows,
@@ -259,5 +260,17 @@ describe("requiredMeta", () => {
       "3 of 4 required steps",
     );
     expect(requiredMeta(payload())).toBe("0 of 4 required steps");
+  });
+});
+
+describe("heroActionVariant", () => {
+  it("steps back to outline while the quick tour is open", () => {
+    expect(heroActionVariant({ tourExpanded: true, attention: false })).toBe("outline");
+    expect(heroActionVariant({ tourExpanded: false, attention: false })).toBe("default");
+  });
+
+  it("stays primary when a step needs attention, tour or not", () => {
+    expect(heroActionVariant({ tourExpanded: true, attention: true })).toBe("default");
+    expect(heroActionVariant({ tourExpanded: false, attention: true })).toBe("default");
   });
 });

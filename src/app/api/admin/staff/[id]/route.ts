@@ -103,7 +103,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       seatsFull(await getSeatUsage(session.organizationId))
     ) {
       return errorResponse(
-        "Your plan's staff limit has been reached. Upgrade your plan to reactivate this team member.",
+        "Your plan has no free seats.",
         "SEAT_LIMIT_REACHED",
         403,
       );

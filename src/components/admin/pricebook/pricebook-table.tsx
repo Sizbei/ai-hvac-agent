@@ -89,7 +89,7 @@ export function PricebookTable({
         description={
           isFiltered
             ? 'Try a different search or clear the filters.'
-            : 'Add the services, materials and equipment you price jobs with.'
+            : 'Add the services, materials and equipment you price requests with.'
         }
         action={
           isFiltered ? (
