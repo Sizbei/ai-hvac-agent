@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Phone, Navigation, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { READ_ONLY_PREVIEW } from '@/lib/admin/preview-view';
+import { useTechReadOnly } from '@/components/tech/tech-read-only-context';
 import { Skeleton } from '@/components/ui/skeleton';
 import { issueLabel, visitWindow } from '@/lib/tech/job-display';
 import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close-out-sheet';
@@ -98,6 +100,7 @@ export function TechJobSummary({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState<string | null>(null);
+  const readOnly = useTechReadOnly();
   const [sheetAction, setSheetAction] = useState<SheetAction | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
   // Set after a lead's tap when the request itself is still waiting on an earlier visit.
@@ -320,15 +323,21 @@ export function TechJobSummary({
             {actions.length > 0 && (
               <div className="grid grid-cols-2 gap-2 border-t pt-3">
                 {actions.map((a, i) => (
-                  <Button
+                  // The span carries the grid cell (and the preview tooltip: a disabled button gets no hover).
+                  <span
                     key={a}
-                    variant={actionButtonVariant(a, actions)}
-                    className={`h-12 rounded-xl px-4 text-[16px] ${actionSpansRow(i, actions.length, actionButtonVariant(actions[0], actions) === 'default') ? 'col-span-2' : ''}`}
-                    disabled={advancing !== null}
-                    onClick={() => handleTap(a)}
+                    title={readOnly ? READ_ONLY_PREVIEW : undefined}
+                    className={`grid ${actionSpansRow(i, actions.length, actionButtonVariant(actions[0], actions) === 'default') ? 'col-span-2' : ''}`}
                   >
-                    {advancing === a ? 'Saving…' : techStatusLabel(a)}
-                  </Button>
+                    <Button
+                      variant={actionButtonVariant(a, actions)}
+                      className="h-12 rounded-xl px-4 text-[16px]"
+                      disabled={advancing !== null || readOnly}
+                      onClick={() => handleTap(a)}
+                    >
+                      {advancing === a ? 'Saving…' : techStatusLabel(a)}
+                    </Button>
+                  </span>
                 ))}
               </div>
             )}

@@ -18,7 +18,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { patchAdminGuide, readAdminGuide } from "./admin-guide-queries";
+import { patchAdminGuide, readAdminGuide, readHistoryContact } from "./admin-guide-queries";
 import type { ViewerContext } from "@/lib/auth/viewer";
 
 const ORG = "11111111-1111-1111-1111-111111111111";
@@ -98,7 +98,7 @@ describe("readAdminGuide", () => {
   it("an active preview reads the TARGET's state with the target's role, read-only", async () => {
     queue.push({ rows: [row({ state: { welcomeDismissedAt: T1 } })] });
     const v = viewer({
-      preview: { status: "active", targetUserId: TARGET, targetName: "Chick", targetRole: "admin", exp: 1 },
+      preview: { status: "active", targetUserId: TARGET, targetName: "Chick", targetEmail: "t@example.com", targetRole: "admin", exp: 1 },
       uiRole: "admin",
     });
     const g = await readAdminGuide(v, { readOnly: true });
@@ -110,7 +110,7 @@ describe("readAdminGuide", () => {
   it("previewing a technician: never due", async () => {
     queue.push({ rows: [row()] });
     const v = viewer({
-      preview: { status: "active", targetUserId: TARGET, targetName: "Tech", targetRole: "technician", exp: 1 },
+      preview: { status: "active", targetUserId: TARGET, targetName: "Tech", targetEmail: "t@example.com", targetRole: "technician", exp: 1 },
       uiRole: "technician",
     });
     expect((await readAdminGuide(v, { readOnly: true })).welcomeDue).toBe(false);
@@ -160,5 +160,28 @@ describe("patchAdminGuide", () => {
     await patchAdminGuide(ORG, ME, { tourCompleted: true }, new Date(T1));
     await patchAdminGuide(ORG, ME, { tourCompleted: true }, new Date(T1));
     expect(executed).toHaveLength(2);
+  });
+});
+
+describe("readHistoryContact", () => {
+  it("reads only the platform owner's display name for the org, with one SELECT", async () => {
+    queue.push({ rows: [row({ contact_name: "Raymond Chen" })] });
+    expect(await readHistoryContact(ORG)).toBe("Raymond Chen");
+    expect(executed).toHaveLength(1);
+    const q = render(executed[0]);
+    // No subject user: the state column is NULL, never another user's row.
+    expect(flat(executed[0])).toContain("NULL::jsonb AS state");
+    expect(q.params).toContain(ORG);
+    expect(q.params).toContainEqual(["owner@x.com"]);
+  });
+
+  it("never returns an email: a name that is an email falls back", async () => {
+    queue.push({ rows: [row({ contact_name: "owner@x.com" })] });
+    expect(await readHistoryContact(ORG)).toBe("your account administrator");
+  });
+
+  it("falls back when no owner row matches", async () => {
+    queue.push({ rows: [row()] });
+    expect(await readHistoryContact(ORG)).toBe("your account administrator");
   });
 });

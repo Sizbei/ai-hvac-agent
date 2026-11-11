@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import {
   Card,
@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { READ_ONLY_PREVIEW } from '@/lib/admin/preview-view';
 
 /** The viewer's local YYYY-MM-DD for an <input type="date"> default. */
 function ymd(d: Date): string {
@@ -21,16 +22,12 @@ function ymd(d: Date): string {
 }
 
 /**
- * Super-admin-only accounting (QuickBooks/CSV) export panel.
- *
- * The export endpoint (/api/admin/accounting/export) is itself super_admin-gated,
- * so the server is the authority for visibility. We probe it once WITHOUT a date
- * range: a non-super_admin gets 403 (gate runs before validation) and we render
- * nothing; a super_admin gets 400 VALIDATION_ERROR (authorized, just missing
- * params) and we show the panel. The probe never downloads a file.
+ * Super-admin-only accounting (QuickBooks/CSV) export panel. The page renders
+ * it only for a super_admin viewer (decided on the server); the export
+ * endpoint (/api/admin/accounting/export) is itself super_admin-gated.
+ * `readOnly` ("View as" preview) disables Download.
  */
-export function AccountingExportPanel() {
-  const [authorized, setAuthorized] = useState<boolean | null>(null);
+export function AccountingExportPanel({ readOnly = false }: { readonly readOnly?: boolean }) {
   const [from, setFrom] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
@@ -40,26 +37,6 @@ export function AccountingExportPanel() {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloaded, setDownloaded] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch('/api/admin/accounting/export');
-        if (cancelled) return;
-        // 401/403 => not authorized. Anything else (400 missing params, etc.)
-        // means the caller passed the gate.
-        setAuthorized(res.status !== 401 && res.status !== 403);
-      } catch {
-        if (!cancelled) setAuthorized(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (authorized === null || authorized === false) return null;
 
   async function handleDownload(): Promise<void> {
     setError(null);
@@ -147,18 +124,20 @@ export function AccountingExportPanel() {
               className="w-auto"
             />
           </div>
-          <Button
-            type="button"
-            onClick={() => void handleDownload()}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Download className="size-4" />
-            )}
-            Download CSV
-          </Button>
+          <span title={readOnly ? READ_ONLY_PREVIEW : undefined}>
+            <Button
+              type="button"
+              onClick={() => void handleDownload()}
+              disabled={downloading || readOnly}
+            >
+              {downloading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
+              Download CSV
+            </Button>
+          </span>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         {downloaded && (

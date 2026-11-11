@@ -10,14 +10,18 @@ import { GlobalSearch } from '@/components/admin/global-search';
 import { navLabelFor, type SetupPlacement } from '@/components/admin/nav-items';
 import { SetupPlacementProvider } from '@/components/admin/setup-placement-context';
 import { OrgNameProvider } from '@/components/admin/org-name-context';
+import { PlatformUiProvider } from '@/components/admin/platform-ui-context';
 import { PreviewBanner } from '@/components/admin/preview-banner';
 import { usePreviewSync } from '@/hooks/use-preview-sync';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
   readonly orgName?: string;
+  /** The account chip: the "View as" target's name and email while previewing. */
   readonly adminName: string;
   readonly adminEmail: string;
+  /** The platform owner, not previewing: platform-only UI shows. */
+  readonly platformUi: boolean;
   /** The role the UI renders for: the "View as" target's while previewing. */
   readonly role: AdminRole | 'technician';
   /** Set only while a "View as" preview is on: the banner line, the active
@@ -46,6 +50,7 @@ export function DashboardShell({
   orgName,
   adminName,
   adminEmail,
+  platformUi,
   role,
   preview = null,
   billingAttention = false,
@@ -68,42 +73,44 @@ export function DashboardShell({
   return (
     <SetupPlacementProvider value={setupPlacement}>
       <OrgNameProvider value={orgName}>
-        <div className="flex h-dvh bg-background-admin dark:bg-background">
-          <Sidebar
-            orgName={orgName}
-            adminName={adminName}
-            adminEmail={adminEmail}
-            role={role}
-            setupPlacement={setupPlacement}
-            mapEnabled={mapEnabled}
-            isMobileOpen={isMobileOpen}
-            onMobileClose={handleMobileClose}
-          />
-          <div className="flex flex-1 flex-col overflow-hidden">
-            {preview && <PreviewBanner line={preview.line} />}
-            <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} orgName={orgName} />
-            {billingAttention && (
-              <div
-                role="alert"
-                className="flex items-center gap-3 border-b border-warning/40 bg-warning-light px-4 py-3 text-sm text-warning-foreground"
-              >
-                <AlertTriangle className="size-4 shrink-0" />
-                <span className="flex-1">
-                  Your subscription needs attention — update billing to restore full
-                  access.
-                </span>
-                <Link
-                  href="/admin/settings/billing"
-                  className="shrink-0 font-medium underline underline-offset-2 hover:no-underline"
+        <PlatformUiProvider value={platformUi}>
+          <div className="flex h-dvh bg-background-admin dark:bg-background">
+            <Sidebar
+              orgName={orgName}
+              adminName={adminName}
+              adminEmail={adminEmail}
+              role={role}
+              setupPlacement={setupPlacement}
+              mapEnabled={mapEnabled}
+              isMobileOpen={isMobileOpen}
+              onMobileClose={handleMobileClose}
+            />
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {preview && <PreviewBanner line={preview.line} />}
+              <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} orgName={orgName} />
+              {billingAttention && (
+                <div
+                  role="alert"
+                  className="flex items-center gap-3 border-b border-warning/40 bg-warning-light px-4 py-3 text-sm text-warning-foreground"
                 >
-                  Update billing
-                </Link>
-              </div>
-            )}
-            <GlobalSearch placement={setupPlacement} mapEnabled={mapEnabled} />
-            <main className="flex-1 overflow-auto">{children}</main>
+                  <AlertTriangle className="size-4 shrink-0" />
+                  <span className="flex-1">
+                    Your subscription needs attention — update billing to restore full
+                    access.
+                  </span>
+                  <Link
+                    href="/admin/settings/billing"
+                    className="shrink-0 font-medium underline underline-offset-2 hover:no-underline"
+                  >
+                    Update billing
+                  </Link>
+                </div>
+              )}
+              <GlobalSearch placement={setupPlacement} mapEnabled={mapEnabled} />
+              <main className="flex-1 overflow-auto">{children}</main>
+            </div>
           </div>
-        </div>
+        </PlatformUiProvider>
       </OrgNameProvider>
     </SetupPlacementProvider>
   );

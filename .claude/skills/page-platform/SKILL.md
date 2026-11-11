@@ -35,9 +35,9 @@ shown once and is not stored in plaintext.
 
 **Invariants:**
 - `isPlatformAdmin` checks the session's email against the `PLATFORM_ADMIN_EMAILS`
-  env var (comma-separated, normalized). The page redirects to `/admin` if the
-  check fails — this redirect is in addition to the API-level gate (server is
-  authoritative, redirect just avoids rendering an empty shell).
+  env var (comma-separated, normalized). The page calls `notFound()` unless
+  `seesPlatformUi(viewer)` — a platform admin who is NOT previewing (spec P7:
+  "View as" applies the target's gates). The API gate stays on the real session.
 - Org status values: `active`, `suspended`, `trial`, `past_due`. Displayed via
   `OrgStatusBadge`; unknown status renders the raw value with neutral styling —
   never crash on an unexpected enum.
@@ -57,8 +57,8 @@ shown once and is not stored in plaintext.
 - The page is a server component (no `'use client'`), which lets it call
   `getAdminSession` synchronously before rendering. The console itself is a client
   component imported inside the page.
-- On dev: `PLATFORM_ADMIN_EMAILS` must include the test user's email or the page
-  redirects immediately.
+- On dev: `PLATFORM_ADMIN_EMAILS` must include the test user's email (and
+  `PLATFORM_ORG_ID` its org) or the page 404s.
 
 **Verify changes:** visual via the admin-pages recipe at `/admin/platform`
 (requires `PLATFORM_ADMIN_EMAILS` set to the session user's email in `.env.local`)

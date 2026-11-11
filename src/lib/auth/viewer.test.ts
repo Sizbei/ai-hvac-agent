@@ -36,7 +36,7 @@ const features = vi.mocked(getFeatures);
 const target = vi.mocked(findPreviewTarget);
 
 const SECRET = "test-auth-secret-for-viewer";
-const TARGET = { userId: "t1", name: "Chick Spears", role: "admin" as const };
+const TARGET = { userId: "t1", name: "Chick Spears", email: "chick.spears@example.com", role: "admin" as const };
 
 async function setPreviewCookie(adminUserId = SESSION.userId, targetUserId = TARGET.userId) {
   const exp = Math.floor(Date.now() / 1000) + 600;
@@ -131,6 +131,7 @@ describe("getViewerContext — view as", () => {
       status: "active",
       targetUserId: "t1",
       targetName: "Chick Spears",
+      targetEmail: "chick.spears@example.com",
       targetRole: "admin",
       exp: expect.any(Number),
     });

@@ -6,8 +6,9 @@ description: Use when working on the /admin/fieldpulse-import page — live impo
 # FieldPulse import (/admin/fieldpulse-import)
 
 **Purpose:** observe the status of the FieldPulse full-import pipeline in real
-time. Shows per-phase progress cards (all 11 pipeline phases) and a
-recent-runs history table. Auto-polls while any phase is actively running.
+time. Shows per-phase progress cards (all 11 pipeline phases) and, for the
+platform admin only (`usePlatformUi()`; not while previewing), a recent-runs
+history table. Auto-polls while any phase is actively running.
 
 **Files:** page `src/app/admin/(dashboard)/fieldpulse-import/page.tsx` · model
 `src/components/admin/fp-import/import-status-model.ts` · hook

@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
+import { selfUserId } from "@/lib/admin/preview-view";
 import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { listStaff, createStaff } from "@/lib/admin/staff-queries";
 import { logAudit } from "@/lib/admin/audit";
@@ -13,10 +15,11 @@ import { seatsFull } from "@/lib/admin/seat-usage";
 
 export async function GET() {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:staff-list:${session.userId}`,
@@ -33,8 +36,10 @@ export async function GET() {
     ]);
     // Echo the caller's own id so the UI can disable self-demote/self-deactivate
     // without a second round-trip. (The server enforces this regardless.)
+    // While previewing it is the "View as" target's (m14): the page marks them
+    // "(you)"; the read-only proxy refuses any write either way.
     // `seats` lets the page say "You've used 3 of 5 seats." before any form.
-    return successResponse({ staff, currentUserId: session.userId, seats });
+    return successResponse({ staff, currentUserId: selfUserId(session, viewer.preview), seats });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to list staff");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

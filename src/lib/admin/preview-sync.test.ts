@@ -29,7 +29,7 @@ describe("shownPreview", () => {
   });
   it("active → its target", () => {
     expect(
-      shownPreview({ status: "active", targetUserId: "t1", targetName: "A", targetRole: "admin", exp: 1 }),
+      shownPreview({ status: "active", targetUserId: "t1", targetName: "A", targetEmail: "t@example.com", targetRole: "admin", exp: 1 }),
     ).toEqual({ previewing: true, targetUserId: "t1" });
   });
   it("stale → previewing with no target", () => {

@@ -16,6 +16,11 @@ export interface PreviewTarget {
   readonly role: "super_admin" | "admin" | "technician";
 }
 
+/** A resolved target: also its email, for the sidebar chip (never sent by the list route). */
+export interface ResolvedPreviewTarget extends PreviewTarget {
+  readonly email: string;
+}
+
 const targetColumns = { userId: users.id, name: users.name, role: users.role };
 
 /** Active users of `orgId`, minus `excludeUserId` (the platform admin). */
@@ -34,9 +39,9 @@ export async function listPreviewTargets(
 export async function findPreviewTarget(
   orgId: string,
   userId: string,
-): Promise<PreviewTarget | null> {
+): Promise<ResolvedPreviewTarget | null> {
   const [row] = await db
-    .select(targetColumns)
+    .select({ ...targetColumns, email: users.email })
     .from(users)
     .where(withTenant(users, orgId, eq(users.id, userId), eq(users.isActive, true)))
     .limit(1);
