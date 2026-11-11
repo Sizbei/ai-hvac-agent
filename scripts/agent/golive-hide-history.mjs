@@ -21,10 +21,13 @@
  *   and the sessions of seeded requests.
  *
  * Safety (plan ruling 5): --apply refuses when the org already has hidden rows
- * unless --reapply is passed. --reapply only hides more (it never un-hides,
- * and re-hides post-go-live rows the mode does not keep); to switch modes run
- * --unhide first, then --apply. Any run against the production host
- * (ep-withered-hill) needs --prod; only the user passes it, never an agent.
+ * unless --reapply is passed. --reapply only hides more (it never un-hides);
+ * once the org has a go-live cutoff (set-history-cutoff.mjs) no run hides a row
+ * created from the cutoff on. To switch modes run --unhide first, then --apply.
+ * --unhide also clears the cutoff. A malformed cutoff makes the dry run and
+ * --apply refuse; --unhide still runs (and clears it). Any run against the
+ * production host (ep-withered-hill, any letter case) needs --prod; only the
+ * user passes it, never an agent.
  * DATABASE_URL comes from the environment, else from .env.local.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -78,12 +81,15 @@ if (!process.env.DATABASE_URL && existsSync(".env.local")) {
 const url = process.env.DATABASE_URL ?? "";
 if (!url) refuse("DATABASE_URL is not set");
 // Before any connection: the database modules are imported only past this line.
-if (url.includes(PROD_HOST) && !args.prod) refuse("this is the production database; pass --prod to run against it");
+// Hostnames are case-insensitive: match the production host in any letter case.
+if (url.toLowerCase().includes(PROD_HOST) && !args.prod) refuse("this is the production database; pass --prod to run against it");
 
 const { neon } = await import("@neondatabase/serverless");
 const { drizzle } = await import("drizzle-orm/neon-http");
 const { sql } = await import("drizzle-orm");
 const m = await import("../../src/lib/admin/golive-marking-sql.ts");
+const { clearHistoryCutoffSql } = await import("../../src/lib/admin/history-cutoff-sql.ts");
+const { historyCutoff, MALFORMED_HISTORY_CUTOFF_ISO } = await import("../../src/lib/tenancy/feature-flags.ts");
 
 const db = drizzle(neon(url));
 const staleDays = args.staleDays ?? m.DEFAULT_STALE_DAYS;
@@ -91,8 +97,11 @@ const rows = async (statement) => (await db.execute(statement)).rows;
 const runBatch = async (statements) =>
   (await db.batch(statements.map((s) => db.execute(s)))).map((r) => r.rowCount ?? 0);
 
-const org = (await rows(sql`SELECT name FROM organizations WHERE id = ${args.org}::uuid`))[0];
+const org = (await rows(sql`SELECT name, feature_flags FROM organizations WHERE id = ${args.org}::uuid`))[0];
 if (!org) refuse(`no organization ${args.org}`);
+if (!args.unhide && historyCutoff(org.feature_flags)?.toISOString() === MALFORMED_HISTORY_CUTOFF_ISO) {
+  refuse("the organization's historyCutoff is not a timestamp; fix it with set-history-cutoff.mjs or clear it with --unhide");
+}
 
 const dollars = (cents) => `$${(Number(cents) / 100).toFixed(2)}`;
 
@@ -122,7 +131,10 @@ async function dryRun() {
 }
 
 if (args.unhide) {
-  printPerTable(`Unhid rows for ${org.name} (${args.org}):`, await runBatch(m.unhideStatements(args.org)));
+  // One batch: the rows come back and the audit cutoff goes, or neither does.
+  const counts = await runBatch([...m.unhideStatements(args.org), clearHistoryCutoffSql(args.org)]);
+  printPerTable(`Unhid rows for ${org.name} (${args.org}):`, counts);
+  console.log("Audit log cutoff cleared.");
 } else if (args.apply) {
   const hidden = (await rows(m.dryRunSql(args.org, staleDays)))[0];
   const already = m.MARKED_TABLES.reduce((n, t) => n + Number(hidden[`${t}_hidden`]), 0);

@@ -138,4 +138,63 @@ describe("go-live audit cutoff (dev DB)", { timeout: 60_000 }, () => {
     expect(prod.status).toBe(1);
     expect(prod.stderr).toContain("pass --prod");
   });
+
+  it("the CLI refuses the production host in any letter case", () => {
+    const prod = spawnScript(["--org", org], {
+      ...process.env,
+      DATABASE_URL: "postgresql://u:p@EP-Withered-Hill-123.us-east-2.aws.neon.tech/db",
+    });
+    expect(prod.status).toBe(1);
+    expect(prod.stderr).toContain("pass --prod");
+  });
+
+  it("a malformed cutoff fails closed: an org viewer's log lists nothing", async () => {
+    const before = (await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`))[0]!.feature_flags;
+    try {
+      for (const bad of [sql`'"not a date"'::jsonb`, sql`'""'::jsonb`, sql`'12345'::jsonb`]) {
+        await run(sql`UPDATE organizations SET feature_flags = jsonb_set(feature_flags, '{historyCutoff}', ${bad}) WHERE id = ${org}`);
+        const since = await getHistoryCutoff(org);
+        expect(since).not.toBeNull();
+        const page = await getAuditLog(org, { since: since!, visibleOnly: true, limit: 100 });
+        expect(page).toEqual({ entries: [], total: 0, actions: [] });
+      }
+      // absent stays "no cutoff"
+      await run(sql`UPDATE organizations SET feature_flags = feature_flags - 'historyCutoff' WHERE id = ${org}`);
+      expect(await getHistoryCutoff(org)).toBeNull();
+    } finally {
+      await run(sql`UPDATE organizations SET feature_flags = ${JSON.stringify(before)}::jsonb WHERE id = ${org}`);
+    }
+  });
+
+  it("visibleOnly drops invoice_synced entries of hidden invoices; everything else, and the platform view, keep them", async () => {
+    const shown = (
+      await run(sql`INSERT INTO invoices (organization_id,state,total_cents) VALUES (${org},'open'::invoice_state,100) RETURNING id`)
+    )[0]!.id as string;
+    const hiddenInv = (
+      await run(sql`INSERT INTO invoices (organization_id,state,total_cents,hidden_from_org) VALUES (${org},'paid'::invoice_state,100,true) RETURNING id`)
+    )[0]!.id as string;
+    const at = "2026-11-12T08:00:00.000Z";
+    const entry = (action: string, entity: string, id: string) =>
+      run(sql`INSERT INTO audit_log (organization_id, action, entity, entity_id, created_at) VALUES (${org}, ${action}, ${entity}, ${id}, ${at}::timestamptz)`);
+    await entry("invoice_synced", "invoices", shown);
+    await entry("invoice_synced", "invoices", hiddenInv);
+    await entry("invoice_reminder_sent", "invoices", hiddenInv);
+
+    const ids = (page: Awaited<ReturnType<typeof getAuditLog>>, action: string) =>
+      page.entries.filter((e) => e.action === action).map((e) => e.entityId);
+
+    const seen = await getAuditLog(org, { visibleOnly: true, limit: 100 });
+    expect(ids(seen, "invoice_synced")).toEqual([shown]);
+    expect(ids(seen, "invoice_reminder_sent")).toEqual([hiddenInv]);
+    expect(seen.total).toBe(seen.entries.length);
+
+    const all = await getAuditLog(org, { limit: 100 });
+    expect(ids(all, "invoice_synced").sort()).toEqual([shown, hiddenInv].sort());
+    expect(all.total).toBe(seen.total + 1);
+
+    // only hidden invoices' syncs: the action leaves the org viewer's filter list too
+    await run(sql`UPDATE invoices SET hidden_from_org = true WHERE id = ${shown}`);
+    expect((await getAuditLog(org, { visibleOnly: true, limit: 100 })).actions).not.toContain("invoice_synced");
+    expect((await getAuditLog(org, { limit: 100 })).actions).toContain("invoice_synced");
+  });
 });

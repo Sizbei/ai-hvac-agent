@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { isFunction, migrationStatements, replayUnits } from "./replay-migration";
 
 vi.mock("server-only", () => ({}));
 
@@ -313,10 +314,7 @@ describe("migration 0059 un-hide triggers (dev DB)", { timeout: 30_000 }, () => 
       (await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`))[0]!.feature_flags;
     const beforeColumns = await run(columns);
 
-    const statements = readFileSync("drizzle/0059_golive.sql", "utf8")
-      .split("--> statement-breakpoint")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const statements = migrationStatements("drizzle/0059_golive.sql");
     // The seed targets the live org, which no suite may touch: it is replayed
     // below against the throwaway org instead.
     const isSeed = (s: string) => s.includes("UPDATE organizations SET feature_flags");
@@ -326,8 +324,16 @@ describe("migration 0059 un-hide triggers (dev DB)", { timeout: 30_000 }, () => 
     const probeSeed = seeds[0].replace(`'${SPEARS}'`, `'${org}'`);
     expect(probeSeed).not.toContain(SPEARS);
 
+    // 0061 replaces 0059's function: its version runs in the same transaction
+    // as 0059's, so neither this suite nor one running beside it ever sees the
+    // DEV database on the older function.
+    const fn0061 = migrationStatements("drizzle/0061_unhide_on_activity.sql").filter(isFunction);
+    expect(fn0061).toHaveLength(1);
+    const units = replayUnits(statements.filter((s) => !isSeed(s))).map((unit) =>
+      unit.some(isFunction) ? [...unit, ...fn0061] : unit,
+    );
     for (let pass = 0; pass < 2; pass++) {
-      for (const stmt of statements.filter((s) => !isSeed(s))) await db.execute(sql.raw(stmt));
+      for (const unit of units) await db.batch(unit.map((stmt) => db.execute(sql.raw(stmt))) as never);
     }
     expect(await run(columns)).toEqual(beforeColumns);
     expect(beforeColumns).toHaveLength(6);

@@ -40,7 +40,7 @@ vi.mock('drizzle-orm', () => ({
   eq: eqSpy,
   gte: gteSpy,
   and: (...a: unknown[]) => a,
-  sql: (...a: unknown[]) => a,
+  sql: Object.assign((...a: unknown[]) => a, { raw: (text: string) => ['raw', text] }),
   count: () => 'count',
   desc: (c: unknown) => c,
 }));
@@ -188,5 +188,27 @@ describe('getAuditLog', () => {
     // The action list stays unfiltered by action (dropdown shows every option).
     const actionListCall = withTenantSpy.mock.calls.find((c) => c.length === 3);
     expect(actionListCall).toBeDefined();
+  });
+
+  it('visibleOnly drops invoice_synced entries whose invoice is hidden, from the count, the rows and the action list', async () => {
+    seed({ count: 0, rows: [], actions: [] });
+    await getAuditLog(ORG, { visibleOnly: true });
+    expect(withTenantSpy).toHaveBeenCalledTimes(2);
+    for (const call of withTenantSpy.mock.calls) {
+      const text = JSON.stringify(call.slice(2));
+      expect(text).toContain("invoice_synced");
+      expect(text).toContain('FROM invoices i WHERE i.id = ');
+      expect(text).toContain('i.hidden_from_org');
+      // the invoice lookup is scoped to the session org
+      expect(call.slice(2).flat(3)).toContain(ORG);
+    }
+  });
+
+  it('without visibleOnly, adds no invoice filter', async () => {
+    seed({ count: 0, rows: [], actions: [] });
+    await getAuditLog(ORG, {});
+    for (const call of withTenantSpy.mock.calls) {
+      expect(JSON.stringify(call.slice(2))).not.toContain('invoice_synced');
+    }
   });
 });

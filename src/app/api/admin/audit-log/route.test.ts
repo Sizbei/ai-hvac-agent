@@ -54,6 +54,7 @@ describe("GET /api/admin/audit-log", () => {
       page: 2,
       limit: 20,
       since: CUTOFF,
+      visibleOnly: true,
     });
   });
 
@@ -68,7 +69,7 @@ describe("GET /api/admin/audit-log", () => {
     getViewerContext.mockResolvedValue({ session: SESSION, showHidden: true });
     await GET(req());
     expect(getHistoryCutoff).not.toHaveBeenCalled();
-    expect(getAuditLog).toHaveBeenCalledWith(ORG, expect.objectContaining({ since: undefined }));
+    expect(getAuditLog).toHaveBeenCalledWith(ORG, expect.objectContaining({ since: undefined, visibleOnly: false }));
   });
 
   it("fails closed with a 500 (no entries) when the cutoff can't be read", async () => {

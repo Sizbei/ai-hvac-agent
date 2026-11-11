@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { historyCutoffPatchSql } from "./history-cutoff-sql";
+import { clearHistoryCutoffSql, historyCutoffPatchSql } from "./history-cutoff-sql";
 
 const ORG = "11111111-1111-1111-1111-111111111111";
 
@@ -28,5 +28,19 @@ describe("historyCutoffPatchSql", () => {
     expect(() => historyCutoffPatchSql("org-1", "2026-11-10T17:30:00.000Z")).toThrow(/uuid/);
     expect(() => historyCutoffPatchSql(ORG, "yesterday")).toThrow(/timestamp/);
     expect(() => historyCutoffPatchSql(ORG, "")).toThrow(/timestamp/);
+  });
+});
+
+describe("clearHistoryCutoffSql", () => {
+  it("removes only the historyCutoff key for one org", () => {
+    const { sql: text, params } = new PgDialect().sqlToQuery(clearHistoryCutoffSql(ORG));
+    expect(text.replace(/\s+/g, " ")).toBe(
+      "UPDATE organizations SET feature_flags = feature_flags - 'historyCutoff' WHERE id = $1::uuid",
+    );
+    expect(params).toEqual([ORG]);
+  });
+
+  it("refuses a non-uuid org", () => {
+    expect(() => clearHistoryCutoffSql("org-1")).toThrow(/uuid/);
   });
 });

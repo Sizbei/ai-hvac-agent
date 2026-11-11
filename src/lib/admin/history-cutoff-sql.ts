@@ -3,7 +3,8 @@
  * as `organizations.feature_flags.historyCutoff`. It merges with `||`, so the
  * boolean switches beside it are untouched. Run it in the same batch as the
  * marking (`scripts/agent/golive-hide-history.mjs --apply`), or on its own via
- * `scripts/agent/set-history-cutoff.mjs`.
+ * `scripts/agent/set-history-cutoff.mjs`. `golive-hide-history.mjs --unhide`
+ * clears it again (clearHistoryCutoffSql).
  */
 import { sql, type SQL } from "drizzle-orm";
 
@@ -17,4 +18,10 @@ export function historyCutoffPatchSql(org: string, iso: string): SQL {
     throw new Error("historyCutoffPatchSql: at must be an ISO timestamp");
   }
   return sql`UPDATE organizations SET feature_flags = feature_flags || jsonb_build_object('historyCutoff', ${at.toISOString()}::text) WHERE id = ${org}::uuid RETURNING feature_flags->>'historyCutoff' AS history_cutoff`;
+}
+
+/** Removes the historyCutoff key (`-`), leaving the switches beside it. Throws on a non-uuid org. */
+export function clearHistoryCutoffSql(org: string): SQL {
+  if (!UUID.test(org)) throw new Error("clearHistoryCutoffSql: org must be a uuid");
+  return sql`UPDATE organizations SET feature_flags = feature_flags - 'historyCutoff' WHERE id = ${org}::uuid`;
 }

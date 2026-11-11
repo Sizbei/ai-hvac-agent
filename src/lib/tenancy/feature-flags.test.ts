@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_FEATURES, featurePatchSchema, historyCutoff, parseFeatures } from "./feature-flags";
+import {
+  DEFAULT_FEATURES,
+  MALFORMED_HISTORY_CUTOFF_ISO,
+  featurePatchSchema,
+  historyCutoff,
+  parseFeatures,
+} from "./feature-flags";
 
 describe("parseFeatures", () => {
   it("returns the defaults for null, undefined and non-objects", () => {
@@ -63,11 +69,22 @@ describe("historyCutoff", () => {
     expect(historyCutoff({ showHistory: true })).toBeNull();
   });
 
-  it("is null for a non-string or unparseable value", () => {
-    expect(historyCutoff({ historyCutoff: 1_762_776_000_000 })).toBeNull();
-    expect(historyCutoff({ historyCutoff: true })).toBeNull();
-    expect(historyCutoff({ historyCutoff: "" })).toBeNull();
-    expect(historyCutoff({ historyCutoff: "not a date" })).toBeNull();
+  it("is null for an explicit null (no cutoff)", () => {
+    expect(historyCutoff({ historyCutoff: null })).toBeNull();
+  });
+
+  it("fails closed on a present but malformed value: a cutoff after every entry", () => {
+    for (const bad of [1_762_776_000_000, true, "", "not a date", {}, ["2026-11-10T12:00:00.000Z"]]) {
+      const at = historyCutoff({ historyCutoff: bad });
+      expect(at?.toISOString(), JSON.stringify(bad)).toBe(MALFORMED_HISTORY_CUTOFF_ISO);
+    }
+    expect(MALFORMED_HISTORY_CUTOFF_ISO).toBe("9999-12-31T23:59:59.999Z");
+  });
+
+  it("returns a fresh Date each time, so a caller can't move the fail-closed cutoff", () => {
+    const first = historyCutoff({ historyCutoff: "nope" })!;
+    first.setTime(0);
+    expect(historyCutoff({ historyCutoff: "nope" })?.toISOString()).toBe(MALFORMED_HISTORY_CUTOFF_ISO);
   });
 
   it("reads an ISO timestamp", () => {

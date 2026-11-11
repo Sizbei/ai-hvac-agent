@@ -36,15 +36,23 @@ export const featurePatchSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: "At least one key" });
 
 /**
+ * What a present but unparseable `historyCutoff` reads as: a cutoff after every
+ * audit entry, so org viewers see none (fail closed), never all of history.
+ */
+export const MALFORMED_HISTORY_CUTOFF_ISO = "9999-12-31T23:59:59.999Z";
+
+/**
  * The go-live moment, `feature_flags.historyCutoff` (an ISO timestamp the
  * marking run stores). Org viewers who don't see hidden history see audit
- * entries only from here on. Null when unset or unparseable. Kept apart from
- * `parseFeatures`, whose switches are booleans only.
+ * entries only from here on. Null when the key is absent (or null); a value
+ * that is present but not a parseable string reads as
+ * MALFORMED_HISTORY_CUTOFF_ISO. Kept apart from `parseFeatures`, whose switches
+ * are booleans only.
  */
 export function historyCutoff(raw: unknown): Date | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const value = (raw as Record<string, unknown>).historyCutoff;
-  if (typeof value !== "string" || value === "") return null;
-  const at = new Date(value);
-  return Number.isNaN(at.getTime()) ? null : at;
+  if (value === undefined || value === null) return null;
+  const at = typeof value === "string" && value !== "" ? new Date(value) : null;
+  return at && !Number.isNaN(at.getTime()) ? at : new Date(MALFORMED_HISTORY_CUTOFF_ISO);
 }

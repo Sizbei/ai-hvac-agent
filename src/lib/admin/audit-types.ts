@@ -26,6 +26,8 @@ export interface AuditLogFilters {
   readonly limit?: number;
   /** Only entries at or after this moment (the org's go-live cutoff). */
   readonly since?: Date;
+  /** Org viewers who don't see hidden history: drop `invoice_synced` entries whose invoice is hidden. */
+  readonly visibleOnly?: boolean;
 }
 
 export interface AuditLogPage {
