@@ -75,6 +75,9 @@ in-memory state.
   was classified.
 
 **Gotchas:**
+- Figures read visible rows only (go-live P6, `src/lib/admin/visibility.ts`);
+  bot turns follow their session and session-less turns count. Technician load
+  drops retired demo users for org viewers.
 - `isFetchingRef` is a ref (not state) so toggling it doesn't trigger a
   re-render — intentional; the loading spinner is driven by `isLoading` state.
 - The page slug is `page-insights-ai` (not `page-insights`) to avoid clashing

@@ -64,6 +64,9 @@ fixed, not the selected range).
   moved on site months later (n shown on the card), not from the formula.
 
 **Gotchas:**
+- Figures read visible rows only (go-live P6, `src/lib/admin/visibility.ts`).
+  Not filtered: the on-site average (time entries) and dispatch health
+  (`decision_audit`); they are not customer history.
 - `onSiteSeconds` is not a `MetricTrend` — it has no previous value and no delta.
   It appears as a sublabel of "Response time", not its own card.
 - `metrics.dispatchHealth.commitRate` is nullable even when the rollup exists

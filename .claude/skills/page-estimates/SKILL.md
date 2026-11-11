@@ -105,6 +105,9 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
 **Field estimates (M3c):** title 'Field estimate', no approval token, 30-day expiry, sold on the technician's phone. `estimates.sold_via` ('portal' | 'office' | 'field', NULL before M3c) and `sold_by` (technician for field, admin for office). Detail Approval card (names in bold as before): field → 'Signed by <name>.' + 'Signed on site with <technician> · <time>'; office → 'Marked sold by <admin>'; old rows unchanged (`approvalLines`, `src/lib/admin/estimate-approval-copy.ts`). `Sold, not invoiced` tab (`bucket=not_invoiced`): native sold, no invoice of any state with this `estimate_id`, not on the job's invoice. Generate (`createInvoiceFromSoldEstimate`) refuses while the field bill holds the lines and returns that invoice; both insert paths write `estimate_line_item_id` with v7 ids in line order. A voided office invoice ends office billing (Generate returns it). The detail carries a read-only `jobInvoiceId` (`billingInvoiceIdSql` when no office invoice exists); a billed estimate shows no Generate, only "Invoice created" or "On the job's invoice" with View invoice (`estimateInvoiceCard`, `src/lib/admin/estimate-detail-display.ts`). Approval and Created dates use the business timezone (`businessWhen`/`businessDay`). `useEstimates` guards fetches per key (`src/lib/admin/keyed-fetch.ts`), so a `?bucket=` deep link loads that bucket on first load.
 
 **Gotchas:**
+- Hidden rows (go-live P6): list, KPI tiles and detail read visible rows only
+  (`src/lib/admin/visibility.ts`); a hidden estimate's detail 404s for org users.
+  "View invoice" from a visible estimate can reach a hidden invoice (404).
 - `winRatePct` can be null (no closed estimates yet); guard before rendering.
 - `stats` may be null on partial server failures; the KpiBand must handle
   `stats=null` (all counts/amounts default to 0).

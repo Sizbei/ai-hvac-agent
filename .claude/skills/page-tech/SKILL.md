@@ -445,6 +445,12 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
 - "View as" a technician: the layout provides `TechReadOnlyProvider`
   (`src/components/tech/tech-read-only-context.tsx`); the day clock and the
   status buttons render disabled under a "Read-only preview" title span.
+- Preview fallback: with no `hvac_tech_session` cookie, `getTechSession()`
+  (`src/lib/auth/tech-session.ts`) builds a technician session from a valid bound
+  `hvac_preview` cookie. Every tech write calls `previewWriteRefusal`
+  (`src/lib/tech/preview-write-gate.ts`, its test scans all write routes).
+  `getGuide(org, userId, { features, write })` stamps only when `write` is true;
+  the guide route passes `write: !session.preview`.
 - **Assignee + tenant guard** (legacy sub-routes): every mutation route checks BOTH
   `assignedTo == techUserId` AND the session's `organizationId`. A technician may only
   touch THEIR OWN job. The guard in `field-queries.ts` must mirror

@@ -207,6 +207,9 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
   zero-data flash before stats arrive — do not remove the guard.
 - Source segmented control is hidden when only one source type exists in
   `sourceCounts` — this is deliberate (no noise for single-source orgs).
+- Hidden rows (go-live P6): list, money tiles, detail and financing read visible
+  rows only (`src/lib/admin/visibility.ts`); a hidden invoice's detail 404s for org
+  users. Request-derived detail fields are null when the request is hidden.
 - Void is a soft state change (`state='void'`); it can't be undone via the UI;
   the server blocks voiding synced invoices and invoices with payments.
 

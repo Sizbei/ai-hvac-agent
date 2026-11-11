@@ -47,6 +47,7 @@ description: Use when working on ANY admin page — shared recipes (session mint
 (read-only; `SMOKE_WRITES=1` adds the chat probe, and off localhost it also
 needs `SMOKE_PROD_WRITES=1`). Migrations run in the
 Vercel build.
+Go-live runbook, rollback targets, rulings and known gaps: `docs/spears-handover.md` (a push to `main` auto-deploys prod).
 
 ## Design system (compose, don't hand-roll)
 

@@ -173,6 +173,9 @@ work logs — real booking history is in `service_requests` via
 - `POST /api/admin/customers` 409 `CUSTOMER_ALREADY_EXISTS` carries
   `details: { customerId, archived }` (`findNativeContactClash`) so the add
   form can link to the existing (possibly archived) row.
+  Hidden customers (go-live P6): `findNativeContactClash` filters `visibleRows`,
+  so an org user's 409 never names or links a hidden customer; the route sends
+  the generic 409 with no `details` (`src/lib/admin/crm-queries.ts`).
 - Phone input is validated by `phoneInputError`
   (`src/lib/admin/customer-validation.ts`) on create and on a CHANGED number in
   `update_contact` (legacy short numbers on file don't block other edits).

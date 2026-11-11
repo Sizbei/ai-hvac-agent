@@ -77,6 +77,10 @@ audit. PATCH applies the body in memory; the card's dismiss lives in
 stripped in `getOnboarding`, and `loadSetupPlacement` always returns
 `operations` for the demo org (`placementFor(state, isDemo)`).
 
+**Visible-only signals:** step signals count visible rows only (plan ruling 2),
+whoever is looking; stamps are per org and written once. The welcome row and
+quick tour are per user and never write in View as (`readOnly`).
+
 **Per-user guide (welcome + quick tour, onboarding spec D1):**
 `users.admin_guide_state` (migration 0060) holds `welcomeDismissedAt`,
 `tourStartedAt`, `tourCompletedAt` (write-once) and `lastLesson`. GET onboarding

@@ -56,6 +56,8 @@ the revenue tile shows the breakdown in its sublabel.
   never in `action`/`meta` (that squeezed titles to nothing on phones).
 
 **Gotchas:**
+- Figures read visible rows only (go-live P6, `src/lib/admin/visibility.ts`);
+  bot turns follow their session. Scorecards drop retired demo users for org viewers.
 - The range `useMemo` dependency is `[days]`, not the `Date` objects. Removing the
   memo causes an infinite refetch loop.
 - Synced AR (`syncedArCents`) may be 0 if no FSM integrations are configured;
