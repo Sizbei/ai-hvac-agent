@@ -41,7 +41,7 @@ export function invoiceDocModel(inv: InvoiceDetailView, now: Date = new Date()):
   const invoiceDate = new Date(inv.issuedAt ?? inv.createdAt);
   const dueDate = inv.dueDate ? new Date(inv.dueDate) : new Date(invoiceDate.getTime() + NET_DAYS_MS);
   return {
-    invoiceRef: invoiceRef(inv.id),
+    invoiceRef: invoiceRef(inv.id, inv.externalRef),
     invoiceDate,
     invoiceDateIsSource: inv.issuedAt != null,
     serviceDate: inv.serviceDate ? new Date(inv.serviceDate) : null,

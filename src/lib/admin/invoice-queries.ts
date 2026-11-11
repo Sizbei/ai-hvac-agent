@@ -1040,6 +1040,8 @@ export interface InvoiceListRow {
   readonly lastReminderSentAt: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
+  /** The source system's own invoice number, or null when native. */
+  readonly externalRef: string | null;
 }
 
 /**
@@ -1059,6 +1061,7 @@ export const LIST_INVOICE_FIELDS = [
   "customerName",
   "lastReminderSentAt",
   "syncedSource",
+  "externalRef",
 ] as const satisfies readonly (keyof InvoiceListRow)[];
 
 export interface InvoiceSummaryStats {
@@ -1386,6 +1389,7 @@ export async function listInvoices(
       ...r,
       customerName: displayCustomerName(safeDecryptName(nameEncrypted)),
       syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+      externalRef: fieldpulseInvoiceId ?? hcpInvoiceId ?? null,
     }));
 
     return {
@@ -1405,6 +1409,7 @@ export async function listInvoices(
     ...r,
     customerName: displayCustomerName(safeDecryptName(nameEncrypted)),
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+    externalRef: fieldpulseInvoiceId ?? hcpInvoiceId ?? null,
   }));
 
   return {
@@ -1480,6 +1485,8 @@ export interface InvoiceDetailView {
   readonly dueDate: Date | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
+  /** The source system's own invoice number, or null when native. */
+  readonly externalRef: string | null;
   /** FieldPulse spillover data for the detail panel; null when not a FP invoice or empty. */
   readonly fieldpulseData: Record<string, unknown> | null;
   readonly lineItems: InvoiceLineItemView[];
@@ -1701,6 +1708,7 @@ export async function getInvoiceDetailById(
         ? { url: requestSignatureUrl ?? null, name: requestSignatureName ?? null, signedAt: requestSignedAt ?? null }
         : null,
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
+    externalRef: fieldpulseInvoiceId ?? hcpInvoiceId ?? null,
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
     customerName: displayCustomerName(safeDecryptName(nameEncrypted)),
     customerAddress: safeDecryptName(addressEncrypted),

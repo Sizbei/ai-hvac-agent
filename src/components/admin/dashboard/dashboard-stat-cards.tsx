@@ -25,7 +25,7 @@ interface StatCardConfig {
   /** Sentence-case label. */
   readonly label: string;
   readonly icon: LucideIcon;
-  /** Imported (FieldPulse/HCP) count in the same bucket → "+N imported". */
+  /** Imported (FieldPulse/HCP) count in the same bucket → "N imported". */
   readonly importedKey?: keyof DashboardStats;
   /** Requests-page filter the tile opens (single-status tiles only). */
   readonly status?: string;
@@ -76,7 +76,11 @@ export function DashboardStatCards({
   isLoading,
 }: DashboardStatCardsProps) {
   const cell = (config: StatCardConfig) => {
-    const value = stats ? String(stats[config.key]) : '—';
+    // The headline is every open request in the status — what the tile's link
+    // opens — so an org whose work is all imported doesn't read a wall of zeros.
+    const value = stats
+      ? String(stats[config.key] + (config.importedKey ? (stats[config.importedKey] ?? 0) : 0))
+      : '—';
     const sublabel =
       stats && config.importedKey
         ? importedSuffix(stats[config.importedKey] ?? 0)

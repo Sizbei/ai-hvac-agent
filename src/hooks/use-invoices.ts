@@ -18,6 +18,8 @@ export interface InvoiceListItem {
   readonly dueDate: string | null;
   /** Which FSM this read-only invoice is mirrored from, or null when native. */
   readonly syncedSource: "fieldpulse" | "housecall" | null;
+  /** The source system's own invoice number, or null when native. */
+  readonly externalRef: string | null;
   readonly customerName: string | null;
   readonly lastReminderSentAt: string | null;
 }

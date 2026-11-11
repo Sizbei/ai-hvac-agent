@@ -13,8 +13,6 @@ import {
   BadgeCheck,
   Users,
   CheckCircle2,
-  MessagesSquare,
-  LayoutDashboard,
   Phone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,13 +28,12 @@ const SPEARS = {
   address: BUSINESS_BASE_LOCATION.address,
 } as const;
 
-/** The live Twilio voice number for the AI agent demo. */
+/** The live Twilio voice number for the AI phone assistant. */
 const DEMO_PHONE = { display: '(231) 559-9669', tel: '+12315599669' } as const;
 
 const NAV = [
-  { label: 'Live demo', href: '/chat' },
-  { label: 'Admin', href: '/admin' },
-  { label: 'Docs', href: '/docs.html' },
+  { label: 'Request service', href: '/chat' },
+  { label: 'Staff sign in', href: '/admin' },
 ];
 
 const SERVICES = [
@@ -110,16 +107,10 @@ export default function Home() {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
           <Link href="/" className="flex items-center gap-2.5">
-            <span className="relative flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-[var(--hvac-accent)] text-primary-foreground shadow-sm">
-              <Wind className="size-5" strokeWidth={2.25} />
-            </span>
-            <span className="flex flex-col leading-none">
-              <span className="font-heading text-lg font-bold tracking-tight">
-                Spears&nbsp;Services
-              </span>
-              <span className="text-xs font-medium text-muted-foreground">
-                AI intake demo
-              </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/spears-logo.png" alt="" className="size-9 rounded-lg" />
+            <span className="font-heading text-lg font-bold tracking-tight">
+              Spears&nbsp;Services
             </span>
           </Link>
 
@@ -279,43 +270,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Two surfaces (demo framing kept honest) */}
-        <section className="pb-16 md:pb-24">
-          <SectionHeading
-            eyebrow="One system, two surfaces"
-            title="A customer chat and a staff cockpit"
-            subtitle="The same conversation flows from the customer-facing assistant straight into a triage-ready dispatch dashboard."
-          />
-          <div className="mt-12 grid gap-6 md:grid-cols-2">
-            <SurfaceCard
-              icon={MessagesSquare}
-              tone="cool"
-              title="Customer chat"
-              href="/chat"
-              cta="Open the chat"
-              points={[
-                'AI disclosure plus one-tap human handoff',
-                'Intake progress as details are captured',
-                'Suggested replies and resume on refresh',
-                'Instant safety escalation for dangerous situations',
-              ]}
-            />
-            <SurfaceCard
-              icon={LayoutDashboard}
-              tone="warm"
-              title="Dispatch dashboard"
-              href="/admin"
-              cta="Open the dashboard"
-              points={[
-                'Service-request queue with technician assignment',
-                'Searchable log of every saved conversation',
-                'Scheduling calendar with arrival windows',
-                'Customer CRM with equipment and service history',
-              ]}
-            />
-          </div>
-        </section>
-
         {/* CTA */}
         <section className="pb-24">
           <div className="relative overflow-hidden rounded-3xl border border-border/70 bg-gradient-to-br from-primary/8 via-card to-[var(--hvac-accent)]/8 p-10 text-center md:p-16">
@@ -359,8 +313,7 @@ export default function Home() {
               <span className="font-heading text-lg font-bold tracking-tight">
                 Spears&nbsp;Services
               </span>
-              <p className="mt-1 text-sm text-muted-foreground">AI intake demo</p>
-              <p className="mt-3 text-sm text-muted-foreground">
+              <p className="mt-1 text-sm text-muted-foreground">
                 {BUSINESS_BASE_LOCATION.address}
               </p>
             </div>
@@ -389,7 +342,7 @@ export default function Home() {
                 </dd>
               </div>
               <div className="flex flex-col gap-0.5 sm:items-end">
-                <dt className="text-xs font-medium text-muted-foreground">AI voice demo</dt>
+                <dt className="text-xs font-medium text-muted-foreground">AI phone assistant</dt>
                 <dd>
                   <a
                     href={`tel:${DEMO_PHONE.tel}`}
@@ -403,7 +356,7 @@ export default function Home() {
           </div>
 
           <p className="mt-8 border-t border-border/60 pt-6 text-xs text-muted-foreground">
-            &copy; 2026 Spears Services. AI intake demo.
+            &copy; 2026 Spears Services.
           </p>
         </div>
       </footer>
@@ -430,44 +383,6 @@ function SectionHeading({ eyebrow, title, subtitle }: SectionHeadingProps) {
         {title}
       </h2>
       <p className="mt-4 text-lg text-muted-foreground">{subtitle}</p>
-    </div>
-  );
-}
-
-interface SurfaceCardProps {
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
-  tone: 'cool' | 'warm';
-  title: string;
-  href: string;
-  cta: string;
-  points: readonly string[];
-}
-
-function SurfaceCard({ icon: Icon, tone, title, href, cta, points }: SurfaceCardProps) {
-  const accent = tone === 'cool' ? 'text-brand-navy' : 'text-[var(--hvac-accent)]';
-  const ring = tone === 'cool' ? 'hover:border-brand-navy/40' : 'hover:border-[var(--hvac-accent)]/40';
-  return (
-    <div
-      className={`flex flex-col rounded-2xl border border-border/70 bg-card/60 p-7 backdrop-blur transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/5 ${ring}`}
-    >
-      <div className={`flex size-11 items-center justify-center rounded-xl bg-muted ${accent}`}>
-        <Icon className="size-5" strokeWidth={2} />
-      </div>
-      <h3 className="mt-4 font-heading text-xl font-semibold tracking-tight">
-        {title}
-      </h3>
-      <ul className="mt-4 flex flex-1 flex-col gap-2.5">
-        {points.map((p) => (
-          <li key={p} className="flex items-start gap-2.5 text-sm text-muted-foreground">
-            <CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${accent}`} />
-            {p}
-          </li>
-        ))}
-      </ul>
-      <Button variant="ghost" className="mt-6 w-fit px-0 text-foreground hover:bg-transparent hover:text-link" render={<Link href={href} />}>
-        {cta}
-        <ArrowRight className="size-4" data-icon="inline-end" />
-      </Button>
     </div>
   );
 }

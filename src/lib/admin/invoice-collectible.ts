@@ -30,7 +30,12 @@ export function canResend(
   return nowMs - new Date(lastReminderSentAt).getTime() >= cooldownMs;
 }
 
-/** Short, human-readable invoice reference from the UUID (we have no invoice #). */
-export function invoiceRef(invoiceId: string): string {
+/**
+ * Human-readable invoice reference. A mirrored invoice shows the number its
+ * source system (FieldPulse / Housecall Pro) uses, so the office can match it
+ * to their own records; a native invoice has no number, so it's cut from the UUID.
+ */
+export function invoiceRef(invoiceId: string, externalRef?: string | null): string {
+  if (externalRef) return `#${externalRef}`;
   return `#${invoiceId.slice(0, 8).toUpperCase()}`;
 }

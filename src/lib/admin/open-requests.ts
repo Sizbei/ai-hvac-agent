@@ -5,10 +5,10 @@
  *   open = status in OPEN_STATUSES (pending, scheduled, assigned, en_route,
  *          arrived, in_progress, on_hold), from every source.
  *
- * The dashboard splits it by status into five native tiles, each with a
- * "+N imported" suffix for FieldPulse / Housecall Pro jobs; insights shows the
- * same total in one tile. Native + imported on the dashboard = the insights
- * number. The requests page filters by the same statuses, all sources.
+ * The dashboard splits it by status into five tiles. Each tile's number is
+ * every open request in that status (the same set its link opens), with an
+ * "N imported" suffix for FieldPulse / Housecall Pro jobs; insights shows the
+ * same total in one tile. The requests page filters by the same statuses, all sources.
  */
 import type { DashboardStats } from "./types";
 
@@ -31,15 +31,15 @@ export function openRequestTotals(stats: DashboardStats): OpenRequestTotals {
   return { native, imported, total: native + imported };
 }
 
-/** "+N imported" suffix for a tile, or undefined when there are none. */
+/** "N imported" suffix for a tile, or undefined when there are none. */
 export function importedSuffix(n: number): string | undefined {
-  return n > 0 ? `+${n} imported` : undefined;
+  return n > 0 ? `${n} imported` : undefined;
 }
 
 /** One-line caption over the dashboard tiles. */
 export function openRequestCaption(t: OpenRequestTotals): string {
   const noun = t.total === 1 ? "open request" : "open requests";
   return t.imported > 0
-    ? `${t.total} ${noun}: ${t.native} booked here, ${t.imported} imported from FieldPulse or Housecall Pro`
+    ? `${t.total} ${noun}: ${t.native} booked here, ${t.imported} imported`
     : `${t.total} ${noun}`;
 }

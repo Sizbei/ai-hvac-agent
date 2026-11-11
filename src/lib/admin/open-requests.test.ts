@@ -18,14 +18,14 @@ describe("openRequestTotals", () => {
 describe("importedSuffix", () => {
   it("hides zero", () => {
     expect(importedSuffix(0)).toBeUndefined();
-    expect(importedSuffix(3)).toBe("+3 imported");
+    expect(importedSuffix(3)).toBe("3 imported");
   });
 });
 
 describe("openRequestCaption", () => {
   it("explains the split when there are imports", () => {
     expect(openRequestCaption({ native: 33, imported: 84, total: 117 })).toBe(
-      "117 open requests: 33 booked here, 84 imported from FieldPulse or Housecall Pro",
+      "117 open requests: 33 booked here, 84 imported",
     );
   });
   it("is short without imports, singular for one", () => {

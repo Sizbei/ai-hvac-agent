@@ -100,6 +100,7 @@ interface ApiInvoice {
   readonly issuedAt: string | null;
   readonly dueDate: string | null;
   readonly syncedSource: 'fieldpulse' | 'housecall' | null;
+  readonly externalRef: string | null;
   readonly fieldpulseData: Record<string, unknown> | null;
   readonly lineItems: InvoiceDetailView['lineItems'];
   readonly payments: ApiPayment[];
@@ -447,7 +448,7 @@ export function InvoiceDetailClient({
     <PageShell>
       {/* ── Header ── */}
       <PageHeader
-        title={`Invoice ${invoiceRef(invoice.id)}`}
+        title={`Invoice ${invoiceRef(invoice.id, invoice.externalRef)}`}
         back={{ href: '/admin/invoices', label: 'Back to invoices' }}
         actions={
           <>

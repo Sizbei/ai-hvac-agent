@@ -11,14 +11,13 @@ import {
 } from "@/components/ui/sheet";
 
 const NAV = [
-  { label: "Live demo", href: "/chat" },
-  { label: "Admin", href: "/admin" },
-  { label: "Docs", href: "/docs.html" },
+  { label: "Request service", href: "/chat" },
+  { label: "Staff sign in", href: "/admin" },
 ];
 
 /**
  * Phone menu. A homeowner opening it needs the two real actions first — get
- * service (the chat) and call — before the demo/admin/docs links.
+ * service (the chat) and call — before the staff sign-in link.
  */
 export function MobileNav({
   phoneDisplay,

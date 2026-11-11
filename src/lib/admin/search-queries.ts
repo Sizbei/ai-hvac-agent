@@ -159,7 +159,7 @@ export async function searchInvoices(
 
   const results: SearchResult[] = [];
   for (const row of rows) {
-    const ref = invoiceRef(row.id);
+    const ref = invoiceRef(row.id, row.fieldpulseInvoiceId ?? row.hcpInvoiceId);
     const matches =
       ref.toLowerCase().includes(term) ||
       (row.fieldpulseInvoiceId?.toLowerCase().includes(term) ?? false);

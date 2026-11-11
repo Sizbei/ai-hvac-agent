@@ -29,7 +29,9 @@ vi.mock("@/lib/financing/provider", () => ({
 }));
 
 // --- Mock the DB read for the AI model selection ---------------------------
-const aiModelRow = vi.fn<() => Array<{ aiModelId: string | null }>>(() => []);
+const aiModelRow = vi.fn<
+  () => Array<{ aiModelId: string | null; schedulingSource?: "native" | "external" | null }>
+>(() => []);
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
@@ -164,7 +166,22 @@ describe("getIntegrationsStatus — mock vs live detection", () => {
 });
 
 describe("getIntegrationsStatus — Rintegrations-1: sync-health folds into status", () => {
+  it("failed availability sync on a natively scheduled org → stays 'connected'", async () => {
+    aiModelRow.mockReturnValue([{ aiModelId: null, schedulingSource: "native" }]);
+    fieldpulseStatus.mockResolvedValue({
+      connected: true,
+      accountInfo: { companyName: "Acme HVAC", accountId: "acct_123" },
+      availabilitySyncStatus: "failed",
+      lastAvailabilitySyncAt: null,
+      lastSyncError: "Fieldpulse request failed: HTTP 403",
+    });
+    const items = byKey(await getIntegrationsStatus("org-1"));
+    expect(items.fieldpulse.status).toBe("connected");
+    expect(items.fieldpulse.detail).not.toContain("403");
+  });
+
   it("connected + availabilitySyncStatus='failed' → status is NOT 'connected'", async () => {
+    aiModelRow.mockReturnValue([{ aiModelId: null, schedulingSource: "external" }]);
     fieldpulseStatus.mockResolvedValue({
       connected: true,
       accountInfo: { companyName: "Acme HVAC", accountId: "acct_123" },

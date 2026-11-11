@@ -98,7 +98,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, cardPayment
             {invoice.customerName ?? '—'}
           </p>
           <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="font-mono tabular-nums">{invoiceRef(invoice.id)}</span>
+            <span className="font-mono tabular-nums">{invoiceRef(invoice.id, invoice.externalRef)}</span>
             {invoice.syncedSource && (
               <SyncPill source={invoice.syncedSource} size="md" />
             )}

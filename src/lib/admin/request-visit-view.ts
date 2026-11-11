@@ -70,9 +70,13 @@ export function sheetVisitView(detail: DetailFields): SheetVisitView {
   };
 }
 
-/** The cancel confirmation's body: only mention a technician when one is on it. */
-export function cancelRequestDescription(hasTechnician: boolean): string {
-  return hasTechnician
+/**
+ * The cancel confirmation's body: only mention a technician when one is on it,
+ * and say so when the cancel also reaches the linked FieldPulse job.
+ */
+export function cancelRequestDescription(hasTechnician: boolean, inFieldpulse = false): string {
+  const base = hasTechnician
     ? "The technician will see it as cancelled."
     : "It moves to Cancelled and stays in the request history.";
+  return inFieldpulse ? `${base} This also cancels the job in FieldPulse.` : base;
 }

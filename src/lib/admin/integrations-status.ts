@@ -67,14 +67,20 @@ function envPresent(name: string): boolean {
   return Boolean(process.env[name]?.trim());
 }
 
-/** Read the org's selected AI model id (null when none persisted). */
-async function getOrgAiModelId(organizationId: string): Promise<string | null> {
+/** Read the org's AI model id (null when none persisted) and scheduling source. */
+async function getOrgSettingsBits(organizationId: string): Promise<{
+  readonly aiModelId: string | null;
+  readonly schedulingSource: "native" | "external" | null;
+}> {
   const [row] = await db
-    .select({ aiModelId: organizationSettings.aiModelId })
+    .select({
+      aiModelId: organizationSettings.aiModelId,
+      schedulingSource: organizationSettings.schedulingSource,
+    })
     .from(organizationSettings)
     .where(eq(organizationSettings.organizationId, organizationId))
     .limit(1);
-  return row?.aiModelId ?? null;
+  return { aiModelId: row?.aiModelId ?? null, schedulingSource: row?.schedulingSource ?? null };
 }
 
 const SETTINGS_INTEGRATIONS_HREF = "/admin/settings?tab=integrations";
@@ -90,19 +96,24 @@ const SERVER_KEY_DETAIL = "Connected with the account key set up on the server";
 export async function getIntegrationsStatus(
   organizationId: string,
 ): Promise<IntegrationStatusItem[]> {
-  const [fieldpulse, housecall, google, aiModelId] = await Promise.all([
+  const [fieldpulse, housecall, google, { aiModelId, schedulingSource }] = await Promise.all([
     getFieldpulseConnectionStatus(organizationId),
     getHousecallConnectionStatus(organizationId),
     getGoogleConnectionStatus(organizationId),
-    getOrgAiModelId(organizationId),
+    getOrgSettingsBits(organizationId),
   ]);
 
   // FSM — Fieldpulse. Connected (per-org key) or env-fallback key present.
   // A "Connected" badge must not stay green when the daily availability-sync
   // cron is failing — that's Rintegrations-1, fed by Rintegrations-2's data.
   const fieldpulseEnv = envPresent("FIELDPULSE_API_KEY") && envKeyFallbackAllowed(organizationId);
+  // Only an org that takes its availability FROM FieldPulse depends on that
+  // sync; for a natively scheduled org a failed availability sync affects
+  // nothing the office sees, so it must not paint the connection red.
   const fieldpulseSyncFailed =
-    fieldpulse.connected && fieldpulse.availabilitySyncStatus === "failed";
+    fieldpulse.connected &&
+    fieldpulse.availabilitySyncStatus === "failed" &&
+    schedulingSource === "external";
   const fieldpulseItem: IntegrationStatusItem = {
     key: "fieldpulse",
     label: "FieldPulse",

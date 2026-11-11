@@ -1759,7 +1759,7 @@ export function RequestDetailSheet({
                   open={cancelConfirmOpen}
                   onOpenChange={(o) => { if (!o && !isPatching) setCancelConfirmOpen(false); }}
                   title="Cancel this request?"
-                  description={cancelRequestDescription(Boolean(detail.assignedTo))}
+                  description={cancelRequestDescription(Boolean(detail.assignedTo), detail.syncedSource === 'fieldpulse')}
                   confirmLabel="Cancel request"
                   confirmingLabel="Cancelling…"
                   cancelLabel="Keep request"

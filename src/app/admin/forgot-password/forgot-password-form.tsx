@@ -69,7 +69,7 @@ export function ForgotPasswordForm({ googleEnabled }: ForgotPasswordFormProps) {
               <span>
                 Ask an administrator to reset your password from{' '}
                 <span className="font-medium text-foreground">
-                  Settings → Staff
+                  Staff
                 </span>
                 , then sign in with the new one.
               </span>

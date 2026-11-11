@@ -1,5 +1,5 @@
 import { it, expect, describe } from 'vitest';
-import { isCollectible, canResend, REMINDER_COOLDOWN_MS } from './invoice-collectible';
+import { isCollectible, canResend, invoiceRef, REMINDER_COOLDOWN_MS } from './invoice-collectible';
 
 const mk = (state: string, total: number, paid: number) => ({ state, totalCents: total, amountPaidCents: paid });
 
@@ -37,5 +37,15 @@ describe('canResend', () => {
   it('returns true when cooldown has long since passed', () => {
     const oldIso = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
     expect(canResend(oldIso, now, REMINDER_COOLDOWN_MS)).toBe(true);
+  });
+});
+
+describe('invoiceRef', () => {
+  it("shows the source system's own number for a mirrored invoice", () => {
+    expect(invoiceRef('4461fe5a-0000-4000-8000-000000000000', '20818747')).toBe('#20818747');
+  });
+  it('falls back to the short id for a native invoice', () => {
+    expect(invoiceRef('4461fe5a-0000-4000-8000-000000000000')).toBe('#4461FE5A');
+    expect(invoiceRef('4461fe5a-0000-4000-8000-000000000000', null)).toBe('#4461FE5A');
   });
 });
