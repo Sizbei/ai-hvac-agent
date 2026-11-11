@@ -37,6 +37,7 @@ import { getPaymentProvider, type PaymentProvider } from "@/lib/payments/provide
 import { cardPaymentsEnabled } from "@/lib/payments/card-enabled";
 import { businessInfoSchema } from "@/lib/admin/org-config-types";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
+import { monthToDateWindow } from "@/lib/admin/collected-cash";
 import { billingInvoiceIdSql, eidParam, jobBilledSql } from "@/lib/admin/estimate-billing-sql";
 
 /**
@@ -894,35 +895,35 @@ export async function getInvoiceOrgIdentity(
 }
 
 /**
- * Net cash collected this calendar month (UTC month boundary — an acceptable
- * approximation for a glance tile): payments received this month minus
- * refunds given this month. A payment that has since been refunded in full
- * reads `refunded`, so it still counts as received; its refund rows subtract.
- * Native money only (FieldPulse-mirrored payments are excluded, and so are any
- * refunds on them). Payments and refunds count only on invoices the viewer
- * sees (both are children of the invoice). neon-http returns sum() as a
- * string, hence the coercion.
+ * Net cash collected this calendar month, from the 1st at New York midnight
+ * (business timezone), by payment date: FieldPulse payments plus payments
+ * taken here, less refunds given this month. The rule that keeps the two from
+ * double counting lives in collected-cash.ts: FieldPulse payment rows count
+ * only on FieldPulse invoices, native payment rows only on native invoices,
+ * and an invoice's amount_paid_cents is never read. A native payment that has
+ * since been refunded in full reads `refunded`, so it still counts as
+ * received; its refund rows subtract. Payments and refunds count only on
+ * invoices the viewer sees (both are children of the invoice). neon-http
+ * returns sum() as a string, hence the coercion.
  */
 export async function collectedThisMonthCents(
   organizationId: string,
   vis: Visibility,
   now: Date = new Date(),
 ): Promise<number> {
-  const monthStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  const { from: monthStart } = monthToDateWindow(now);
+  const nativeInvoice = and(
+    eq(invoices.id, payments.invoiceId),
+    eq(invoices.organizationId, organizationId),
+    isNull(invoices.fieldpulseInvoiceId),
+    isNull(invoices.hcpInvoiceId),
+    visibleRows(invoices, vis),
   );
-  const [receivedRows, refundedRows] = await db.batch([
+  const [receivedRows, refundedRows, fieldpulseRows] = await db.batch([
     db
       .select({ value: sum(payments.amountCents) })
       .from(payments)
-      .innerJoin(
-        invoices,
-        and(
-          eq(invoices.id, payments.invoiceId),
-          eq(invoices.organizationId, organizationId),
-          visibleRows(invoices, vis),
-        ),
-      )
+      .innerJoin(invoices, nativeInvoice)
       .where(
         withTenant(
           payments,
@@ -943,14 +944,7 @@ export async function collectedThisMonthCents(
           eq(payments.organizationId, organizationId),
         ),
       )
-      .innerJoin(
-        invoices,
-        and(
-          eq(invoices.id, payments.invoiceId),
-          eq(invoices.organizationId, organizationId),
-          visibleRows(invoices, vis),
-        ),
-      )
+      .innerJoin(invoices, nativeInvoice)
       .where(
         withTenant(
           refunds,
@@ -960,8 +954,35 @@ export async function collectedThisMonthCents(
           lt(refunds.createdAt, now),
         ),
       ),
+    // FieldPulse payments by their real payment date. Settled only: an FP
+    // 'refunded' row has amount_refunded_cents 0.
+    db
+      .select({ value: sum(sql`${payments.amountCents} - ${payments.amountRefundedCents}`) })
+      .from(payments)
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          isNotNull(invoices.fieldpulseInvoiceId),
+          visibleRows(invoices, vis),
+        ),
+      )
+      .where(
+        withTenant(
+          payments,
+          organizationId,
+          isNotNull(payments.fieldpulsePaymentId),
+          eq(payments.status, "succeeded"),
+          gte(payments.createdAt, monthStart),
+          lt(payments.createdAt, now),
+        ),
+      ),
   ]);
-  return netCollectedCents(receivedRows[0]?.value, refundedRows[0]?.value);
+  return (
+    netCollectedCents(receivedRows[0]?.value, refundedRows[0]?.value) +
+    netCollectedCents(fieldpulseRows[0]?.value, 0)
+  );
 }
 
 /**

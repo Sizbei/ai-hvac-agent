@@ -14,13 +14,13 @@ export function pageLabel(page: number, total: number, per: number): string {
 }
 
 /**
- * "Collected this month" counts payments taken in this app only (FieldPulse /
- * Housecall Pro payment mirrors are record-only, see
- * src/lib/integrations/fieldpulse/import/payments.ts). With synced invoices on
- * the books the tile must say so, or $0.00 reads as "nothing came in".
+ * "Collected this month" is cash received since the 1st (New York time):
+ * FieldPulse payments by their payment date plus payments taken here, less
+ * refunds (collected-cash.ts). With synced invoices on the books the sublabel
+ * names both sources so the figure reads as what it is.
  */
 export function collectedThisMonthSublabel(hasSyncedInvoices: boolean): string {
   return hasSyncedInvoices
-    ? "Paid here since the 1st · FieldPulse/HCP not included"
+    ? "Since the 1st · FieldPulse payments + payments taken here"
     : "Received since the 1st, less refunds";
 }

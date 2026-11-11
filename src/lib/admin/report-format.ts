@@ -63,26 +63,28 @@ interface RevenueLike {
   readonly grossCollectedCents: number;
   readonly refundedCents: number;
   readonly netCollectedCents: number;
-  readonly syncedCollectedCents: number;
+  readonly fieldpulseCollectedCents: number;
 }
 
 /**
- * The Net revenue tile. An org on FieldPulse / HCP takes most of its money
- * there; that money only reaches us as paid-to-date on the mirrored invoices,
- * so the headline adds it to what was collected here (no invoice is in both)
- * and the sublabel names each part and its basis. Without synced money the
- * tile reads exactly as before.
+ * The "Collected" tile: cash received in the period, by payment date —
+ * FieldPulse payments plus payments taken here, less refunds. The two parts
+ * never overlap (collected-cash.ts). Without FieldPulse money the sublabel
+ * reads as before.
  */
-export function netRevenueTile(r: RevenueLike): { valueCents: number; sublabel: string } {
-  if (r.syncedCollectedCents > 0) {
+export function collectedTile(r: RevenueLike, days: number): { label: string; valueCents: number; sublabel: string } {
+  const label = `Collected (last ${days} days)`;
+  if (r.fieldpulseCollectedCents > 0) {
     return {
-      valueCents: r.netCollectedCents + r.syncedCollectedCents,
+      label,
+      valueCents: r.fieldpulseCollectedCents + r.netCollectedCents,
       sublabel:
-        `${formatCentsExact(r.syncedCollectedCents)} paid to date on FieldPulse/HCP invoices issued in the period · ` +
-        `${formatCentsExact(r.netCollectedCents)} received here in the period, less refunds`,
+        `${formatCentsExact(r.fieldpulseCollectedCents)} FieldPulse payments + ` +
+        `${formatCentsExact(r.netCollectedCents)} taken here, less refunds`,
     };
   }
   return {
+    label,
     valueCents: r.netCollectedCents,
     sublabel: `${formatCentsExact(r.grossCollectedCents)} collected − ${formatCentsExact(r.refundedCents)} refunded`,
   };

@@ -4,9 +4,12 @@
  * MONEY-SAFETY DECISION: imported FP payments are RECORD-ONLY.
  *  - They are NEVER written to invoice.amountPaidCents — FP supplies that via
  *    the invoice mirror.
- *  - They are excluded from collectedThisMonthCents and getSalesReport
- *    grossCollectedCents via `fieldpulsePaymentId IS NULL` guards (see aggregate
- *    guard files).
+ *  - They are the SOURCE of FieldPulse money in "collected" figures
+ *    (collectedThisMonthCents, getSalesReport fieldpulseCollectedCents), by
+ *    their payment date (created_at). Native-only sums (grossCollectedCents)
+ *    still exclude them via `fieldpulsePaymentId IS NULL`. The no-double-count
+ *    rule is in src/lib/admin/collected-cash.ts: FP rows count only on FP
+ *    invoices, and the invoice's amountPaidCents is never added on top.
  *  - This is explicitly documented in the payment row (comment on fieldpulsePaymentId).
  *
  * Payment status mapping (honest approach):

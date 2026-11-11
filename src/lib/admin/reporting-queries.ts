@@ -55,33 +55,20 @@ export interface SalesReportPeriod {
 export interface SalesReport {
   readonly fromDate: string;
   readonly toDate: string;
-  /** NATIVE succeeded payments in the period (gross, before refunds). Synced
-   * (FSM-mirrored) invoices never have native payment rows, so this is native
-   * money only — see syncedCollectedCents for the synced side. */
+  /** NATIVE payments received in the period (gross, before refunds), by
+   * payment date, on native invoices only. See collected-cash.ts. */
   readonly grossCollectedCents: number;
-  /** Refunds issued in the period (native; synced invoices have no native refunds). */
+  /** Native refunds issued in the period (FieldPulse payments carry none). */
   readonly refundedCents: number;
   /** grossCollectedCents - refundedCents (native net). */
   readonly netCollectedCents: number;
-  /** SYNCED revenue: paid-to-date (as reported by the FSM) on FSM-synced invoices
-   * ISSUED in the period (source-system date, not the import run). Reported SEPARATELY from native so the two sources are
-   * never blended into one double-counted total (a synced invoice has no native
-   * payment rows, so it would otherwise be invisible in collected revenue).
-   * BASIS CAVEAT: this is a creation-cohort, paid-to-date figure — NOT a
-   * payment-date sum like native grossCollectedCents. Synced invoices carry no
-   * per-payment dates, so it cannot be payment-date-scoped: it includes money
-   * received after the period on invoices issued in it, and misses money
-   * received in the period on older invoices.
-   *
-   * The Reports "Net revenue" headline (`netRevenueTile`) still adds the two,
-   * by decision: for an org that takes most of its money in FieldPulse/HCP a
-   * native-only headline reads near $0. There is no double count (FieldPulse
-   * payment mirrors are excluded from grossCollectedCents, HCP payments are
-   * never stored as native payments, and synced invoices refuse native
-   * payments), but the sum mixes the two bases, so the tile's sublabel names
-   * each part and its basis. Anything else that needs one consistent basis
-   * must read the two fields separately. */
-  readonly syncedCollectedCents: number;
+  /** FieldPulse payments received in the period, by their real payment date
+   * (the mirrored payment rows, status succeeded, on FieldPulse invoices).
+   * The headline "Collected" = this + netCollectedCents (`collectedTile`).
+   * No double count: each invoice's money comes from one source only
+   * (collected-cash.ts), and invoice amount_paid_cents is never read here.
+   * Housecall Pro stores no payment rows, so HCP money is not in it. */
+  readonly fieldpulseCollectedCents: number;
   /** Open balance across ALL invoices in state 'open' (= nativeArCents + syncedArCents). */
   readonly outstandingArCents: number;
   /** Open balance on NATIVE invoices only (no FSM source id). */
@@ -133,12 +120,14 @@ export async function getSalesReport(
     arRow,
     estimateRow,
     invoiceRow,
-    syncedCollectedRow,
+    fieldpulseCollectedRow,
   ] = await db.batch([
     // Gross collected: payments that actually cleared. A FULLY-refunded payment
     // flips status to 'refunded' — it was still collected (the refund is
     // subtracted separately below), so it must stay in gross. Excluding it while
     // still subtracting its refund double-reduced net collected.
+    // Native payments on NATIVE invoices only: a synced invoice's money is
+    // counted from its FieldPulse payment rows (last query), never twice.
     db
       .select({ value: sum(payments.amountCents) })
       .from(payments)
@@ -147,6 +136,8 @@ export async function getSalesReport(
         and(
           eq(invoices.id, payments.invoiceId),
           eq(invoices.organizationId, organizationId),
+          isNull(invoices.fieldpulseInvoiceId),
+          isNull(invoices.hcpInvoiceId),
           visibleRows(invoices, vis),
         ),
       )
@@ -161,11 +152,9 @@ export async function getSalesReport(
         ),
       ),
 
-    // Refunds issued within the period (net-collected subtracts these).
-    // NO fieldpulsePaymentId guard needed here: FP-imported payments (RECORD-ONLY)
-    // link only to FP-synced invoices, which refundPayment refuses — so refund rows
-    // can never exist against them. If that invariant ever changes, add the same
-    // IS NULL exclusion the gross-collected queries carry. A refund follows its
+    // Refunds issued within the period (net-collected subtracts these). Same
+    // native-payment-on-native-invoice scope as gross, so a refund is only
+    // subtracted from money this report counted. A refund follows its
     // payment's invoice: refunds on a hidden invoice are not subtracted, just as
     // that invoice's payments are not counted in gross.
     db
@@ -180,6 +169,8 @@ export async function getSalesReport(
         and(
           eq(invoices.id, payments.invoiceId),
           eq(invoices.organizationId, organizationId),
+          isNull(invoices.fieldpulseInvoiceId),
+          isNull(invoices.hcpInvoiceId),
           visibleRows(invoices, vis),
         ),
       )
@@ -187,6 +178,7 @@ export async function getSalesReport(
         withTenant(
           refunds,
           organizationId,
+          isNull(payments.fieldpulsePaymentId),
           gte(refunds.createdAt, fromDate),
           lte(refunds.createdAt, toDate),
         ),
@@ -269,22 +261,31 @@ export async function getSalesReport(
         ),
       ),
 
-    // Synced collected revenue: amount paid on FSM-synced invoices issued in the
-    // period. Synced invoices mirror FSM billing and carry no native payment
-    // rows, so without this they'd be invisible in collected revenue. Kept as its
-    // OWN figure (never folded into grossCollectedCents) so native + synced are
-    // never blended into a double-counted total.
+    // FieldPulse collected: the mirrored FieldPulse payment rows received in
+    // the period, by their real payment date (created_at), on FieldPulse
+    // invoices. Settled only: an FP 'refunded' row has amount_refunded_cents 0,
+    // so it would add money that went back. Never the invoice's
+    // amount_paid_cents, which is the same money summed by FieldPulse.
     db
-      .select({ value: sum(invoices.amountPaidCents) })
-      .from(invoices)
+      .select({ value: sum(sql`${payments.amountCents} - ${payments.amountRefundedCents}`) })
+      .from(payments)
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          sql`${invoices.fieldpulseInvoiceId} IS NOT NULL`,
+          visibleRows(invoices, vis),
+        ),
+      )
       .where(
         withTenant(
-          invoices,
+          payments,
           organizationId,
-          sql`(${invoices.fieldpulseInvoiceId} IS NOT NULL OR ${invoices.hcpInvoiceId} IS NOT NULL)`,
-          gte(INVOICE_ISSUED_SQL, fromDate),
-          lte(INVOICE_ISSUED_SQL, toDate),
-          visibleRows(invoices, vis),
+          sql`${payments.fieldpulsePaymentId} IS NOT NULL`,
+          eq(payments.status, "succeeded"),
+          gte(payments.createdAt, fromDate),
+          lte(payments.createdAt, toDate),
         ),
       ),
   ] as const);
@@ -292,7 +293,7 @@ export async function getSalesReport(
   const grossCollectedCents = toNumber(grossRow[0]?.value);
   const refundedCents = toNumber(refundRow[0]?.value);
   const netCollectedCents = grossCollectedCents - refundedCents;
-  const syncedCollectedCents = toNumber(syncedCollectedRow[0]?.value);
+  const fieldpulseCollectedCents = toNumber(fieldpulseCollectedRow[0]?.value);
   const nativeArCents = toNumber(arRow[0]?.native);
   const syncedArCents = toNumber(arRow[0]?.synced);
   const outstandingArCents = nativeArCents + syncedArCents;
@@ -319,7 +320,7 @@ export async function getSalesReport(
     grossCollectedCents,
     refundedCents,
     netCollectedCents,
-    syncedCollectedCents,
+    fieldpulseCollectedCents,
     outstandingArCents,
     nativeArCents,
     syncedArCents,
@@ -435,8 +436,16 @@ export async function getLeadSourceBreakdown(
     // 3. Gross revenue: succeeded payments on invoices of this source's requests
     //    (period-scoped by the REQUEST's createdAt — attribute money to the lead
     //    cohort). Summing payment rows directly avoids fan-out. All sides scoped.
+    //    Same one-source-per-invoice rule as "Collected" (collected-cash.ts):
+    //    native payments on native invoices, FieldPulse payment rows (net of
+    //    amount_refunded_cents) on FieldPulse invoices.
     db
-      .select({ source: sourceKey, value: sum(payments.amountCents) })
+      .select({
+        source: sourceKey,
+        value: sum(
+          sql`${payments.amountCents} - CASE WHEN ${payments.fieldpulsePaymentId} IS NOT NULL THEN ${payments.amountRefundedCents} ELSE 0 END`,
+        ),
+      })
       .from(serviceRequests)
       .innerJoin(
         invoices,
@@ -444,7 +453,7 @@ export async function getLeadSourceBreakdown(
       )
       .innerJoin(
         payments,
-        sql`${payments.invoiceId} = ${invoices.id} AND ${payments.organizationId} = ${organizationId} AND ${payments.status} = 'succeeded' AND ${payments.fieldpulsePaymentId} IS NULL`,
+        sql`${payments.invoiceId} = ${invoices.id} AND ${payments.organizationId} = ${organizationId} AND ${payments.status} = 'succeeded' AND ((${payments.fieldpulsePaymentId} IS NULL AND ${invoices.fieldpulseInvoiceId} IS NULL AND ${invoices.hcpInvoiceId} IS NULL) OR (${payments.fieldpulsePaymentId} IS NOT NULL AND ${invoices.fieldpulseInvoiceId} IS NOT NULL))`,
       )
       .where(
         withTenant(
