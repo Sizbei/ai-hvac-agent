@@ -9,7 +9,7 @@
  * `details` column only ever holds field NAMES / ids (never decrypted PII), so
  * it is safe to return verbatim.
  */
-import { and, eq, sql, count, desc, type SQL } from "drizzle-orm";
+import { and, eq, gte, sql, count, desc, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { auditLog, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
@@ -27,7 +27,9 @@ export async function getAuditLog(
   const limit = Math.min(MAX_LIMIT, Math.max(1, filters.limit ?? DEFAULT_LIMIT));
   const offset = (page - 1) * limit;
 
-  const conditions: SQL[] = [];
+  // Org viewers who don't see hidden history start at the go-live cutoff.
+  const sinceConditions: SQL[] = filters.since ? [gte(auditLog.createdAt, filters.since)] : [];
+  const conditions: SQL[] = [...sinceConditions];
   const action = filters.action?.trim();
   if (action) {
     conditions.push(eq(auditLog.action, action));
@@ -39,9 +41,9 @@ export async function getAuditLog(
 
   const whereClause = withTenant(auditLog, organizationId, ...conditions);
 
-  // The distinct-actions list is keyed only on the org (not the action/entity
-  // filters) so the filter dropdown always shows every option, even after one
-  // is selected.
+  // The distinct-actions list is keyed only on the org and the cutoff (not the
+  // action/entity filters) so the filter dropdown always shows every option,
+  // even after one is selected.
   const [countResult, rows, actionRows] = await Promise.all([
     db
       .select({ value: count() })
@@ -82,7 +84,7 @@ export async function getAuditLog(
     db
       .selectDistinct({ action: auditLog.action })
       .from(auditLog)
-      .where(withTenant(auditLog, organizationId))
+      .where(withTenant(auditLog, organizationId, ...sinceConditions))
       .orderBy(sql`${auditLog.action} ASC`),
   ]);
 

@@ -29,8 +29,24 @@ Entity filter uses the static `KNOWN_ENTITIES` enum in the page.
   If `JSON.parse` throws or the payload isn't an object, it returns
   `'(details unavailable)'` — not the raw string (which could contain a future
   leaked value).
-- `minTableWidth="40rem"` on `DataTableShell` prevents the table columns from
-  collapsing on narrow viewports. Do not remove.
+- Phone (<640px) stacks: the When and Actor columns are `hidden sm:table-cell`
+  and fold into a `sm:hidden` line at the top of the Action cell, which wraps
+  (`whitespace-normal`, details `break-words`, at every width), so nothing
+  scrolls sideways and long details never push Actor off-screen.
+  From `sm` up the Action column keeps `sm:min-w-[20rem]` (with 180 + 140 px
+  this is the old 40rem floor). Don't re-add `minTableWidth`: it is an inline
+  style and forces the sideways scroll on phones.
+- Go-live cutoff (P8 M7): a viewer with `!showHidden` (an org user, or the
+  platform admin while previewing, unless the org has `showHistory`) sees
+  entries only from `organizations.feature_flags.historyCutoff` on — the route
+  reads it via `getHistoryCutoff` (`src/lib/tenancy/features.ts`, parser
+  `historyCutoff` in `src/lib/tenancy/feature-flags.ts`) and passes
+  `since` to `getAuditLog`, which bounds the count, the rows AND the
+  distinct-actions list. No cutoff stored = no bound. A failed cutoff read is
+  a 500, never all history. The cutoff is set by
+  `scripts/agent/set-history-cutoff.mjs` (builder `historyCutoffPatchSql` in
+  `src/lib/admin/history-cutoff-sql.ts`); integration suite
+  `tests/integration/audit-history-cutoff.test.ts`.
 - Actor is `actorName` (display name); null renders as `<span italic>System</span>`
   for automated/unauthenticated actions. Never show a raw user ID.
 - `humanize()` (`humanizeAuditKey` in `src/lib/admin/audit-format.ts`)

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
+import { getHistoryCutoff } from "@/lib/tenancy/features";
 import { getAuditLog } from "@/lib/admin/audit-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -7,10 +8,11 @@ import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:audit-log-list:${session.userId}`,
@@ -32,11 +34,19 @@ export async function GET(request: NextRequest) {
       ? Math.min(100, Math.max(1, parseInt(limitParam, 10) || 50))
       : 50;
 
+    // Org viewers see entries from the go-live moment on; the platform admin
+    // (not previewing) and orgs with showHistory see everything. A failed
+    // cutoff read throws to the 500 below rather than showing all history.
+    const since = viewer.showHidden
+      ? undefined
+      : ((await getHistoryCutoff(session.organizationId)) ?? undefined);
+
     const result = await getAuditLog(session.organizationId, {
       action,
       entity,
       page,
       limit,
+      since,
     });
 
     return successResponse({

@@ -37,9 +37,12 @@ import {
   parseTemplatesResponse,
   templateDeleteErrorMessage,
 } from "@/lib/admin/template-response";
+import { reviewTextsOnFrom, templateStatus } from "@/lib/admin/review-switch-copy";
 
 export default function CommunicationTemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
+  // The org's reviewRequests switch (P8 M9); true until the server says otherwise.
+  const [reviewTextsOn, setReviewTextsOn] = useState(true);
   const [loading, setLoading] = useState(true);
   // Load failure (GET) vs a failed toggle: only the first replaces the list.
   const [loadFailed, setLoadFailed] = useState(false);
@@ -58,7 +61,9 @@ export default function CommunicationTemplatesPage() {
     try {
       const response = await fetch("/api/admin/communications/templates");
       if (!response.ok) throw new Error(`templates GET ${response.status}`);
-      setTemplates(parseTemplatesResponse<Template>(await response.json()));
+      const json: unknown = await response.json();
+      setTemplates(parseTemplatesResponse<Template>(json));
+      setReviewTextsOn(reviewTextsOnFrom(json));
       setLoadFailed(false);
     } catch (err) {
       console.error("Couldn’t load templates:", err);
@@ -197,6 +202,7 @@ export default function CommunicationTemplatesPage() {
             <TemplateCard
               key={template.id}
               template={template}
+              reviewTextsOn={reviewTextsOn}
               onEdit={() => openEdit(template)}
               onToggleActive={() => handleToggleActive(template)}
               toggling={togglingId === template.id}
@@ -241,12 +247,14 @@ export default function CommunicationTemplatesPage() {
 
 function TemplateCard({
   template,
+  reviewTextsOn,
   onEdit,
   onToggleActive,
   onDelete,
   toggling,
 }: {
   readonly template: Template;
+  readonly reviewTextsOn: boolean;
   readonly onEdit: () => void;
   readonly onToggleActive: () => void;
   readonly toggling: boolean;
@@ -259,11 +267,12 @@ function TemplateCard({
     (t) => t.value === template.templateType,
   );
   const isEmail = template.templateType.startsWith("email");
+  const status = templateStatus(template, reviewTextsOn);
 
   return (
     <Card
       className={
-        template.isActive
+        status.active
           ? "flex flex-col gap-3 p-5"
           : "flex flex-col gap-3 p-5 opacity-60"
       }
@@ -278,12 +287,12 @@ function TemplateCard({
         <Badge
           variant="outline"
           className={
-            template.isActive
+            status.active
               ? "shrink-0 border-success/30 bg-success-light text-success"
               : "shrink-0 text-muted-foreground"
           }
         >
-          {template.isActive ? "Active" : "Inactive"}
+          {status.label}
         </Badge>
       </div>
 

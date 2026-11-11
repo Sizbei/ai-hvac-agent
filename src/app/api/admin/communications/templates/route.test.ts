@@ -16,6 +16,8 @@ const getAdminSession = vi.fn();
 vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
+// GET reads the viewer (server-only); POST still reads the session above.
+vi.mock("@/lib/auth/viewer", () => ({ getViewerContext: vi.fn() }));
 
 vi.mock("@/lib/rate-limit", () => ({
   slidingWindow: () => ({ allowed: true }),

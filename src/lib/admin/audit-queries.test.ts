@@ -24,15 +24,21 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/db/tenant', () => ({
-  withTenant: (_table: unknown, _orgId: string, ...conditions: unknown[]) =>
+const { withTenantSpy } = vi.hoisted(() => ({
+  withTenantSpy: vi.fn((_table: unknown, _orgId: string, ...conditions: unknown[]) =>
     conditions[0] ?? true,
+  ),
 }));
+vi.mock('@/lib/db/tenant', () => ({ withTenant: withTenantSpy }));
 
-const { eqSpy } = vi.hoisted(() => ({ eqSpy: vi.fn((...a: unknown[]) => a) }));
+const { eqSpy, gteSpy } = vi.hoisted(() => ({
+  eqSpy: vi.fn((...a: unknown[]) => a),
+  gteSpy: vi.fn((...a: unknown[]) => ['gte', ...a]),
+}));
 
 vi.mock('drizzle-orm', () => ({
   eq: eqSpy,
+  gte: gteSpy,
   and: (...a: unknown[]) => a,
   sql: (...a: unknown[]) => a,
   count: () => 'count',
@@ -74,6 +80,8 @@ function seed(opts: {
 beforeEach(() => {
   selectQueue.length = 0;
   eqSpy.mockClear();
+  gteSpy.mockClear();
+  withTenantSpy.mockClear();
 });
 
 describe('getAuditLog', () => {
@@ -158,5 +166,27 @@ describe('getAuditLog', () => {
     seed({ count: 0, rows: [], actions: [] });
     await getAuditLog(ORG, {});
     expect(eqSpy).toHaveBeenCalledWith('u.org', ORG);
+  });
+
+  it('without a cutoff, adds no created_at bound', async () => {
+    seed({ count: 0, rows: [], actions: [] });
+    await getAuditLog(ORG, {});
+    expect(gteSpy).not.toHaveBeenCalled();
+  });
+
+  it('with a cutoff, bounds the count, the rows and the action list by created_at >= cutoff', async () => {
+    const since = new Date('2026-11-10T17:30:00.000Z');
+    seed({ count: 0, rows: [], actions: [] });
+    await getAuditLog(ORG, { action: 'customer_updated', since });
+    expect(gteSpy).toHaveBeenCalledWith('al.createdAt', since);
+    // count + rows share one where clause; the action list builds its own.
+    expect(withTenantSpy).toHaveBeenCalledTimes(2);
+    for (const call of withTenantSpy.mock.calls) {
+      expect(call[1]).toBe(ORG);
+      expect(call.slice(2)).toContainEqual(['gte', 'al.createdAt', since]);
+    }
+    // The action list stays unfiltered by action (dropdown shows every option).
+    const actionListCall = withTenantSpy.mock.calls.find((c) => c.length === 3);
+    expect(actionListCall).toBeDefined();
   });
 });

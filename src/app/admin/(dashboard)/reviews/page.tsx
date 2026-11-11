@@ -14,6 +14,7 @@ import { SectionCard } from '@/components/admin/ui/section-card';
 import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { reviewsEmptyDescription } from '@/lib/admin/review-switch-copy';
 
 const PER_PAGE = 50;
 
@@ -88,7 +89,7 @@ function ReviewRequestLink({ review }: { readonly review: ReviewRow }) {
 export default function ReviewsPage() {
   useAdminPageTitle('Reviews');
   const [page, setPage] = useState(1);
-  const { reviews, total, stats, isLoading, error } = useReviews({ page });
+  const { reviews, total, stats, reviewTextsOn, isLoading, error } = useReviews({ page });
 
   const responseRate =
     stats && stats.count > 0
@@ -150,7 +151,7 @@ export default function ReviewsPage() {
           <EmptyState
             icon={Star}
             title="No reviews yet"
-            description="Review requests are sent automatically when a request is completed."
+            description={reviewsEmptyDescription(reviewTextsOn)}
           />
         ) : (
           <>
