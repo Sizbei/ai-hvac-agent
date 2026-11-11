@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { StepGlyph } from '@/components/admin/ui/step-glyph';
 import { CopySignInLink } from '@/components/admin/setup/copy-sign-in-link';
 import { rowActionsFor, type StepRow } from '@/lib/admin/setup-view';
@@ -43,14 +43,17 @@ function RowActions({ row, heroId }: { row: StepRow; heroId?: string }) {
   return (
     <>
       {show.primary && step.href && (
-        <Button variant="outline" size="sm" className={ROW_BUTTON} render={<Link href={step.href} />}>
+        <Link href={step.href} className={buttonVariants({ variant: 'outline', size: 'sm', className: ROW_BUTTON })}>
           {step.hrefLabel}
-        </Button>
+        </Link>
       )}
       {show.secondary && step.secondaryHref && (
-        <Button variant="outline" size="sm" className={ROW_BUTTON} render={<Link href={step.secondaryHref} />}>
+        <Link
+          href={step.secondaryHref}
+          className={buttonVariants({ variant: 'outline', size: 'sm', className: ROW_BUTTON })}
+        >
           {step.secondaryLabel}
-        </Button>
+        </Link>
       )}
     </>
   );

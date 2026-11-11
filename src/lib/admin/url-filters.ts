@@ -35,3 +35,26 @@ export function fromQueryString(search: string): Record<string, string> {
   for (const [k, v] of sp.entries()) out[k] = v;
   return out;
 }
+
+/**
+ * Query keys the filter sync carries over: the quick tour's back-to-tour strip
+ * reads them (onboarding spec D4), and a client navigation can remount the page
+ * after the sync's first write, so dropping them would lose the strip.
+ */
+const PRESERVED_KEYS = ['from', 'lesson', 'replay'] as const;
+
+/**
+ * The query string useUrlFilterSync writes: the page's filter params plus any
+ * preserved key present in `currentSearch`. A filter of the same name wins.
+ */
+export function filterSyncSearch(
+  params: Record<string, string | undefined>,
+  currentSearch: string,
+): string {
+  const current = fromQueryString(currentSearch);
+  const preserved: Record<string, string> = {};
+  for (const key of PRESERVED_KEYS) {
+    if (!(key in params) && current[key]) preserved[key] = current[key];
+  }
+  return toQueryString({ ...preserved, ...params });
+}

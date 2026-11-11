@@ -48,12 +48,18 @@ export const PHASE_TITLES: Record<1 | 2 | 3, string> = {
   3: "Run your first request",
 };
 
+/** Phase 3 once a request is booked: the business already runs requests. */
+const PHASE_3_TITLE_BOOKED = "Run requests";
+
 const required = (p: OnboardingPayload) => p.steps.filter((s) => s.required);
+const firstRequestBooked = (p: OnboardingPayload) =>
+  p.steps.some((s) => s.id === "book_first_request" && s.done);
 const optional = (p: OnboardingPayload) => p.steps.filter((s) => !s.required);
 
 /** The three phase cards (spec §4 "Progress numbers"); optional steps live in `optionalGroup`. */
 export function phasesOf(payload: OnboardingPayload): PhaseGroup[] {
   const req = required(payload);
+  const booked = firstRequestBooked(payload);
   return ([1, 2, 3] as const).map((phase) => {
     const rows = req
       .map((step, i) => ({ step, number: i + 1 }))
@@ -61,7 +67,7 @@ export function phasesOf(payload: OnboardingPayload): PhaseGroup[] {
     const done = rows.filter((r) => r.step.done).length;
     return {
       phase,
-      title: PHASE_TITLES[phase],
+      title: phase === 3 && booked ? PHASE_3_TITLE_BOOKED : PHASE_TITLES[phase],
       rows,
       meta: rows.length > 0 ? `${done} of ${rows.length}` : undefined,
       collapsed: rows.length > 0 && done === rows.length,
@@ -91,20 +97,29 @@ export function heroFor(payload: OnboardingPayload): { attention?: DerivedStep; 
   return next ? { upNext: next } : {};
 }
 
+/** Header meta next to the required-steps bar: "3 of 4 required steps". */
+export function requiredMeta(payload: OnboardingPayload): string {
+  const { requiredDone, requiredTotal } = payload.progress;
+  return `${requiredDone} of ${requiredTotal} required steps`;
+}
+
 export function showFinished(payload: OnboardingPayload): boolean {
   const { requiredDone, requiredTotal } = payload.progress;
   return requiredDone === requiredTotal || payload.completedSeenAt != null;
 }
 
-const SUBTITLE_ACTIVE =
-  "Finish these to run your first request. Steps complete on their own · about 10 min, plus your technician's sign-in";
+const SUBTITLE_TAIL = "Steps complete on their own · about 10 min, plus your technician's sign-in";
+const SUBTITLE_ACTIVE = `Finish these to run your first request. ${SUBTITLE_TAIL}`;
+const SUBTITLE_BOOKED = `A few steps left to finish setting up. ${SUBTITLE_TAIL}`;
 const SUBTITLE_SETTLED = "Steps complete on their own.";
 const DISMISSED_NOTE = "Hidden from the home page.";
 
 export function subtitleFor(payload: OnboardingPayload): string {
   return payload.dismissedAt != null || payload.completedSeenAt != null
     ? SUBTITLE_SETTLED
-    : SUBTITLE_ACTIVE;
+    : firstRequestBooked(payload)
+      ? SUBTITLE_BOOKED
+      : SUBTITLE_ACTIVE;
 }
 
 export function dismissedNote(payload: OnboardingPayload): string | null {

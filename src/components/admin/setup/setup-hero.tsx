@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { StepGlyph } from '@/components/admin/ui/step-glyph';
 import { CopySignInLink } from '@/components/admin/setup/copy-sign-in-link';
@@ -25,9 +25,9 @@ function HeroAction({ step, variant }: { step: DerivedStep; variant: 'default' |
   }
   if (!step.href) return null;
   return (
-    <Button variant={variant} className="w-full sm:w-auto" render={<Link href={step.href} />}>
+    <Link href={step.href} className={buttonVariants({ variant, className: 'w-full sm:w-auto' })}>
       {step.hrefLabel}
-    </Button>
+    </Link>
   );
 }
 
