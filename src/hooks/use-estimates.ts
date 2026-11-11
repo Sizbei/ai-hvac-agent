@@ -124,7 +124,8 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
         setTotal(cached.data.total);
         setStats(cached.data.stats);
         setIsLoading(false);
-        return;
+        // Fresh: nothing to fetch. Stale: keep it on screen and revalidate below.
+        if (estimatesCache.isFresh(key)) return;
       }
 
       // Bail if another fetch is already in flight (unless busting) — guard the
@@ -132,7 +133,7 @@ export function useEstimates(params: UseEstimatesParams = {}): UseEstimatesResul
       if (fetchGate({ inFlightKey: inFlightKeyRef.current, key, bust }) === 'skip') return;
 
       inFlightKeyRef.current = key;
-      setIsLoading(true);
+      if (!cached) setIsLoading(true);
       try {
         const res = await adminFetch(`/api/admin/estimates${buildQuery(params)}`);
         if (!res.ok) {

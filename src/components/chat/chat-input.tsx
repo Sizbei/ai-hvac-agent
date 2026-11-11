@@ -227,7 +227,7 @@ export function ChatInput({
           autoFocus
           rows={1}
           aria-label="Chat message input"
-          className="flex-1 resize-none rounded-md border border-border-input bg-surface-raised px-3 py-2.5 text-[15px] text-foreground placeholder:text-foreground-faint transition-[background-color,border-color] duration-[var(--dur-hover)] focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 overflow-y-auto"
+          className="flex-1 resize-none rounded-md border border-border-input bg-surface-raised px-3 py-2.5 text-base sm:text-[15px] text-foreground placeholder:text-foreground-faint transition-[background-color,border-color] duration-[var(--dur-hover)] focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 overflow-y-auto"
           style={{ lineHeight: '1.5rem', minHeight: '2.75rem' }}
         />
 

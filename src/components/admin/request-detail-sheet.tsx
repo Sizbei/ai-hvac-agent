@@ -280,10 +280,13 @@ function InvoiceStatusBadge({ status }: { readonly status: string }) {
 function InfoRow({
   label,
   value,
+  href,
   hideEmpty = false,
 }: {
   readonly label: string;
   readonly value: string | null;
+  /** Makes the value a link (tel:/mailto:) — one tap to call from a phone. */
+  readonly href?: string;
   /** Skip the row entirely when there is no value (intake fields). */
   readonly hideEmpty?: boolean;
 }) {
@@ -292,7 +295,15 @@ function InfoRow({
     <div className="flex justify-between gap-4 py-1">
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
       <span className="min-w-0 break-words text-right text-sm font-medium">
-        {value ?? <span className="text-muted-foreground italic">Not provided</span>}
+        {value === null ? (
+          <span className="text-muted-foreground italic">Not provided</span>
+        ) : href ? (
+          <a href={href} className="text-link underline-offset-4 hover:underline">
+            {value}
+          </a>
+        ) : (
+          value
+        )}
       </span>
     </div>
   );
@@ -1118,8 +1129,12 @@ export function RequestDetailSheet({
                 <h3 className="text-sm font-semibold mb-2">Customer information</h3>
                 <div className="rounded-md border p-3 space-y-1">
                   <InfoRow label="Name" value={detail.customerName} />
-                  {detail.customerPhone && <InfoRow label="Phone" value={detail.customerPhone} />}
-                  {detail.customerEmail && <InfoRow label="Email" value={detail.customerEmail} />}
+                  {detail.customerPhone && (
+                    <InfoRow label="Phone" value={detail.customerPhone} href={`tel:${detail.customerPhone.replace(/[^\d+]/g, '')}`} />
+                  )}
+                  {detail.customerEmail && (
+                    <InfoRow label="Email" value={detail.customerEmail} href={`mailto:${detail.customerEmail}`} />
+                  )}
                   {detail.address && <InfoRow label="Address" value={detail.address} />}
                 </div>
               </section>

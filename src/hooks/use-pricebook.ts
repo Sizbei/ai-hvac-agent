@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
@@ -90,9 +90,13 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
   const [isLoading, setIsLoading] = useState(() => pricebookCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
 
+  // Latest-wins: an older response must not overwrite a newer filter/page.
+  const runRef = useRef(0);
+
   const fetch_ = useCallback(
     async ({ bust = false }: { bust?: boolean } = {}) => {
       if (bust) pricebookCache.invalidate(key);
+      const run = ++runRef.current;
 
       const cached = pricebookCache.get(key);
       const hasCachedData = cached !== null;
@@ -116,6 +120,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         const query = qs.toString();
         const res = await adminFetch(`/api/admin/pricebook${query ? `?${query}` : ''}`);
         const json = await res.json();
+        if (run !== runRef.current) return;
         if (json.success) {
           setError(null);
           setItems(json.data.items);
@@ -131,9 +136,9 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
-        if (!hasCachedData) setError('Network error');
+        if (run === runRef.current && !hasCachedData) setError('Network error');
       } finally {
-        setIsLoading(false);
+        if (run === runRef.current) setIsLoading(false);
       }
     },
     [key, page, limit, search, type, includeInactive, isLaborItem, sort],

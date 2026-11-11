@@ -2,7 +2,8 @@
 
 import { listViewState } from '@/lib/admin/list-view-state';
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { BackToGuideBanner } from '@/components/admin/setup/back-to-guide-banner';
 import { useOpenFromParam } from '@/hooks/use-open-from-param';
@@ -52,10 +53,50 @@ export default function AdminRequestsPage() {
 
   useAdminPageTitle('Requests');
 
-  // Persist filters to the URL (shareable links + survives refresh). Page and
-  // the detail sheet selection are intentionally NOT persisted. Defaults map to
-  // '' so they're dropped from the URL.
+  // The open request lives in the URL (`?request=<id>`): a link to it can be
+  // shared, and opening one from the list pushes a history entry so Back (or a
+  // phone's back swipe) closes the sheet instead of leaving Requests.
+  const pushedEntryRef = useRef(false);
+  const openRequest = useCallback((id: string) => {
+    if (!pushedEntryRef.current) {
+      const sp = new URLSearchParams(window.location.search);
+      sp.set('request', id);
+      window.history.pushState(null, '', `${window.location.pathname}?${sp.toString()}`);
+      pushedEntryRef.current = true;
+    }
+    setSelectedRequestId(id);
+  }, []);
+  const closeRequest = useCallback(() => {
+    if (pushedEntryRef.current) {
+      // Consume our entry; popstate then clears the selection.
+      pushedEntryRef.current = false;
+      window.history.back();
+      return;
+    }
+    setSelectedRequestId(null);
+  }, []);
+  useEffect(() => {
+    const onPopState = () => {
+      pushedEntryRef.current = false;
+      const id = new URLSearchParams(window.location.search).get('request');
+      setSelectedRequestId(id && isUuid(id) ? id : null);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+  // A link to a request followed while already on this page (global search, a
+  // notification) changes only the query string — the page does not remount, so
+  // the mount-time restore below never sees it.
+  const requestParam = useSearchParams().get('request');
+  useEffect(() => {
+    if (requestParam && isUuid(requestParam)) setSelectedRequestId(requestParam);
+  }, [requestParam]);
+
+  // Persist filters and the open request to the URL (shareable links + survives
+  // refresh). Page is intentionally NOT persisted. Defaults map to '' so
+  // they're dropped from the URL.
   const urlFilterState = {
+    request: selectedRequestId ?? '',
     status: statusFilter,
     urgency: urgencyFilter,
     assignedTo: assignedToFilter,
@@ -75,7 +116,7 @@ export default function AdminRequestsPage() {
     if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as RequestSortKey);
     if (p.q) { setSearchInput(p.q); setDebouncedSearch(p.q); }
     // Deep link from a customer's history, an estimate or an invoice: open that
-    // request's detail sheet. Not persisted, so closing it drops the param.
+    // request's detail sheet. Closing it drops the param.
     if (p.request && isUuid(p.request)) setSelectedRequestId(p.request);
   }, []);
   useUrlFilterSync(urlFilterState, restoreFiltersFromUrl);
@@ -169,7 +210,7 @@ export default function AdminRequestsPage() {
       <RequestTable
         requests={requests}
         isLoading={isLoading}
-        onRowClick={(req) => setSelectedRequestId(req.id)}
+        onRowClick={(req) => openRequest(req.id)}
         onCreate={() => setCreateOpen(true)}
         hasActiveFilters={
           !!statusFilter || !!urgencyFilter || !!assignedToFilter || !!debouncedSearch || isAfterHoursFilter
@@ -214,7 +255,7 @@ export default function AdminRequestsPage() {
 
       <RequestDetailSheet
         requestId={selectedRequestId}
-        onClose={() => setSelectedRequestId(null)}
+        onClose={closeRequest}
         onAssigned={refetch}
       />
     </PageShell>

@@ -120,11 +120,12 @@ export function useInventory(params: UseInventoryParams = {}): UseInventoryResul
         setTrackedIds(cachedInv.data.trackedPricebookItemIds);
         setPurchaseOrders(cachedPo.data.purchaseOrders);
         setPurchaseOrdersTotal(cachedPo.data.total);
-        return;
+        // Fresh: nothing to fetch. Stale: keep it on screen and revalidate below.
+        if (inventoryCache.isFresh(invKey) && poCache.isFresh(poKey)) return;
       }
 
       const seq = ++fetchSeqRef.current;
-      setIsLoading(true);
+      if (!(cachedInv && cachedPo)) setIsLoading(true);
 
       try {
         const invQs = new URLSearchParams();

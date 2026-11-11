@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSwrCache } from '@/lib/admin/swr-cache';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 
@@ -146,9 +146,15 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
   const [isLoading, setIsLoading] = useState(() => invoicesCache.get(key) === null);
   const [error, setError] = useState<string | null>(null);
 
+  // Latest-wins: a response only applies if no newer fetch has started since.
+  // Without it, a slow response for the previous tab could land last and leave
+  // the wrong invoices under the current tab.
+  const runRef = useRef(0);
+
   const fetchAll = useCallback(
     async ({ bust = false }: { bust?: boolean } = {}): Promise<void> => {
       if (bust) invoicesCache.invalidate(key);
+      const run = ++runRef.current;
 
       const cached = invoicesCache.get(key);
       const hasCachedData = cached !== null;
@@ -168,6 +174,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
 
       try {
         const res = await adminFetch(`/api/admin/invoices${buildQuery(params)}`);
+        if (run !== runRef.current) return;
         if (!res.ok) {
           if (!hasCachedData) setError('Couldn’t load invoices. Please try again.');
           return;
@@ -184,6 +191,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
             cardPaymentsEnabled?: boolean;
           };
         };
+        if (run !== runRef.current) return;
         if (body.success) {
           const fresh: InvoicesPayload = {
             invoices: body.data.invoices,
@@ -206,9 +214,9 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
-        if (!hasCachedData) setError('Could not connect to server. Please try again.');
+        if (run === runRef.current && !hasCachedData) setError('Could not connect to server. Please try again.');
       } finally {
-        setIsLoading(false);
+        if (run === runRef.current) setIsLoading(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

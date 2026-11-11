@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AlertTriangle } from 'lucide-react';
@@ -14,6 +14,7 @@ import { PlatformUiProvider } from '@/components/admin/platform-ui-context';
 import { BillingEntryProvider } from '@/components/admin/billing-entry-context';
 import { PreviewBanner } from '@/components/admin/preview-banner';
 import { usePreviewSync } from '@/hooks/use-preview-sync';
+import { useMainScrollRestore } from '@/hooks/use-main-scroll-restore';
 import { previewSyncEnabled } from '@/lib/admin/preview-sync';
 import type { AdminRole } from '@/lib/auth/types';
 import type { BillingEntry } from '@/lib/admin/billing-entry';
@@ -69,6 +70,9 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const mobileTitle = useMobileTitle(setupPlacement, mapEnabled);
+  // The admin scrolls inside <main>; restore its position on Back/Forward.
+  const mainRef = useRef<HTMLElement>(null);
+  useMainScrollRestore(mainRef, usePathname());
   usePreviewSync(
     previewSyncEnabled({ platformUi, previewing: preview !== null }),
     preview !== null,
@@ -123,7 +127,7 @@ export function DashboardShell({
                   </div>
                 )}
                 <GlobalSearch placement={setupPlacement} mapEnabled={mapEnabled} />
-                <main className="flex-1 overflow-auto">{children}</main>
+                <main ref={mainRef} className="flex-1 overflow-auto">{children}</main>
               </div>
             </div>
           </BillingEntryProvider>
