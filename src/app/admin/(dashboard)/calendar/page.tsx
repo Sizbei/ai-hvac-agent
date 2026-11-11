@@ -1,7 +1,8 @@
 'use client';
 
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import dynamic from 'next/dynamic';
 import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
@@ -138,6 +139,16 @@ export default function CalendarPage() {
   useAdminPageTitle('Calendar');
   const [date, setDate] = useState<string>(todayBusiness);
   const [view, setView] = useState<CalendarView>('day');
+  // View and date live in the URL, so a refresh or Back returns to the same
+  // week instead of today's day view. Defaults are dropped from the URL.
+  const restoreFromUrl = useCallback((p: Record<string, string>) => {
+    if (p.view && VIEW_TABS.some((t) => t.id === p.view)) setView(p.view as CalendarView);
+    if (p.date && /^\d{4}-\d{2}-\d{2}$/.test(p.date)) setDate(p.date);
+  }, []);
+  useUrlFilterSync(
+    { view: view === 'day' ? '' : view, date: date === todayBusiness() ? '' : date },
+    restoreFromUrl,
+  );
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [status, setStatus] = useState<CalendarStatus | null>(null);
   // Initialize to false (SSR-safe default); sync from localStorage after mount

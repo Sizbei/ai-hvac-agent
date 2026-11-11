@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthShell } from '@/components/auth/auth-shell';
 import { signupEnabledFromEnv } from '@/lib/auth/signup-enabled';
 import { resolveLoginMode, type LoginMode } from '@/lib/auth/login-mode';
+import { safeAdminReturnPath } from '@/lib/admin/admin-fetch';
 
 /** Generic, non-enumerating messages for the ?error= codes the OIDC callback
  * redirects with. All denial paths map to a single uninformative message. */
@@ -158,7 +159,9 @@ function PasswordForm({ onError }: { readonly onError: (msg: string) => void }) 
         return;
       }
 
-      window.location.href = '/admin/requests';
+      // Return to where the session expired, when that is a safe admin path.
+      const next = new URLSearchParams(window.location.search).get('next');
+      window.location.href = safeAdminReturnPath(next) ?? '/admin/requests';
     } catch {
       onError('Network error. Please try again.');
     } finally {

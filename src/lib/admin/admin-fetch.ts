@@ -25,9 +25,29 @@ export async function adminFetch(
 ): Promise<Response> {
   const res = await fetch(input, init);
   if (res.status === 401) {
-    window.location.href = '/admin/login';
+    // Carry where the user was, so signing back in returns them there.
+    window.location.href = loginUrlWithReturn(window.location.pathname + window.location.search);
     // Throw so the caller's try/catch exits without running further logic.
     throw new AdminAuthRedirectError();
   }
   return res;
+}
+
+/**
+ * A same-site admin path that is safe to return to after sign-in, or null.
+ * Only `/admin/...` paths are accepted — never a scheme, host, `//` or
+ * backslash form — so `?next=` can't be used as an open redirect.
+ */
+export function safeAdminReturnPath(next: string | null | undefined): string | null {
+  if (!next) return null;
+  if (!/^\/admin(\/|\?|$)/.test(next)) return null;
+  if (next.includes('//') || next.includes('\\') || /[\u0000-\u001f]/.test(next)) return null;
+  if (/^\/admin\/(login|forgot-password|invite)(\/|\?|$)/.test(next)) return null;
+  return next;
+}
+
+/** The sign-in URL carrying a return path (dropped when it isn't a safe one). */
+export function loginUrlWithReturn(current: string): string {
+  const safe = safeAdminReturnPath(current);
+  return safe ? `/admin/login?next=${encodeURIComponent(safe)}` : '/admin/login';
 }

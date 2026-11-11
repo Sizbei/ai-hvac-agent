@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useUrlFilterSync } from '@/hooks/use-url-filter-sync';
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw, Users } from 'lucide-react';
 import { useDispatchBoard } from '@/hooks/use-dispatch-board';
 import { DispatchColumn } from '@/components/admin/dispatch/dispatch-column';
@@ -64,6 +65,11 @@ function formatDayLabel(isoDate: string): string {
 export default function DispatchPage() {
   useAdminPageTitle('Dispatch');
   const [date, setDate] = useState<string>(todayBusiness);
+  // The day lives in the URL, so a refresh or Back returns to the same board.
+  const restoreFromUrl = useCallback((p: Record<string, string>) => {
+    if (p.date && /^\d{4}-\d{2}-\d{2}$/.test(p.date)) setDate(p.date);
+  }, []);
+  useUrlFilterSync({ date: date === todayBusiness() ? '' : date }, restoreFromUrl);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   const { board, isLoading, error, refetch } = useDispatchBoard(date);

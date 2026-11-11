@@ -263,6 +263,13 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
   const groupRef = useRef<HTMLDivElement>(null);
   // Fixed per page load: dates and the overdue cut read against it.
   const [now] = useState(() => new Date());
+  // Bumped by "Try again" (and when the phone comes back online) to reload.
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const retry = () => setAttempt((n) => n + 1);
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -285,11 +292,11 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
             });
           }
         } else {
-          setError('Failed to load jobs');
+          setError('Couldn’t load your jobs.');
         }
       } catch {
         if (cancelled) return;
-        setError('Could not connect to server.');
+        setError('No connection. Your jobs will load when you’re back online.');
       }
       if (!cancelled) {
         setIsLoading(false);
@@ -300,7 +307,7 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
       cancelled = true;
       controller.abort();
     };
-  }, [range, now]);
+  }, [range, now, attempt]);
 
   let content: React.ReactNode;
   if (isLoading) {
@@ -314,7 +321,21 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
       </ul>
     );
   } else if (error) {
-    content = <p className="text-[15px] text-danger-strong">{error}</p>;
+    content = (
+      <div className="space-y-3">
+        <p className="text-[15px] text-danger-strong">{error}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setIsLoading(true);
+            setAttempt((n) => n + 1);
+          }}
+          className="inline-flex min-h-11 items-center rounded-md border border-border-input bg-surface-raised px-4 text-[15px] font-medium text-foreground"
+        >
+          Try again
+        </button>
+      </div>
+    );
   } else if (range === 'today') {
     const { current, older } = splitTodayJobs(jobs, now);
     content = (
