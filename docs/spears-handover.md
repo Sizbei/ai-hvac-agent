@@ -823,3 +823,28 @@ errors, `npx vitest run` → no drop from the live baseline.
   Chick.
 - Checked as Chick on prod: dashboard, setup with video, requests, customers
   (390 px), invoices and calendar.
+
+## Deploy record: first-look review fixes (2026-11-11)
+
+- D6 `09cc806` → `ai-hvac-agent-ke2hfogqd`. Smoke tests pass.
+- Shipped: a password sign-in link on `/admin/login` (Chick's mail is on
+  Microsoft 365, not Google); the public home page no longer reads as a demo;
+  invoices show their FieldPulse number; dashboard tiles count imported open
+  requests; the FieldPulse card only shows "Sync failed" for an org scheduled
+  from FieldPulse (prod's availability sync returns HTTP 403 and is unused);
+  cancelling a FieldPulse-linked request says it also cancels the FieldPulse
+  job; the daily invoice job now re-pulls every open FieldPulse invoice by its
+  own id, so unlinked open invoices clear when paid.
+- Prod data: the 3 non-FieldPulse chats and the one request a test chat made
+  (`HVAC-2414D750`) are hidden. Undo record:
+  `~/.hvac-golive/dummy-chats-hidden-2026-11-11T13-17-22-196Z.json`
+  (set `hidden_from_org = false` on the listed ids).
+- **Still open before Chick relies on it:**
+  - `dispatch_alert_phone` and `voice_transfer_number` are not set. An inbound
+    booking with a time slot auto-assigns a technician, texts the customer and
+    creates a FieldPulse job, and nobody at Spears is notified.
+  - No FieldPulse webhooks are registered. New FieldPulse jobs, estimates and
+    customers do not arrive; only open invoices and invoices of known jobs
+    refresh, once a day.
+  - Editing a schedule or adding a note on a FieldPulse-linked request writes
+    to the FieldPulse job with no warning.
