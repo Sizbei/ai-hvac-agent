@@ -6,6 +6,7 @@
 
 import { NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { db } from "@/lib/db";
 import { communicationTemplates } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
@@ -42,10 +43,11 @@ const templateSchema = z.object({
  */
 export async function GET() {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:templates-list:${session.userId}`,
@@ -61,7 +63,8 @@ export async function GET() {
       orderBy: [asc(communicationTemplates.triggerType), asc(communicationTemplates.priority)],
     });
 
-    return successResponse({ templates });
+    // The Review request card reads "Off for this account" when the switch is off (P8 M9).
+    return successResponse({ templates, reviewTextsOn: viewer.features.reviewRequests });
   } catch (error) {
     logger.error({ error }, "Failed to fetch communication templates");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

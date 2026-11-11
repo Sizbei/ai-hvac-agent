@@ -22,7 +22,11 @@ are aggregated in the API query. No polling — manual page navigation.
 
 **Invariants:**
 - Review requests are created automatically when a job is completed — there is
-  no manual "send" button on this page (the empty state copy says exactly this).
+  no manual "send" button on this page (the empty state copy says exactly this
+  while the org's `reviewRequests` switch is on). When the switch is off the
+  empty state reads "Review texts are off for this account." — the API returns
+  `reviewTextsOn` (from `getViewerContext().features`) and the copy lives in
+  `src/lib/admin/review-switch-copy.ts` (tested).
   This path (technician marks complete → `createReviewRequest` →
   `queueCommunicationJob`) has no admin session in the loop, so the
   `isDemoAccount(session)` guards on other outbound routes can't cover it —

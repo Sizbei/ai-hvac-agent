@@ -40,6 +40,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/visibility-insights.test.ts",
   // Onboarding D1: per-user admin guide merge, isolation and read-only preview (two throwaway orgs).
   "tests/integration/admin-guide-state.test.ts",
+  // P8 M7: go-live audit cutoff builder, CLI and since-bound reads (one throwaway org).
+  "tests/integration/audit-history-cutoff.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

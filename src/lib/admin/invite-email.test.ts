@@ -14,6 +14,11 @@ vi.mock("@/lib/communication/resend-adapter", () => ({
 const logError = vi.fn();
 vi.mock("@/lib/logger", () => ({ logger: { error: (...a: unknown[]) => logError(...a) } }));
 
+const getOrgTimeZone = vi.fn();
+vi.mock("./org-time-zone", () => ({
+  getOrgTimeZone: (...a: unknown[]) => getOrgTimeZone(...a),
+}));
+
 import {
   buildInviteEmail,
   inviteLink,
@@ -24,7 +29,13 @@ import {
 const TOKEN = "a".repeat(64);
 const URL_ = `https://app.example.com/admin/invite/${TOKEN}`;
 const EXPIRES = new Date("2026-11-14T15:00:00.000Z");
-const ARGS = { orgName: "Spears Services", url: URL_, role: "admin" as const, expiresAt: EXPIRES };
+const ARGS = {
+  orgName: "Spears Services",
+  url: URL_,
+  role: "admin" as const,
+  expiresAt: EXPIRES,
+  timeZone: "America/New_York",
+};
 
 const ORIGINAL = {
   key: process.env.RESEND_API_KEY,
@@ -37,6 +48,7 @@ function restore(name: string, value: string | undefined) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getOrgTimeZone.mockResolvedValue("America/Chicago");
   process.env.RESEND_API_KEY = "re_test";
   process.env.NEXT_PUBLIC_APP_URL = "https://app.example.com";
 });
@@ -81,6 +93,30 @@ describe("buildInviteEmail", () => {
     expect(admin.text).toContain("Nov 14, 2026");
     expect(buildInviteEmail({ ...ARGS, role: "technician" }).text).toContain("as a technician");
   });
+
+  it("shows the expiry in the org's time zone, never UTC", () => {
+    const eastern = buildInviteEmail(ARGS);
+    expect(eastern.text).toMatch(/expires Nov 14, 2026, 10:00\sAM EST\./);
+    expect(eastern.html).toMatch(/expires Nov 14, 2026, 10:00\sAM EST\./);
+    expect(eastern.text).not.toContain("UTC");
+    const central = buildInviteEmail({ ...ARGS, timeZone: "America/Chicago" });
+    expect(central.text).toMatch(/expires Nov 14, 2026, 9:00\sAM CST\./);
+  });
+
+  it("asks the owner to set up their account instead of naming a role", () => {
+    const owner = buildInviteEmail({ ...ARGS, ownerInvite: true });
+    for (const body of [owner.text, owner.html]) {
+      expect(body).toContain("to set up your account.");
+      expect(body).not.toContain("as an admin");
+    }
+    expect(owner.html).toContain("<strong>Spears Services</strong> to set up your account.");
+  });
+
+  it("escapes the org name in the owner copy too", () => {
+    const { html } = buildInviteEmail({ ...ARGS, ownerInvite: true, orgName: "<i>X</i>" });
+    expect(html).toContain("&lt;i&gt;X&lt;/i&gt;");
+    expect(html).not.toContain("<i>X</i>");
+  });
 });
 
 describe("inviteLink", () => {
@@ -123,11 +159,30 @@ describe("deliverInvite", () => {
     expect(deliverInvite(BASE)).toEqual({ emailed: true });
     expect(after).toHaveBeenCalledTimes(1);
     expect(sendEmail).not.toHaveBeenCalled(); // only inside after()
+    expect(getOrgTimeZone).not.toHaveBeenCalled(); // the lookup runs inside after() too
+    await (after.mock.calls[0][0] as () => Promise<void>)();
+    expect(getOrgTimeZone).toHaveBeenCalledWith(BASE.organizationId);
+    expect(sendEmail).toHaveBeenCalledWith({
+      to: "chick@example.com",
+      ...buildInviteEmail({ ...ARGS, timeZone: "America/Chicago" }),
+    });
+  });
+
+  it("falls back to the business time zone when the org's can't be read", async () => {
+    getOrgTimeZone.mockRejectedValue(new Error("db down"));
+    deliverInvite(BASE);
     await (after.mock.calls[0][0] as () => Promise<void>)();
     expect(sendEmail).toHaveBeenCalledWith({
       to: "chick@example.com",
-      ...buildInviteEmail({ orgName: "Spears Services", url: URL_, role: "admin", expiresAt: EXPIRES }),
+      ...buildInviteEmail({ ...ARGS, timeZone: "America/New_York" }),
     });
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it("sends the owner copy for an owner invite", async () => {
+    deliverInvite({ ...BASE, ownerInvite: true });
+    await (after.mock.calls[0][0] as () => Promise<void>)();
+    expect(sendEmail.mock.calls[0][0].text).toContain("to set up your account.");
   });
 
   it("does not email without RESEND_API_KEY", () => {

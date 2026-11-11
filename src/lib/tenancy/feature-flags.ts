@@ -34,3 +34,17 @@ export const featurePatchSchema = z
     showHistory: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one key" });
+
+/**
+ * The go-live moment, `feature_flags.historyCutoff` (an ISO timestamp the
+ * marking run stores). Org viewers who don't see hidden history see audit
+ * entries only from here on. Null when unset or unparseable. Kept apart from
+ * `parseFeatures`, whose switches are booleans only.
+ */
+export function historyCutoff(raw: unknown): Date | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const value = (raw as Record<string, unknown>).historyCutoff;
+  if (typeof value !== "string" || value === "") return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at;
+}

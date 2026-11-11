@@ -71,6 +71,12 @@ the first field, Template ID second.
 **Gotchas:**
 - Inactive templates (isActive=false) render at 60% opacity — this is
   intentional visual distinction.
+- The status badge comes from `templateStatus` in
+  `src/lib/admin/review-switch-copy.ts`: a `review_request` template reads
+  "Off for this account" (dimmed, never "Active") while the org's
+  `reviewRequests` switch is off. GET returns that switch as `reviewTextsOn`
+  (from `getViewerContext().features`); the page reads it with
+  `reviewTextsOnFrom`.
 - The editor dialog is re-mounted (via `key` prop) on each open so the form
   re-seeds without a `useEffect` reset — preserve the `key` approach when
   modifying the dialog.

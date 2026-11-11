@@ -33,7 +33,13 @@ export async function GET(request: NextRequest) {
       getReviewStats(session.organizationId, viewer),
     ]);
 
-    return successResponse({ reviews, total, stats });
+    // The page words its empty state by the org's switch (P8 M9).
+    return successResponse({
+      reviews,
+      total,
+      stats,
+      reviewTextsOn: viewer.features.reviewRequests,
+    });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to load reviews");
     return errorResponse("Internal server error", "INTERNAL_ERROR", 500);

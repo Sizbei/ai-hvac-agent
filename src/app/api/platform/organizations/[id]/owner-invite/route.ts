@@ -118,6 +118,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       role: result.invite.role,
       expiresAt: new Date(result.invite.expiresAt),
       priorCount,
+      ownerInvite: true,
     });
     const url = inviteLink(result.token);
 

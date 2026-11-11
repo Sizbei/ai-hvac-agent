@@ -24,6 +24,8 @@ export interface AuditLogFilters {
   readonly entity?: string;
   readonly page?: number;
   readonly limit?: number;
+  /** Only entries at or after this moment (the org's go-live cutoff). */
+  readonly since?: Date;
 }
 
 export interface AuditLogPage {

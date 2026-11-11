@@ -65,6 +65,13 @@ function formatTimestamp(iso: string): string {
   });
 }
 
+function Actor({ entry }: { readonly entry: AuditLogEntry }) {
+  return <>{entry.actorName ?? <span className="italic">System</span>}</>;
+}
+
+// Phone (<640px): When and Actor fold into the Action cell, which wraps, so no
+// line runs off to the right. From sm up it is the three-column table; the
+// Action cell wraps there too, so long details never push Actor off-screen.
 const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
   {
     key: 'when',
@@ -74,7 +81,7 @@ const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
         {formatTimestamp(e.createdAt)}
       </span>
     ),
-    className: 'w-[180px]',
+    className: 'hidden w-[180px] sm:table-cell',
   },
   {
     key: 'action',
@@ -83,6 +90,9 @@ const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
       const details = formatAuditDetails(e.details);
       return (
         <div className="min-w-0 space-y-1">
+          <p className="text-xs text-muted-foreground sm:hidden">
+            {formatTimestamp(e.createdAt)} · <Actor entry={e} />
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="text-xs">
               {humanize(e.action)}
@@ -92,24 +102,25 @@ const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
             </span>
           </div>
           {details && (
-            <p className="truncate text-xs text-muted-foreground">{details}</p>
+            <p className="break-words text-xs text-muted-foreground">{details}</p>
           )}
           {e.ipAddress && (
-            <p className="text-xs text-muted-foreground/70">IP: {e.ipAddress}</p>
+            <p className="break-all text-xs text-muted-foreground/70">IP: {e.ipAddress}</p>
           )}
         </div>
       );
     },
+    className: 'whitespace-normal sm:min-w-[20rem]',
   },
   {
     key: 'actor',
     header: 'Actor',
     cell: (e) => (
       <span className="truncate text-muted-foreground">
-        {e.actorName ?? <span className="italic">System</span>}
+        <Actor entry={e} />
       </span>
     ),
-    className: 'w-[140px]',
+    className: 'hidden w-[140px] sm:table-cell',
   },
 ];
 
@@ -157,7 +168,6 @@ export default function AdminAuditLogPage() {
           rows={entries}
           getRowKey={(e) => e.id}
           isLoading={isLoading}
-          minTableWidth="40rem"
           toolbar={
             <div className="flex flex-wrap items-center gap-3">
               <Select

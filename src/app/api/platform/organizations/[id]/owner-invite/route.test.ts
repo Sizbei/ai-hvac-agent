@@ -159,6 +159,7 @@ describe("POST /api/platform/organizations/[id]/owner-invite", () => {
       role: "admin",
       expiresAt: new Date(INVITE.expiresAt),
       priorCount: 3,
+      ownerInvite: true,
     });
     const json = await res.json();
     // Controller ruling: the platform admin ALWAYS gets the copy link.
