@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import {
   getLocationConsent,
   setLocationConsent,
@@ -38,6 +39,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     const body: unknown = await request.json();
     const parsed = consentSchema.safeParse(body);
     if (!parsed.success) {

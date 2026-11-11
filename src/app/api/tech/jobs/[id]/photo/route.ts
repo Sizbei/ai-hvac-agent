@@ -13,6 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { listJobPhotos, isJobOwnedByTech } from "@/lib/tech/field-queries";
 import { addJobPhoto } from "@/lib/tech/photo-writes";
@@ -42,6 +43,8 @@ export async function POST(
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     const rate = slidingWindow(
       `tech:photo:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,

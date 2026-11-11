@@ -61,6 +61,16 @@ function as(me: string, mine: readonly TechAssignmentRow[], all: readonly TechAs
 beforeEach(() => vi.clearAllMocks());
 
 describe("POST /api/tech/jobs/[id]/status", () => {
+  it("403 PREVIEW_READ_ONLY for a preview session even if the proxy is bypassed; nothing written", async () => {
+    as(T1, [row()], [row()]);
+    (getTechSession as unknown as Mock).mockResolvedValue({ userId: T1, organizationId: "org", preview: { adminUserId: "a", exp: 9_999_999_999 } });
+    const res = await post({ action: "en_route" });
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe("PREVIEW_READ_ONLY");
+    expect(findReadableJob).not.toHaveBeenCalled();
+    expect(applyTechAction).not.toHaveBeenCalled();
+  });
+
   it("400 INVALID_INPUT for cancelled and scheduled (not technician actions)", async () => {
     as(T1, [row()], [row()]);
     for (const action of ["cancelled", "scheduled"]) {

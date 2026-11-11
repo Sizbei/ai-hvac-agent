@@ -205,13 +205,14 @@ export async function getTechInvoiceView(
   organizationId: string,
   techUserId: string,
   requestId: string,
+  features: { readonly payLinks: boolean },
 ): Promise<TechInvoiceViewResult> {
   const org = organizationId;
   const rid = requestId;
   const job = await findReadableJob(org, techUserId, rid);
   if (!job) return { kind: "not_found" };
   if (!job.native) return { kind: "external" };
-  return { kind: "ok", view: await buildView(org, techUserId, rid, job) };
+  return { kind: "ok", view: await buildView(org, techUserId, rid, job, features.payLinks) };
 }
 
 async function buildView(
@@ -219,6 +220,7 @@ async function buildView(
   techUserId: string,
   rid: string,
   job: { customerId: string | null; native: boolean; status: string },
+  payLinks: boolean,
 ): Promise<TechInvoiceView> {
 
   const [visit, [live], [meta]] = await Promise.all([
@@ -272,6 +274,7 @@ async function buildView(
     fromEstimate: full?.invoice.fromEstimate ?? false,
     customerHasPhone: shared.customerHasPhone,
     signatureFresh: full?.invoice.signature.fresh ?? false,
+    payLinks,
   });
   return { invoice: full?.invoice ?? null, ...shared, materialsNotOnInvoice: full?.materials ?? [], allowed };
 }

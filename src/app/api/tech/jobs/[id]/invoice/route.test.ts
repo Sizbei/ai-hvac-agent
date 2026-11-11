@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   replay: { current: null as null | { status: number; envelope: unknown } },
   createInvoiceFromJob: vi.fn(),
   logAudit: vi.fn(),
+  getFeatures: vi.fn(),
 }));
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), after: h.after }));
 vi.mock("server-only", () => ({}));
@@ -28,6 +29,7 @@ vi.mock("@/lib/http/idempotency", async (orig) => ({
 }));
 vi.mock("@/lib/admin/invoice-field-writes", () => ({ createInvoiceFromJob: h.createInvoiceFromJob }));
 vi.mock("@/lib/admin/audit", () => ({ logAudit: h.logAudit }));
+vi.mock("@/lib/tenancy/features", () => ({ getFeatures: h.getFeatures }));
 
 import { GET, POST } from "./route";
 import { canonicalHash } from "@/lib/http/idempotency";
@@ -41,6 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.getTechSession.mockResolvedValue({ userId: "u1", organizationId: "o1" });
   h.slidingWindow.mockReturnValue({ allowed: true, remaining: 1, resetMs: 1 });
+  h.getFeatures.mockResolvedValue({ payLinks: true });
 });
 
 describe("GET /api/tech/jobs/[id]/invoice", () => {
@@ -89,7 +92,24 @@ describe("GET /api/tech/jobs/[id]/invoice", () => {
     const res = await GET(req(), ctx(ID));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, data: view });
-    expect(h.getTechInvoiceView).toHaveBeenCalledWith("o1", "u1", ID);
+    expect(h.getTechInvoiceView).toHaveBeenCalledWith("o1", "u1", ID, { payLinks: true });
+    expect(h.getFeatures).toHaveBeenCalledWith("o1");
+  });
+
+  it("threads the org's pay-link switch into the view", async () => {
+    h.getFeatures.mockResolvedValue({ payLinks: false });
+    h.getTechInvoiceView.mockResolvedValue({ kind: "not_found" });
+    await GET(req(), ctx(ID));
+    expect(h.getTechInvoiceView).toHaveBeenCalledWith("o1", "u1", ID, { payLinks: false });
+  });
+
+  it("a failed feature read falls back to pay links off, not a 500", async () => {
+    h.getFeatures.mockRejectedValue(new Error("db down"));
+    const view = { allowed: ["record_payment"] };
+    h.getTechInvoiceView.mockResolvedValue({ kind: "ok", view });
+    const res = await GET(req(), ctx(ID));
+    expect(res.status).toBe(200);
+    expect(h.getTechInvoiceView).toHaveBeenCalledWith("o1", "u1", ID, { payLinks: false });
   });
 
   it("500 with human copy when the read throws", async () => {

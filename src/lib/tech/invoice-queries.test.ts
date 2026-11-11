@@ -104,8 +104,8 @@ function asLead(lead = true) {
   h.findActiveVisit.mockResolvedValue({ appointmentId: "a", leadTechnicianId: lead ? ME : "someone-else" });
 }
 
-async function viewOf() {
-  const r = await getTechInvoiceView(ORG, ME, REQ);
+async function viewOf(payLinks = true) {
+  const r = await getTechInvoiceView(ORG, ME, REQ, { payLinks });
   if (r.kind !== "ok") throw new Error(`expected a view, got ${r.kind}`);
   return r.view;
 }
@@ -132,7 +132,7 @@ beforeEach(() => {
 describe("getTechInvoiceView", () => {
   it("not_found when the job is not readable, without querying further", async () => {
     h.findReadableJob.mockResolvedValue(null);
-    expect(await getTechInvoiceView(ORG, ME, REQ)).toEqual({ kind: "not_found" });
+    expect(await getTechInvoiceView(ORG, ME, REQ, { payLinks: true })).toEqual({ kind: "not_found" });
     expect(h.executed).toHaveLength(0);
     expect(h.findActiveVisit).not.toHaveBeenCalled();
   });
@@ -140,7 +140,7 @@ describe("getTechInvoiceView", () => {
   it("external for a FieldPulse/HCP job: no statement after findReadableJob", async () => {
     h.findReadableJob.mockResolvedValue({ id: REQ, customerId: CUST, native: false, status: "in_progress" });
     script({ invoice: invoiceRow() });
-    expect(await getTechInvoiceView(ORG, ME, REQ)).toEqual({ kind: "external" });
+    expect(await getTechInvoiceView(ORG, ME, REQ, { payLinks: true })).toEqual({ kind: "external" });
     expect(h.executed).toHaveLength(0);
     expect(h.findActiveVisit).not.toHaveBeenCalled();
     expect(h.getDefaultTaxBps).not.toHaveBeenCalled();
@@ -389,6 +389,11 @@ describe("getTechInvoiceView", () => {
     expect(v).toMatchObject({ externalInvoice: true, onSite: false, isLead: true, allowed: [], customerHasPhone: false });
     expect(stmt(M.customer)).toBeUndefined();
     expect(stmt(M.meta)!.sql).toContain("(i.fieldpulse_invoice_id IS NOT NULL OR i.hcp_invoice_id IS NOT NULL)");
+  });
+
+  it("open invoice with a balance and a phone but pay links off: no pay_link", async () => {
+    script({ invoice: invoiceRow({ state: "open", amount_paid_cents: 500, balance_cents: 10200 }) });
+    expect((await viewOf(false)).allowed).toEqual(["record_payment"]);
   });
 
   it("open invoice with a balance and a customer phone: record_payment and pay_link", async () => {

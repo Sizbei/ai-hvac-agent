@@ -9,6 +9,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getTechSession } from "@/lib/auth/tech-session";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import type { TechSessionPayload } from "@/lib/auth/tech-config";
 import { isSameOriginRequest } from "@/lib/session-csrf";
 import { isUuid } from "@/lib/validation/uuid";
@@ -56,13 +57,15 @@ export function statusRefusal(
 const fail = (message: string, code: string, status: number) =>
   ({ ok: false as const, response: errorResponse(message, code, status) });
 
-/** session → same-origin → uuid → rate limit (`limit` defaults to the 30/min write limit; M3d draft autosave passes 60/min). */
+/** session → preview read-only → same-origin → uuid → rate limit (`limit` defaults to the 30/min write limit; M3d draft autosave passes 60/min). */
 export async function frontGates(
   request: NextRequest, id: string, bucket: string,
   limit: { readonly maxRequests: number; readonly windowMs: number } = RATE_LIMITS.adminMutation,
 ): Promise<{ ok: true; session: TechSessionPayload } | { ok: false; response: NextResponse }> {
   const session = await getTechSession();
   if (!session) return fail("Unauthorized", "UNAUTHORIZED", 401);
+  const previewRefused = previewWriteRefusal(session, request);
+  if (previewRefused) return { ok: false, response: previewRefused };
   if (!isSameOriginRequest(request)) return fail("Forbidden", "FORBIDDEN", 403);
   if (!isUuid(id)) return fail("Invalid request ID format", "INVALID_ID", 400);
   const rate = slidingWindow(`tech:${bucket}:write:${rateKeyFor(session)}`, limit.maxRequests, limit.windowMs);

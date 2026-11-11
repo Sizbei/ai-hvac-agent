@@ -1,6 +1,7 @@
 /**
  * GET /api/tech/jobs/[id]/invoice — the field invoice screen (spec §6.2.1).
- * Tech session → UUID → read rate limit → the view: not readable → 404 (never
+ * Tech session → UUID → read rate limit → the org's pay-link switch → the view
+ * (no "Send pay link" when it's off or unreadable): not readable → 404 (never
  * confirming the job exists), FieldPulse/HCP job → 409 MANAGED_EXTERNALLY.
  *
  * POST — adopt or create the job's draft invoice (spec §6.2): preamble → `{}`
@@ -15,7 +16,8 @@ import { isUuid } from "@/lib/validation/uuid";
 import { RATE_LIMITS, slidingWindow } from "@/lib/rate-limit";
 import { getTechInvoiceView } from "@/lib/tech/invoice-queries";
 import { errorResponse, successResponse } from "@/lib/api-response";
-import { logger } from "@/lib/logger";
+import { errorCode, logger } from "@/lib/logger";
+import { getFeatures } from "@/lib/tenancy/features";
 import { techWritePreamble } from "@/lib/tech/invoice-route-guards";
 import { reasonResult } from "@/lib/tech/invoice-errors";
 import { auditWrite, okResult, readKey, readWriteBody } from "@/lib/tech/invoice-write-route";
@@ -41,7 +43,12 @@ export async function GET(
     if (!rate.allowed) {
       return errorResponse("Too many requests. Wait a moment and try again.", "RATE_LIMITED", 429);
     }
-    const result = await getTechInvoiceView(session.organizationId, session.userId, id);
+    // A failed flag read must not break the screen; "off" hides "Send pay link" (the route refuses it then too).
+    const { payLinks } = await getFeatures(session.organizationId).catch((error: unknown) => {
+      logger.warn({ code: errorCode(error) }, "Feature read failed for the tech invoice view; using pay links off");
+      return { payLinks: false };
+    });
+    const result = await getTechInvoiceView(session.organizationId, session.userId, id, { payLinks });
     if (result.kind === "not_found") return errorResponse("This job isn't yours.", "NOT_FOUND", 404);
     if (result.kind === "external") {
       return errorResponse("This job is managed in FieldPulse.", "MANAGED_EXTERNALLY", 409);

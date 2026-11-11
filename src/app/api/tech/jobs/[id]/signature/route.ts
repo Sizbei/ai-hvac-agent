@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { isSameOriginRequest } from "@/lib/session-csrf";
 import { isUuid } from "@/lib/validation/uuid";
@@ -55,6 +56,8 @@ export async function POST(
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     if (!isSameOriginRequest(request)) {
       return errorResponse("Forbidden", "FORBIDDEN", 403);
     }

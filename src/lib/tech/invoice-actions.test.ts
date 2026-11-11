@@ -4,7 +4,7 @@ import { invoiceAllowedActions } from "./invoice-actions";
 type Input = Parameters<typeof invoiceAllowedActions>[0];
 const base: Input = {
   state: "none", isLead: true, onSite: true, native: true, externalInvoice: false, balanceCents: 0,
-  lines: 0, fromEstimate: false, customerHasPhone: true, signatureFresh: false,
+  lines: 0, fromEstimate: false, customerHasPhone: true, signatureFresh: false, payLinks: true,
 };
 const allowed = (over: Partial<Input>) => invoiceAllowedActions({ ...base, ...over });
 
@@ -37,6 +37,10 @@ describe("invoiceAllowedActions", () => {
     expect(allowed({ state: "open", lines: 1, balanceCents: 8900 })).toEqual(["record_payment", "pay_link"]);
     expect(allowed({ state: "open", lines: 1, balanceCents: 8900, customerHasPhone: false })).toEqual(["record_payment"]);
     expect(allowed({ state: "open", lines: 1, balanceCents: 8900, fromEstimate: true })).toEqual(["record_payment", "pay_link"]);
+  });
+
+  it("open with a balance: no pay link when the org's pay links are off", () => {
+    expect(allowed({ state: "open", lines: 1, balanceCents: 8900, payLinks: false })).toEqual(["record_payment"]);
   });
 
   it("open with nothing due: nothing", () => {

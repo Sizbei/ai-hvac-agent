@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Pre-deploy checklist. Read-only: it checks env var NAMES (never values),
+ * Pre-deploy checklist. Read-only: it checks env var NAMES (and compares, never
+ * prints, the signup flag value when the CLI shows it),
  * never calls `vercel env pull`, and never deploys.
  *
  *   npx tsx scripts/agent/predeploy-check.mjs                    # --env production
@@ -10,8 +11,11 @@
  *   - `vercel whoami` succeeds
  *   - `vercel env ls <env>` lists every required name (src/lib/env-validation.ts
  *     requiredEnvNames(); production also PLATFORM_ADMIN_EMAILS, PLATFORM_ORG_ID,
- *     NEXT_PUBLIC_APP_URL) and, for production, not DEMO_MODE_ORG_IDS.
- *     RESEND_API_KEY missing is a warning only.
+ *     NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_SIGNUP_ENABLED) and, for production, not
+ *     DEMO_MODE_ORG_IDS. RESEND_API_KEY missing is a warning only.
+ *   - production: NEXT_PUBLIC_SIGNUP_ENABLED must be "false" (signup is on by
+ *     default). The value is compared, never printed; when `vercel env ls`
+ *     shows it as Encrypted (it does) only the name is checked, with a warning.
  *   - the newest drizzle/*.sql is the last _journal.json entry
  *   - production only: on main, tracked tree clean (untracked files ignored),
  *     HEAD equals origin/main (after a fetch)
@@ -20,9 +24,10 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { requiredEnvNames } from "../../src/lib/env-validation.ts";
-import { envCheck, migrationTagMismatch, parseVercelEnvLs } from "../../src/lib/deploy/env-check.ts";
+import { envCheck, envValueCheck, migrationTagMismatch, parseVercelEnvLs } from "../../src/lib/deploy/env-check.ts";
 
-const PRODUCTION_EXTRA = ["PLATFORM_ADMIN_EMAILS", "PLATFORM_ORG_ID", "NEXT_PUBLIC_APP_URL"];
+const SIGNUP_FLAG = "NEXT_PUBLIC_SIGNUP_ENABLED";
+const PRODUCTION_EXTRA = ["PLATFORM_ADMIN_EMAILS", "PLATFORM_ORG_ID", "NEXT_PUBLIC_APP_URL", SIGNUP_FLAG];
 const PRODUCTION_FORBIDDEN = ["DEMO_MODE_ORG_IDS"];
 const WARN_IF_MISSING = ["RESEND_API_KEY"];
 
@@ -59,6 +64,13 @@ if (!run("vercel", ["whoami"]).ok) {
     for (const name of forbiddenPresent) failures.push(`env var ${name} must not be set (${env})`);
     const soft = envCheck({ required: WARN_IF_MISSING, forbidden: [], present });
     for (const name of soft.missing) warnings.push(`env var ${name} is not set (${env}); email will not send`);
+    if (env === "production") {
+      const signup = envValueCheck(ls.stdout, SIGNUP_FLAG, "false");
+      if (signup === "mismatch") failures.push(`env var ${SIGNUP_FLAG} must be false (${env}); signup would be open`);
+      if (signup === "hidden") {
+        warnings.push(`vercel env ls hides values; ${SIGNUP_FLAG} is set but its value wasn't checked. Confirm it is false (${env})`);
+      }
+    }
   }
 }
 

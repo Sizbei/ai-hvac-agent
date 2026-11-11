@@ -582,7 +582,7 @@ describe("field estimates (dev DB)", () => {
     const m = await addMaterial(rid, 1, 3_000);
     const { eid } = await soldEstimate(rid);
     expect(data(await billVia(rid, eid, randomUUID())).added).toBe(2);
-    const r = await ti.getTechInvoiceView(org, tech, rid);
+    const r = await ti.getTechInvoiceView(org, tech, rid, { payLinks: true });
     if (r.kind !== "ok" || !r.view.invoice || !("lines" in r.view.invoice)) throw new Error("expected the lead's full invoice");
     expect(r.view.invoice.lines.map((l) => l.fromEstimate).sort()).toEqual([false, true, true]);
     expect(m).toBeTruthy();
@@ -594,12 +594,12 @@ describe("field estimates (dev DB)", () => {
       await db.execute(sql`INSERT INTO idempotency_keys (organization_id,user_id,route,key,request_hash,state,attempt_id)
         VALUES (${org},${tech},${route},${randomUUID()},'h','in_progress',${randomUUID()})`);
     }
-    const before = await ti.getTechInvoiceView(org, tech, rid);
+    const before = await ti.getTechInvoiceView(org, tech, rid, { payLinks: true });
     if (before.kind !== "ok") throw new Error(before.kind);
     expect(before.view.pendingWrite).toBe(false);
     await db.execute(sql`INSERT INTO idempotency_keys (organization_id,user_id,route,key,request_hash,state,attempt_id)
       VALUES (${org},${tech},${`/api/tech/jobs/${rid}/invoice/finalize`},${randomUUID()},'h','in_progress',${randomUUID()})`);
-    const after = await ti.getTechInvoiceView(org, tech, rid);
+    const after = await ti.getTechInvoiceView(org, tech, rid, { payLinks: true });
     if (after.kind !== "ok") throw new Error(after.kind);
     expect(after.view.pendingWrite).toBe(true);
   }, 60_000);

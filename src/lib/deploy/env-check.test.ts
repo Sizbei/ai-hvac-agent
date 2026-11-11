@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { requiredEnvNames } from "@/lib/env-validation";
-import { envCheck, migrationTagMismatch, parseVercelEnvLs } from "./env-check";
+import { envCheck, envValueCheck, migrationTagMismatch, parseVercelEnvLs } from "./env-check";
 
 // Hand-made in the documented `vercel env ls` table layout (CLI 50); NOT
 // captured from a real run — the CLI was signed out when this was written.
@@ -97,5 +97,41 @@ describe("migrationTagMismatch", () => {
 
   it("fails when there are no migrations at all", () => {
     expect(migrationTagMismatch([], [])).toBe("no migrations found in drizzle/");
+  });
+});
+
+describe("envValueCheck", () => {
+  const table = (rows: string) => ` name  value  environments  created\n${rows}`;
+  const NAME = "NEXT_PUBLIC_SIGNUP_ENABLED";
+
+  it("missing when the name has no row", () => {
+    expect(envValueCheck(FIXTURE, NAME, "false")).toBe("missing");
+    expect(envValueCheck("", NAME, "false")).toBe("missing");
+  });
+
+  it("hidden when the CLI shows Encrypted (the CLI 50 layout)", () => {
+    expect(envValueCheck(table(` ${NAME}  Encrypted  Production  1d ago\n`), NAME, "false")).toBe("hidden");
+    expect(envValueCheck(table(` ${NAME}  encrypted  Production  1d ago\n`), NAME, "false")).toBe("hidden");
+  });
+
+  it("match when a shown value equals the expected value", () => {
+    expect(envValueCheck(table(` ${NAME}  false  Production  1d ago\n`), NAME, "false")).toBe("match");
+  });
+
+  it("mismatch when a shown value differs, or any of several rows differs", () => {
+    expect(envValueCheck(table(` ${NAME}  true  Production  1d ago\n`), NAME, "false")).toBe("mismatch");
+    expect(envValueCheck(table(` ${NAME}  FALSE  Production  1d ago\n`), NAME, "false")).toBe("mismatch");
+    expect(
+      envValueCheck(table(` ${NAME}  false  Production  1d ago\n ${NAME}  true  Production  2d ago\n`), NAME, "false"),
+    ).toBe("mismatch");
+  });
+
+  it("returns only a verdict, never the value", () => {
+    const out = envValueCheck(table(` ${NAME}  s3cr3t  Production  1d ago\n`), NAME, "false");
+    expect(out).not.toContain("s3cr3t");
+  });
+
+  it("ignores rows before the header and other names", () => {
+    expect(envValueCheck(`${NAME} true\n${table(" OTHER  true  Production  1d ago\n")}`, NAME, "false")).toBe("missing");
   });
 });

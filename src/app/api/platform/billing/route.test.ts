@@ -117,4 +117,23 @@ describe("POST /api/platform/billing", () => {
     const res = await POST(postReq({ action: "portal" }));
     expect(res.status).toBe(200);
   });
+
+  it.each([{ action: "checkout", planId: "pro" }, { action: "portal" }])(
+    "403 BILLING_PLATFORM_MANAGED for an org super_admin in the platform-managed org (%o)",
+    async (body) => {
+      process.env.PLATFORM_ADMIN_EMAILS = "ops@x.com";
+      process.env.PLATFORM_ORG_ID = ORG;
+      getAdminSession.mockResolvedValue(session("super_admin", "owner@spears.test"));
+      const res = await POST(postReq(body));
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("BILLING_PLATFORM_MANAGED");
+      expect(logAudit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("an org super_admin outside the platform org still gets checkout", async () => {
+    process.env.PLATFORM_ORG_ID = "99999999-9999-4999-8999-999999999999";
+    getAdminSession.mockResolvedValue(session("super_admin"));
+    expect((await POST(postReq({ action: "checkout", planId: "pro" }))).status).toBe(200);
+  });
 });

@@ -67,6 +67,13 @@ describe("techWritePreamble", () => {
     expect(h.slidingWindow).not.toHaveBeenCalled();
   });
 
+  it("403 PREVIEW_READ_ONLY for a preview session, even past the proxy; nothing else runs", async () => {
+    h.getTechSession.mockResolvedValue({ ...SESSION, preview: { adminUserId: OTHER, exp: 9_999_999_999 } });
+    await expectFail(403, "PREVIEW_READ_ONLY", "Read-only while viewing as another user");
+    expect(h.slidingWindow).not.toHaveBeenCalled();
+    expect(h.findReadableJob).not.toHaveBeenCalled();
+  });
+
   it("403 FORBIDDEN cross-origin, before the id check", async () => {
     h.isSameOriginRequest.mockReturnValue(false);
     await expectFail(403, "FORBIDDEN", "Forbidden", "not-a-uuid");

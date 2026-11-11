@@ -20,7 +20,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { getAdminSession } from "@/lib/auth/session";
-import { isSuperAdmin, isPlatformAdmin } from "@/lib/auth/authz";
+import { isSuperAdmin, isPlatformAdmin, isPlatformManagedOrg } from "@/lib/auth/authz";
 import { db } from "@/lib/db";
 import { organizations } from "@/lib/db/schema";
 import { getBillingProvider } from "@/lib/billing/provider";
@@ -104,6 +104,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
     if (!canManageBilling(session)) {
       return errorResponse("Forbidden", "FORBIDDEN", 403);
+    }
+    // The platform owner handles the platform org's billing (the page shows
+    // "handled by"); its own super_admin can't start checkout or the portal.
+    if (isPlatformManagedOrg(session.organizationId) && !isPlatformAdmin(session)) {
+      return errorResponse("Billing for this account is handled by the platform.", "BILLING_PLATFORM_MANAGED", 403);
     }
 
     const rateCheck = slidingWindow(

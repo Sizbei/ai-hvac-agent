@@ -6,6 +6,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { getGuide, hideGuide } from "@/lib/tech/guide-queries";
 import { isSameOriginRequest } from "@/lib/session-csrf";
@@ -41,6 +42,8 @@ export async function PATCH(request: NextRequest) {
   try {
     const session = await getTechSession();
     if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     if (!isSameOriginRequest(request)) return errorResponse("Forbidden", "FORBIDDEN", 403);
     const rate = slidingWindow(`tech:guide-patch:${rateKeyFor(session)}`, RATE_LIMITS.adminMutation.maxRequests, RATE_LIMITS.adminMutation.windowMs);
     if (!rate.allowed) return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);

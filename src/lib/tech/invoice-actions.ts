@@ -16,6 +16,8 @@ export function invoiceAllowedActions(i: {
   fromEstimate: boolean;
   customerHasPhone: boolean;
   signatureFresh: boolean;
+  /** The org's pay-link switch (features.payLinks): off → no "Send pay link". */
+  payLinks: boolean;
 }): InvoiceAction[] {
   if (!i.isLead || !i.onSite || !i.native) return [];
   const out: InvoiceAction[] = [];
@@ -28,7 +30,7 @@ export function invoiceAllowedActions(i: {
     if (!i.signatureFresh) out.push("sign");
   } else if (i.state === "open" && i.balanceCents > 0) {
     out.push("record_payment");
-    if (i.customerHasPhone) out.push("pay_link");
+    if (i.customerHasPhone && i.payLinks) out.push("pay_link");
   }
   return out;
 }

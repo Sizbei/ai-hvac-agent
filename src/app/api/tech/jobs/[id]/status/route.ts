@@ -11,6 +11,7 @@
 import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
 import {
   findAllAssignments, findReadableJob, findTechAssignments, hasOtherOpenRows, hasProgress, isOpen,
@@ -50,6 +51,8 @@ export async function POST(
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     const rate = slidingWindow(
       `tech:status:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,

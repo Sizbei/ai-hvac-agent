@@ -14,6 +14,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
 import {
   addJobMaterial,
@@ -84,6 +85,8 @@ export async function POST(
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     const rate = slidingWindow(
       `tech:materials:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,
@@ -146,6 +149,8 @@ export async function DELETE(
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
     const rate = slidingWindow(
       `tech:materials:${rateKeyFor(session)}`,
       RATE_LIMITS.adminMutation.maxRequests,

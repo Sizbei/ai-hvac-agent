@@ -7,7 +7,8 @@
  * `role: "technician"` — verifyTechToken rejects tokens missing any of these,
  * and separately requires the `aud: "hvac-tech"` claim that signTechToken sets
  * (that's what keeps this out of the admin session's cookie slot).
- * Reads .env.local (the DEV Neon branch — never point it at prod).
+ * Reads .env.local (the DEV Neon branch — never point it at prod). Refuses the
+ * production host (ep-withered-hill) unless --prod is passed.
  *
  *   node scripts/agent/mint-tech-session.mjs
  */
@@ -20,6 +21,13 @@ for (const line of readFileSync(".env.local", "utf8").split("\n")) {
 
 const { signTechToken } = await import("../../src/lib/auth/tech-config.ts");
 const { neon } = await import("@neondatabase/serverless");
+const { mintProdRefusal } = await import("../../src/lib/deploy/mint-guard.ts");
+
+const refusal = mintProdRefusal(process.env.DATABASE_URL, process.argv.slice(2));
+if (refusal) {
+  console.error(refusal);
+  process.exit(1);
+}
 
 const sql = neon(process.env.DATABASE_URL);
 // Optional: scope the pick to one tenant (a throwaway org). Unset = unchanged.

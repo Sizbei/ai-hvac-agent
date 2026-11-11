@@ -1,6 +1,7 @@
 /**
  * Pure helpers for the pre-deploy checklist (scripts/agent/predeploy-check.mjs).
- * They deal in env var NAMES only — no value is ever read or returned.
+ * They deal in env var NAMES; only `envValueCheck` reads a value cell, and it
+ * returns a verdict, never the value.
  */
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -12,7 +13,12 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * column is never read.
  */
 export function parseVercelEnvLs(stdout: string): string[] {
-  const names = new Set<string>();
+  return [...new Set(tableRows(stdout).map((cells) => cells[0]))];
+}
+
+/** The table rows (cells) after the `name … environments …` header. */
+function tableRows(stdout: string): string[][] {
+  const rows: string[][] = [];
   let inTable = false;
   for (const line of stdout.split("\n")) {
     const cells = line.trim().split(/\s+/);
@@ -20,9 +26,23 @@ export function parseVercelEnvLs(stdout: string): string[] {
       inTable = true;
       continue;
     }
-    if (inTable && ENV_NAME.test(cells[0] ?? "")) names.add(cells[0]);
+    if (inTable && ENV_NAME.test(cells[0] ?? "")) rows.push(cells);
   }
-  return [...names];
+  return rows;
+}
+
+export type EnvValueVerdict = "missing" | "hidden" | "match" | "mismatch";
+
+/**
+ * Whether `name` is set to `expected` in `vercel env ls` output, as a verdict
+ * only (the value is never returned). "hidden" when the CLI shows the value as
+ * Encrypted (CLI 50 does for every variable), so it can't be checked here.
+ */
+export function envValueCheck(stdout: string, name: string, expected: string): EnvValueVerdict {
+  const values = tableRows(stdout).filter((cells) => cells[0] === name).map((cells) => cells[1] ?? "");
+  if (values.length === 0) return "missing";
+  if (values.some((v) => v.toLowerCase() !== "encrypted" && v !== expected)) return "mismatch";
+  return values.every((v) => v === expected) ? "match" : "hidden";
 }
 
 export function envCheck({

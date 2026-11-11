@@ -4,7 +4,8 @@
  * Prints the raw token on stdout — use as the `hvac_admin_session` cookie.
  *
  * The payload MUST include `name`: verifyToken rejects tokens without it.
- * Reads .env.local (the DEV Neon branch — never point it at prod).
+ * Reads .env.local (the DEV Neon branch — never point it at prod). Refuses the
+ * production host (ep-withered-hill) unless --prod is passed.
  *
  *   node scripts/agent/mint-admin-session.mjs
  */
@@ -17,6 +18,13 @@ for (const line of readFileSync(".env.local", "utf8").split("\n")) {
 
 const { signToken } = await import("../../src/lib/auth/config.ts");
 const { neon } = await import("@neondatabase/serverless");
+const { mintProdRefusal } = await import("../../src/lib/deploy/mint-guard.ts");
+
+const refusal = mintProdRefusal(process.env.DATABASE_URL, process.argv.slice(2));
+if (refusal) {
+  console.error(refusal);
+  process.exit(1);
+}
 
 const sql = neon(process.env.DATABASE_URL);
 // Optional: scope the pick to one tenant (e.g. the fictional demo org) instead

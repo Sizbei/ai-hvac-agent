@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getTechSession } from "@/lib/auth/tech-session";
+import { previewWriteRefusal } from "@/lib/tech/preview-write-gate";
 import { rateKeyFor } from "@/lib/tech/tech-preview";
 import { recordTechnicianLocation } from "@/lib/tech/location-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -30,6 +31,8 @@ export async function POST(request: NextRequest) {
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const previewRefused = previewWriteRefusal(session, request);
+    if (previewRefused) return previewRefused;
 
     const rate = slidingWindow(
       `tech:location:${rateKeyFor(session)}`,
