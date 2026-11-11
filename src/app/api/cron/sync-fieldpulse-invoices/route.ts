@@ -20,7 +20,13 @@ import { db } from "@/lib/db";
 import { fieldpulseConnections, serviceRequests } from "@/lib/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { verifyCronAuth } from "@/lib/cron-auth";
-import { pullInvoicesForJob } from "@/lib/integrations/fieldpulse/invoice-sync";
+import {
+  pullInvoicesForJob,
+  pullOpenFieldpulseInvoices,
+} from "@/lib/integrations/fieldpulse/invoice-sync";
+
+// The sweep runs in after(); give it the longest window every plan allows.
+export const maxDuration = 60;
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -42,6 +48,16 @@ export async function GET(request: Request): Promise<Response> {
       // detached promise would be frozen on Vercel, so use after().
       after(async () => {
         try {
+          // Open invoices FIRST, by their own id: they are what the office
+          // watches, and the ones with no linked job are never reached by the
+          // job sweep below. If the function runs out of time it is the
+          // (mostly settled) job sweep that is cut short, not this.
+          const open = await pullOpenFieldpulseInvoices(organizationId);
+          logger.info(
+            { organizationId, ...open },
+            "Cron-triggered Fieldpulse open-invoice refresh complete",
+          );
+
           // Org-scoped: only this org's jobs (defense-in-depth + index use).
           const jobs = await db
             .select({ fieldpulseJobId: serviceRequests.fieldpulseJobId })

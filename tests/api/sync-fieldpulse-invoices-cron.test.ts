@@ -7,11 +7,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { GET } from "@/app/api/cron/sync-fieldpulse-invoices/route";
 import { db } from "@/lib/db";
 import { verifyCronAuth } from "@/lib/cron-auth";
-import { pullInvoicesForJob } from "@/lib/integrations/fieldpulse/invoice-sync";
+import {
+  pullInvoicesForJob,
+  pullOpenFieldpulseInvoices,
+} from "@/lib/integrations/fieldpulse/invoice-sync";
 
 vi.mock("@/lib/db", () => ({ db: { select: vi.fn() } }));
 vi.mock("@/lib/cron-auth", () => ({ verifyCronAuth: vi.fn() }));
 vi.mock("@/lib/integrations/fieldpulse/invoice-sync", () => ({
+  pullOpenFieldpulseInvoices: vi
+    .fn()
+    .mockResolvedValue({ created: 0, updated: 0, skipped: 0, failed: 0 }),
   pullInvoicesForJob: vi
     .fn()
     .mockResolvedValue({ created: 1, updated: 0, skipped: 0, failed: 0 }),
@@ -53,6 +59,9 @@ describe("sync-fieldpulse-invoices cron", () => {
       .mockReturnValueOnce(chain([{ fieldpulseJobId: "job-1" }])); // org-1 jobs
     const res = await GET(reqWith("Bearer secret"));
     expect(res.status).toBe(200);
-    expect(mockedPull).toHaveBeenCalledWith("org-1", "job-1");
+    // The sweep runs in after(), behind the open-invoice refresh: wait for it.
+    await vi.waitFor(() => expect(mockedPull).toHaveBeenCalledWith("org-1", "job-1"));
+    // Open invoices are refreshed by their own id, so unlinked ones clear too.
+    expect(pullOpenFieldpulseInvoices).toHaveBeenCalledWith("org-1");
   });
 });

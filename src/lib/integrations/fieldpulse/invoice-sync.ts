@@ -20,7 +20,7 @@ import {
   invoiceLineItems,
   customers,
 } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc, isNotNull } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { getFieldpulseClient } from "./client";
 import { parseFpDate } from "./fp-dates";
@@ -679,6 +679,63 @@ export async function pullInvoicesForJob(
     }
   } catch (error) {
     logger.warn({ error, fieldpulseJobId }, "Fieldpulse job-invoice pull failed (degraded)");
+  }
+  return summary;
+}
+
+/** How many open invoices one sweep re-checks, and how many at once. */
+const OPEN_INVOICE_SWEEP_LIMIT = 400;
+const OPEN_INVOICE_SWEEP_CONCURRENCY = 5;
+
+/**
+ * Re-pull every OPEN mirrored invoice by its own Fieldpulse id, least recently
+ * refreshed first. The job sweep (pullInvoicesForJob) only reaches invoices
+ * whose job is in this app; an open invoice with no linked job would otherwise
+ * stay "overdue" here forever after it is paid in Fieldpulse. Degrade-safe:
+ * per-invoice failures are counted, never thrown.
+ */
+export async function pullOpenFieldpulseInvoices(
+  organizationId: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ created: number; updated: number; skipped: number; failed: number }> {
+  const summary = { created: 0, updated: 0, skipped: 0, failed: 0 };
+  try {
+    const client = await getFieldpulseClient(organizationId, fetchImpl);
+    if (!client) return summary;
+    const open = await db
+      .select({ fieldpulseInvoiceId: invoices.fieldpulseInvoiceId })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.organizationId, organizationId),
+          eq(invoices.state, "open"),
+          isNotNull(invoices.fieldpulseInvoiceId),
+        ),
+      )
+      .orderBy(asc(invoices.updatedAt))
+      .limit(OPEN_INVOICE_SWEEP_LIMIT);
+    const healCustomer = makeFpCustomerHealer(organizationId, client);
+    for (let i = 0; i < open.length; i += OPEN_INVOICE_SWEEP_CONCURRENCY) {
+      const outcomes = await Promise.all(
+        open.slice(i, i + OPEN_INVOICE_SWEEP_CONCURRENCY).map(async ({ fieldpulseInvoiceId }) => {
+          if (!fieldpulseInvoiceId) return "skipped" as const;
+          try {
+            const invoice = await client.getInvoice(fieldpulseInvoiceId);
+            if (!invoice) return "skipped" as const;
+            return await upsertInvoiceRecord(organizationId, invoice, healCustomer);
+          } catch (error) {
+            logger.warn(
+              { error, fieldpulseInvoiceId },
+              "Fieldpulse open-invoice pull failed (degraded)",
+            );
+            return "failed" as const;
+          }
+        }),
+      );
+      for (const outcome of outcomes) summary[outcome]++;
+    }
+  } catch (error) {
+    logger.warn({ error, organizationId }, "Fieldpulse open-invoice sweep failed (degraded)");
   }
   return summary;
 }

@@ -34,7 +34,8 @@ vi.mock("./client", () => ({
 }));
 
 import { db } from "@/lib/db";
-import { upsertInvoiceRecord } from "./invoice-sync";
+import { upsertInvoiceRecord, pullOpenFieldpulseInvoices } from "./invoice-sync";
+import { getFieldpulseClient } from "./client";
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -531,5 +532,46 @@ describe("deriveInvoiceState — a zero balance is not proof of payment", () => 
     );
 
     expect(getInvoiceValues()?.mock.calls[0]?.[0]?.state).toBe("paid");
+  });
+});
+
+// ── pullOpenFieldpulseInvoices ────────────────────────────────────────────────
+
+describe("pullOpenFieldpulseInvoices", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** The open-invoice id query: select().from().where().orderBy().limit(). */
+  function mockOpenIds(ids: (string | null)[]) {
+    vi.mocked(db.select).mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: () => Promise.resolve(ids.map((fieldpulseInvoiceId) => ({ fieldpulseInvoiceId }))),
+          }),
+        }),
+      }),
+    } as never);
+  }
+
+  it("does nothing when the org is not connected", async () => {
+    vi.mocked(getFieldpulseClient).mockResolvedValue(null as never);
+    const result = await pullOpenFieldpulseInvoices(ORG);
+    expect(result).toEqual({ created: 0, updated: 0, skipped: 0, failed: 0 });
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("fetches each open invoice by its own id and isolates failures", async () => {
+    const getInvoice = vi.fn(async (id: string) => {
+      if (id === "boom") throw new Error("HTTP 500");
+      return null; // gone in FieldPulse → skipped
+    });
+    vi.mocked(getFieldpulseClient).mockResolvedValue({ getInvoice } as never);
+    mockOpenIds(["60000001", "boom", "60000003", "60000004", "60000005", "60000006"]);
+
+    const result = await pullOpenFieldpulseInvoices(ORG);
+
+    expect(getInvoice).toHaveBeenCalledTimes(6);
+    expect(getInvoice).toHaveBeenCalledWith("60000006");
+    expect(result).toEqual({ created: 0, updated: 0, skipped: 5, failed: 1 });
   });
 });
