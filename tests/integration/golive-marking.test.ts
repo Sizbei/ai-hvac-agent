@@ -72,19 +72,42 @@ function customer() {
   return one(sql`INSERT INTO customers (organization_id,name_encrypted) VALUES (${org},'probe') RETURNING id`);
 }
 
-function session(customerId: string | null, status = "submitted") {
+function session(customerId: string | null, status = "submitted", tokenPrefix = "") {
   return one(
-    sql`INSERT INTO customer_sessions (organization_id,token,customer_id,status) VALUES (${org},gen_random_uuid()::text,${customerId},${status}::session_status) RETURNING id`,
+    sql`INSERT INTO customer_sessions (organization_id,token,customer_id,status) VALUES (${org},${tokenPrefix}||gen_random_uuid()::text,${customerId},${status}::session_status) RETURNING id`,
   );
 }
 
-/** scheduledDate is SQL so the visit-sync trigger mirrors it into visit #1. */
-function request(sessionId: string, customerId: string | null, status: string, scheduledDate = sql`NULL`) {
+/** scheduledDate is SQL so the visit-sync trigger mirrors it into visit #1. refPrefix "HVAC-DEMO"/"HVAC-CAP" makes a seeded row. */
+function request(sessionId: string, customerId: string | null, status: string, scheduledDate = sql`NULL`, refPrefix = "PRB-") {
   return one(
     sql`INSERT INTO service_requests (organization_id,session_id,customer_id,issue_type,urgency,description,reference_number,status,scheduled_date)
-        VALUES (${org},${sessionId},${customerId},'no_heat','medium','Probe request','PRB-'||substr(md5(random()::text),1,8),${status}::request_status,${scheduledDate}) RETURNING id`,
+        VALUES (${org},${sessionId},${customerId},'no_heat','medium','Probe request',${refPrefix}||substr(md5(random()::text),1,8),${status}::request_status,${scheduledDate}) RETURNING id`,
   );
 }
+
+function backdate(table: Table, id: string, days: number) {
+  const ago = sql`now() - make_interval(days => ${days}::int)`;
+  return db.execute(sql`UPDATE ${sql.identifier(table)} SET created_at = ${ago}, updated_at = ${ago} WHERE id = ${id}`);
+}
+
+/** Visible rows whose parent (session, customer, request) is hidden. Must be 0 after any apply. */
+async function danglingLinks(orgId: string): Promise<Row> {
+  return (await run(sql`SELECT
+    (SELECT count(*) FROM service_requests x JOIN customer_sessions p ON p.id = x.session_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS request_session,
+    (SELECT count(*) FROM service_requests x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS request_customer,
+    (SELECT count(*) FROM customer_sessions x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS session_customer,
+    (SELECT count(*) FROM invoices x JOIN service_requests p ON p.id = x.service_request_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS invoice_request,
+    (SELECT count(*) FROM invoices x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS invoice_customer,
+    (SELECT count(*) FROM estimates x JOIN service_requests p ON p.id = x.service_request_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS estimate_request,
+    (SELECT count(*) FROM estimates x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS estimate_customer,
+    (SELECT count(*) FROM invoices x JOIN estimates p ON p.id = x.estimate_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS invoice_estimate`))[0]!;
+}
+
+const NO_DANGLING = {
+  request_session: 0, request_customer: 0, session_customer: 0,
+  invoice_request: 0, invoice_customer: 0, estimate_request: 0, estimate_customer: 0, invoice_estimate: 0,
+};
 
 function appointment(requestId: string, startsAt: ReturnType<typeof sql>, cancelled: boolean) {
   return one(
@@ -143,6 +166,61 @@ async function seed() {
   await db.execute(sql`UPDATE service_requests SET created_at = now() - interval '90 days' WHERE id = ${f.staleR}`);
   // a cancelled request still carrying a future scheduled_date
   await chain("cancelledReq", "cancelled", sql`now() + interval '3 days'`);
+  // P8 B3: a resumable chat idle for 20 days
+  f.oldChatC = await customer();
+  f.oldChatS = await session(f.oldChatC, "chatting");
+  await backdate("customer_sessions", f.oldChatS, 20);
+  // P8 M5: an open estimate untouched for 120 days, on a completed request
+  await chain("oldEst", "completed");
+  f.oldEstE = await estimate(f.oldEstR!, f.oldEstC!, "open");
+  await backdate("estimates", f.oldEstE, 120);
+  // P8 M6: old open requests kept by an open invoice / a recent open estimate
+  await chain("staleInv", "pending");
+  await backdate("service_requests", f.staleInvR!, 90);
+  f.staleInvI = await invoice(f.staleInvR!, f.staleInvC!, "open");
+  await chain("staleEst", "pending");
+  await backdate("service_requests", f.staleEstR!, 90);
+  f.staleEstE = await estimate(f.staleEstR!, f.staleEstC!, "open");
+  // P8 B1: seeded rows. A DEMO request with a visit and a fresh chatting session,
+  // a CAP request with an open invoice, and a customer who also has real work.
+  f.seedDemoC = await customer();
+  f.seedDemoS = await session(f.seedDemoC, "chatting");
+  f.seedDemoR = await request(f.seedDemoS, f.seedDemoC, "pending", sql`now() + interval '2 days'`, "HVAC-DEMO");
+  f.seedCapC = await customer();
+  f.seedCapS = await session(f.seedCapC);
+  f.seedCapR = await request(f.seedCapS, f.seedCapC, "pending", sql`NULL`, "HVAC-CAP");
+  f.seedCapI = await invoice(f.seedCapR, f.seedCapC, "open");
+  f.seedCapE = await estimate(f.seedCapR, f.seedCapC, "open");
+  f.sharedC = await customer();
+  f.sharedSeedS = await session(f.sharedC);
+  f.sharedSeedR = await request(f.sharedSeedS, f.sharedC, "pending", sql`NULL`, "HVAC-DEMO");
+  f.sharedRealS = await session(f.sharedC);
+  f.sharedRealR = await request(f.sharedRealS, f.sharedC, "pending");
+  // P8 fix A: a FieldPulse estimate created 120 days ago that the import "updated"
+  // yesterday is stale; a native one with the same dates was really touched
+  await chain("fpOldEst", "completed");
+  f.fpOldEstE = await one(
+    sql`INSERT INTO estimates (organization_id,service_request_id,customer_id,status,total_cents,fieldpulse_estimate_id)
+        VALUES (${org},${f.fpOldEstR},${f.fpOldEstC},'open'::estimate_status,9900,${`fp-${randomUUID()}`}) RETURNING id`,
+  );
+  await chain("nativeTouched", "completed");
+  f.nativeTouchedE = await estimate(f.nativeTouchedR!, f.nativeTouchedC!, "open");
+  for (const id of [f.fpOldEstE, f.nativeTouchedE]) {
+    await db.execute(sql`UPDATE estimates SET created_at = now() - interval '120 days', updated_at = now() - interval '1 day' WHERE id = ${id}`);
+  }
+  // an old sold estimate an open invoice references stays with the invoice
+  f.invEstC = await customer();
+  f.invEstE = await estimate(null, f.invEstC, "sold");
+  await backdate("estimates", f.invEstE, 200);
+  f.invEstI = await one(
+    sql`INSERT INTO invoices (organization_id,customer_id,estimate_id,state,total_cents)
+        VALUES (${org},${f.invEstC},${f.invEstE},'open'::invoice_state,12500) RETURNING id`,
+  );
+  // fresh resumable sessions with seed-script tokens
+  f.demoTokC = await customer();
+  f.demoTokS = await session(f.demoTokC, "chatting", "demo-seed-");
+  f.demoCapTokC = await customer();
+  f.demoCapTokS = await session(f.demoCapTokC, "confirmed", "demo-cap-");
   // the local-midnight boundary in America/Chicago
   const midnight = sql`(date_trunc('day', now() AT TIME ZONE ${TZ}) AT TIME ZONE ${TZ})`;
   await chain("todayEarly", "completed");
@@ -214,10 +292,97 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("the dry run counts an old open request with no scheduled date", async () => {
+  it("the dry run counts each P8 rule", async () => {
+    await batch(m.unhideStatements(org));
     const dry = (await run(m.dryRunSql(org)))[0]!;
-    // staleR is the only open request created over 60 days ago
-    expect(dry.old_open_requests_kept).toBe(1);
+    // staleR (never scheduled) is the one old open request nothing keeps
+    expect(dry.stale_requests_hidden).toBe(1);
+    // staleInvR and staleEstR are kept by their open invoice / recent estimate
+    expect(dry.old_open_requests_kept).toBe(2);
+    // oldEstE and fpOldEstE; seedCapE is hidden as seeded, not as stale
+    expect(dry.stale_estimates_hidden).toBe(2);
+    // oldChatS only; fresh seeded sessions count as seeded
+    expect(dry.stale_sessions_hidden).toBe(1);
+    // seedDemoS, seedCapS, sharedSeedS (seeded requests) + demoTokS, demoCapTokS (tokens)
+    expect(dry.seeded_sessions_hidden).toBe(5);
+    expect(dry.seeded_requests_hidden).toBe(3);
+    // a longer cut keeps staleR
+    const longer = (await run(m.dryRunSql(org, 100)))[0]!;
+    expect(longer.stale_requests_hidden).toBe(0);
+    expect(longer.old_open_requests_kept).toBe(0);
+  });
+
+  it("an old resumable session is hidden with its customer; a recent one is kept (both modes)", async () => {
+    for (const mode of ["history", "empty"] as const) {
+      await apply(mode);
+      await expectHidden(true, [["customer_sessions", "oldChatS"], ["customers", "oldChatC"]]);
+      await expectHidden(false, [["customer_sessions", "chatS"], ["customers", "chatC"]]);
+    }
+  });
+
+  it("history hides an open estimate untouched for 90 days and keeps a recent one", async () => {
+    await apply("history");
+    await expectHidden(true, [["estimates", "oldEstE"], ["service_requests", "oldEstR"], ["customers", "oldEstC"]]);
+    await expectHidden(false, [["estimates", "estE"], ["service_requests", "estR"], ["customers", "estC"]]);
+  });
+
+  it("history hides an old open request unless an open invoice or recent estimate keeps it", async () => {
+    await apply("history");
+    await expectHidden(true, [["service_requests", "staleR"], ["customer_sessions", "staleS"], ["customers", "staleC"]]);
+    await expectHidden(false, [
+      ["service_requests", "staleInvR"], ["invoices", "staleInvI"], ["customer_sessions", "staleInvS"], ["customers", "staleInvC"],
+      ["service_requests", "staleEstR"], ["estimates", "staleEstE"], ["customer_sessions", "staleEstS"], ["customers", "staleEstC"],
+      ["service_requests", "openR"],
+    ]);
+  });
+
+  it("a FieldPulse estimate ages by created_at; a native one by updated_at", async () => {
+    await apply("history");
+    await expectHidden(true, [["estimates", "fpOldEstE"], ["service_requests", "fpOldEstR"], ["customers", "fpOldEstC"]]);
+    await expectHidden(false, [["estimates", "nativeTouchedE"], ["service_requests", "nativeTouchedR"], ["customers", "nativeTouchedC"]]);
+  });
+
+  it("an estimate a kept invoice references is kept, whatever its status and age", async () => {
+    await apply("history");
+    await expectHidden(false, [["invoices", "invEstI"], ["estimates", "invEstE"], ["customers", "invEstC"]]);
+  });
+
+  it("demo-seed- / demo-cap- sessions are hidden with their customers in both modes", async () => {
+    for (const mode of ["history", "empty"] as const) {
+      await apply(mode);
+      await expectHidden(true, [
+        ["customer_sessions", "demoTokS"], ["customers", "demoTokC"],
+        ["customer_sessions", "demoCapTokS"], ["customers", "demoCapTokC"],
+      ]);
+    }
+  });
+
+  it("--stale-days moves the cut", async () => {
+    await batch(m.unhideStatements(org));
+    await batch(m.markStatements(org, "history", 100));
+    await expectHidden(false, [["service_requests", "staleR"], ["customers", "staleC"]]);
+  });
+
+  it("seeded HVAC-DEMO / HVAC-CAP requests, their sessions, invoices and estimates are hidden in both modes", async () => {
+    for (const mode of ["history", "empty"] as const) {
+      await apply(mode);
+      await expectHidden(true, [
+        ["service_requests", "seedDemoR"], ["customer_sessions", "seedDemoS"], ["customers", "seedDemoC"],
+        ["service_requests", "seedCapR"], ["customer_sessions", "seedCapS"], ["customers", "seedCapC"],
+        ["invoices", "seedCapI"], ["estimates", "seedCapE"],
+        ["service_requests", "sharedSeedR"], ["customer_sessions", "sharedSeedS"],
+      ]);
+    }
+    // a seeded customer with other kept work stays
+    await apply("history");
+    await expectHidden(false, [["customers", "sharedC"], ["service_requests", "sharedRealR"]]);
+  });
+
+  it("no visible row points at a hidden parent after either mode", async () => {
+    for (const mode of ["history", "empty"] as const) {
+      await apply(mode);
+      expect(await danglingLinks(org)).toEqual(NO_DANGLING);
+    }
   });
 
   it("history hides completed request without future visit, paid invoice, FieldPulse draft, sold estimate, abandoned orphan session", async () => {
@@ -285,6 +450,22 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     const again = spawnScript(["--org", org, "--apply", "--reapply"]);
     expect(again.status).toBe(0);
     expect(again.stdout).toContain("Hid rows for");
+  });
+
+  it("script refuses a bad --stale-days and reports the cut it was given", () => {
+    for (const bad of ["0", "-5", "abc", "1.5"]) {
+      const out = spawnScript(["--org", org, "--stale-days", bad]);
+      expect(out.status).toBe(1);
+      expect(out.stderr).toBe("Refused: --stale-days must be a whole number of days from 1 to 99999\n");
+    }
+    const empty = spawnScript(["--org", org, "--mode", "empty", "--stale-days", "30"]);
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toBe("Refused: --stale-days only applies to --mode history\n");
+    const out = spawnScript(["--org", org, "--stale-days", "100"]);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toContain("stale cut 100 days");
+    expect(out.stdout).toMatch(/history: hides \d+ open requests older than 100 days/);
+    expect(out.stdout).toMatch(/both: hide \d+ seeded HVAC-DEMO \/ HVAC-CAP requests/);
   });
 
   it("unhide restores every row", async () => {

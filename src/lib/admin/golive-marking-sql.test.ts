@@ -3,6 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { BUSINESS_TIME_ZONE } from "./calendar-time";
 import {
+  DEFAULT_STALE_DAYS,
   MARKED_TABLES,
   dryRunSql,
   keptCustomerIdsSql,
@@ -44,8 +45,8 @@ describe("golive marking SQL", () => {
       expect(tableRefs.length).toBeGreaterThan(0);
       expect(orgPreds.length).toBe(tableRefs.length);
       for (const m of orgPreds) expect(params[Number(m[1]) - 1]).toBe(ORG);
-      // the only other bound value is the fallback timezone
-      for (const p of params) expect([ORG, BUSINESS_TIME_ZONE]).toContain(p);
+      // the only other bound values are the fallback timezone and the stale-days cut
+      for (const p of params) expect([ORG, BUSINESS_TIME_ZONE, DEFAULT_STALE_DAYS]).toContain(p);
     }
   });
 
@@ -168,6 +169,91 @@ describe("golive marking SQL", () => {
     }
     expect(flat).toContain(" AS old_open_requests_kept");
     expect(flat).toContain(" AS open_ar_cents_hidden_in_empty");
-    expect(flat).toContain("interval '60 days'");
+    for (const col of ["stale_requests_hidden", "stale_sessions_hidden", "stale_estimates_hidden", "seeded_requests_hidden", "seeded_sessions_hidden"]) {
+      expect(flat).toContain(` AS ${col}`);
+    }
+    // the stale counts are by age only; seeded rows are counted on their own line
+    expect(flat).toContain("(CASE WHEN se.fieldpulse_estimate_id IS NOT NULL THEN se.created_at ELSE COALESCE(se.updated_at, se.created_at) END) < now() - interval '90 days'");
+    expect(flat).toContain("ss.updated_at < now() - interval '14 days'");
+    expect(flat).toContain("sr.created_at < now() - make_interval(days => $");
+  });
+
+  it("resumable sessions are kept only when updated in the last 14 days, in both modes", () => {
+    for (const mode of MODES) {
+      const { flat } = render(keptSessionIdsSql(ORG, mode));
+      expect(flat).toContain(
+        "(cs.status IN ('chatting'::session_status, 'extracting'::session_status, 'confirmed'::session_status) AND cs.updated_at >= now() - interval '14 days' AND NOT (cs.token",
+      );
+      // sessions of kept requests are still kept, whatever their age
+      expect(flat).toMatch(/OR cs\.id IN \(SELECT kr\.session_id FROM service_requests kr/);
+    }
+  });
+
+  it("open estimates are kept only when active in the last 90 days; FieldPulse rows age by created_at", () => {
+    const { flat } = render(keptEstimateIdsSql(ORG, "history"));
+    expect(flat).toContain(
+      "(e.status = 'open'::estimate_status AND (CASE WHEN e.fieldpulse_estimate_id IS NOT NULL THEN e.created_at ELSE COALESCE(e.updated_at, e.created_at) END) >= now() - interval '90 days')",
+    );
+  });
+
+  it("estimates referenced by a kept invoice are kept", () => {
+    const { flat } = render(keptEstimateIdsSql(ORG, "history"));
+    expect(flat).toMatch(/OR e\.id IN \(SELECT ki\.estimate_id FROM invoices ki WHERE ki\.organization_id = \$\d+::uuid AND ki\.estimate_id IS NOT NULL AND ki\.id IN \(SELECT i\.id FROM invoices i /);
+  });
+
+  it("the request rule keeps a request for membership in the kept estimates, not a re-stated age test", () => {
+    const { flat } = render(keptRequestIdsSql(ORG, "history"));
+    expect(flat).toMatch(/OR EXISTS \(SELECT 1 FROM estimates re WHERE re\.organization_id = \$\d+::uuid AND re\.service_request_id = sr\.id AND re\.id IN \(SELECT e\.id FROM estimates e /);
+  });
+
+  it("demo-seed- and demo-cap- session tokens are seeded", () => {
+    for (const mode of MODES) {
+      expect(render(keptSessionIdsSql(ORG, mode)).flat).toContain(
+        "AND NOT (cs.token LIKE 'demo-seed-%' OR cs.token LIKE 'demo-cap-%') AND",
+      );
+    }
+  });
+
+  it("history keeps a non-terminal request only when created within the stale-days cut (default 60)", () => {
+    expect(DEFAULT_STALE_DAYS).toBe(60);
+    const { flat, params } = render(keptRequestIdsSql(ORG, "history"));
+    const m = flat.match(
+      /\(sr\.status NOT IN \('completed'::request_status, 'cancelled'::request_status\) AND sr\.created_at >= now\(\) - make_interval\(days => \$(\d+)::int\)\)/,
+    );
+    expect(m).not.toBeNull();
+    expect(params[Number(m![1]) - 1]).toBe(60);
+    const custom = render(keptRequestIdsSql(ORG, "history", 30));
+    expect(custom.params).toContain(30);
+    expect(custom.params).not.toContain(60);
+    // a kept invoice or estimate still keeps an old request
+    expect(flat).toMatch(/OR EXISTS \(SELECT 1 FROM invoices i .*OR EXISTS \(SELECT 1 FROM estimates re /);
+  });
+
+  it("the stale-days cut reaches every statement that renders the request rule", () => {
+    for (const s of [...markStatements(ORG, "history", 45), dryRunSql(ORG, 45)]) {
+      const { flat, params } = render(s);
+      if (flat.includes("make_interval")) expect(params).toContain(45);
+      expect(params).not.toContain(DEFAULT_STALE_DAYS);
+    }
+  });
+
+  it("seeded HVAC-DEMO / HVAC-CAP requests are never kept, in either mode", () => {
+    const seeded = "(sr.reference_number LIKE 'HVAC-DEMO%' OR sr.reference_number LIKE 'HVAC-CAP%')";
+    for (const mode of MODES) {
+      expect(render(keptRequestIdsSql(ORG, mode)).flat).toContain(`AND NOT ${seeded} AND`);
+      // nor their sessions as resumable chats
+      expect(render(keptSessionIdsSql(ORG, mode)).flat).toContain(
+        "NOT EXISTS (SELECT 1 FROM service_requests sd WHERE sd.organization_id = $",
+      );
+    }
+  });
+
+  it("an invoice or estimate on a seeded request is not kept, so no visible child points at it", () => {
+    for (const a of ["i", "e"]) {
+      const q = a === "i" ? keptInvoiceIdsSql(ORG, "history") : keptEstimateIdsSql(ORG, "history");
+      const { flat } = render(q);
+      expect(flat).toContain("NOT EXISTS (SELECT 1 FROM service_requests sd WHERE sd.organization_id = $");
+      expect(flat).toContain(`sd.id = ${a}.service_request_id AND (sd.reference_number LIKE 'HVAC-DEMO%' OR sd.reference_number LIKE 'HVAC-CAP%'))`);
+    }
   });
 });
