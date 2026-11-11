@@ -51,3 +51,12 @@ describe("prodMigrationRefusal", () => {
     expect(reason).not.toContain("u:p");
   });
 });
+
+describe("prodSeedRefusal", () => {
+  it("refuses the production host and allows anything else", async () => {
+    const { prodSeedRefusal } = await import("./migrate-guard");
+    expect(prodSeedRefusal("postgresql://u:p@ep-withered-hill-123.us-east-1.aws.neon.tech/db")).toMatch(/Refusing to seed/);
+    expect(prodSeedRefusal("postgresql://u:p@ep-dev-branch.us-east-1.aws.neon.tech/db")).toBeNull();
+    expect(prodSeedRefusal(undefined)).toBeNull();
+  });
+});

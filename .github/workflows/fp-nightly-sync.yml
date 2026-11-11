@@ -58,8 +58,10 @@ jobs:
           node-version: 22
           cache: "npm"
 
+      # --ignore-scripts: the next step holds the production database URL and
+      # the encryption key, so no dependency gets to run install-time code here.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # SECURITY: `phases` is attacker-controllable free text (any user who can
       # dispatch this workflow). It MUST arrive through `env:` and be quoted in

@@ -31,3 +31,9 @@ export function prodMigrationRefusal({
   if (vercelEnv === "production" || confirm === "1") return null;
   return "Refusing to migrate: DATABASE_URL is the production database and VERCEL_ENV is not production (set MIGRATE_PROD_CONFIRM=1 for a deliberate manual run).";
 }
+
+/** Seeds write fictional data and delete by org id: never against production. */
+export function prodSeedRefusal(databaseUrl: string | undefined): string | null {
+  if (!databaseUrl || !hostOf(databaseUrl).includes(PROD_HOST_MARKER)) return null;
+  return "Refusing to seed: DATABASE_URL is the production database.";
+}

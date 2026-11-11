@@ -12,4 +12,10 @@ tests
 
 # Local env / secrets (never upload)
 .env
-.env.local
+.env.*
+!.env.example
+
+# Untracked local folders (the CLI uploads them otherwise)
+demo
+venv
+.agents

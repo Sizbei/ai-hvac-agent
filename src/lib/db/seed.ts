@@ -5,6 +5,7 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
+import { prodSeedRefusal } from "./migrate-guard";
 import bcrypt from "bcryptjs";
 import * as dotenv from "dotenv";
 
@@ -21,6 +22,8 @@ async function seed(): Promise<void> {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL environment variable is required");
   }
+  const refusal = prodSeedRefusal(process.env.DATABASE_URL);
+  if (refusal) throw new Error(refusal);
 
   console.log("Seeding database...");
 

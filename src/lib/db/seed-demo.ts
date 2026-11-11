@@ -15,6 +15,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq, like, inArray, or } from "drizzle-orm";
 import * as schema from "./schema";
+import { prodSeedRefusal } from "./migrate-guard";
 import { encrypt } from "../crypto";
 import { DEFAULT_TOKEN_BUDGET, DEFAULT_MAX_TURNS } from "../ai/chat-limits";
 import { type ArrivalWindow } from "../admin/arrival-window";
@@ -870,6 +871,8 @@ async function seedDemo(): Promise<void> {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL environment variable is required");
   }
+  const refusal = prodSeedRefusal(process.env.DATABASE_URL);
+  if (refusal) throw new Error(refusal);
   if (!process.env.ENCRYPTION_KEY) {
     throw new Error("ENCRYPTION_KEY environment variable is required");
   }
