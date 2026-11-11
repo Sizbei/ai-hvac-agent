@@ -10,6 +10,9 @@
  *   npx tsx scripts/agent/set-history-cutoff.mjs --org <uuid>                      # now
  *   npx tsx scripts/agent/set-history-cutoff.mjs --org <uuid> --at 2026-11-10T22:00:00Z
  *
+ * --at must not be in the future. A running app instance picks the new cutoff
+ * up within 30 s (the org row TTL cache, src/lib/tenancy/org-row.ts).
+ *
  * Any run against the production host (ep-withered-hill) needs --prod; only the
  * user passes it, never an agent. DATABASE_URL comes from the environment, else
  * from .env.local.
@@ -41,6 +44,8 @@ function parseArgs(argv) {
   }
   if (!out.org || !UUID.test(out.org)) refuse("--org must be an organization uuid");
   if (out.at !== null && Number.isNaN(new Date(out.at).getTime())) refuse("--at must be an ISO timestamp");
+  // A future cutoff would hide entries written between now and then.
+  if (out.at !== null && new Date(out.at).getTime() > Date.now()) refuse("--at can't be in the future");
   return out;
 }
 

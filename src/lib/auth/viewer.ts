@@ -8,7 +8,7 @@ import { PREVIEW_COOKIE, verifyPreviewCookie } from "@/lib/auth/preview-cookie";
 import { findPreviewTarget } from "@/lib/admin/preview-targets";
 import type { AdminRole, AdminSessionPayload } from "@/lib/auth/types";
 import { computeShowHidden, type Visibility } from "@/lib/admin/visibility";
-import { getFeatures } from "@/lib/tenancy/features";
+import { getCachedFeatures } from "@/lib/tenancy/features";
 import { DEFAULT_FEATURES, type Features } from "@/lib/tenancy/feature-flags";
 import { errorCode, logger } from "@/lib/logger";
 
@@ -53,10 +53,14 @@ function safeIsPlatformAdmin(session: AdminSessionPayload): boolean {
   }
 }
 
-/** Fail safe: a lookup error means DEFAULT_FEATURES (`showHistory: false`). */
+/**
+ * Fail safe: a lookup error means DEFAULT_FEATURES (`showHistory: false`).
+ * Reads the 30 s TTL-cached org row (final wave M2): a `showHistory` switched
+ * off on another instance can still reveal history there for up to 30 s.
+ */
 async function safeFeatures(organizationId: string): Promise<Features> {
   try {
-    return await getFeatures(organizationId);
+    return await getCachedFeatures(organizationId);
   } catch (error) {
     logger.error(
       { code: errorCode(error), organizationId },

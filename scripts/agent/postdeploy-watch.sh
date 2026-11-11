@@ -6,6 +6,8 @@
 # `vercel logs` streams for at most 5 minutes, so each pass captures up to that.
 # Test hooks (no network): WATCH_FIXTURE_LOGS=<file> WATCH_FIXTURE_ENV=<file>
 # replace `vercel logs` / `vercel env ls` and skip the smoke run.
+# Exit (first that applies): 1 a smoke pass failed, 5 the logs showed a 5xx,
+# 4 logs were unavailable, 3 fixture run, 0 clean.
 set -u
 usage() { echo "usage: bash scripts/agent/postdeploy-watch.sh <deployment url> [--minutes 60] [--every 10]" >&2; exit 1; }
 URL="${1:-}"; [ -z "$URL" ] && usage
@@ -36,7 +38,7 @@ if [ "${WATCH_FIXTURE:-}" = "1" ]; then
   fixture="${WATCH_FIXTURE_LOGS:-/dev/null}"
   echo "FIXTURE MODE — no smoke, no real logs"
 fi
-smoke_fail=0; logs_bad=0; continue_after=0; end=$(( $(date +%s) + MINUTES * 60 )); pass=0
+smoke_fail=0; logs_bad=0; saw_5xx=0; continue_after=0; end=$(( $(date +%s) + MINUTES * 60 )); pass=0
 
 while :; do
   pass=$((pass + 1))
@@ -60,7 +62,14 @@ while :; do
     cp "$fixture" "$TMP"
   fi
   if [ "$continue_after" -eq 0 ]; then
-    if [ -s "$TMP" ]; then $SUM summarize < "$TMP"; else echo "logs: no lines captured — verify vercel logs access"; fi
+    if [ -s "$TMP" ]; then
+      # summarize exits 5 when it counted a 5xx; anything else nonzero is a failed summary.
+      $SUM summarize < "$TMP"; sstatus=$?
+      if [ "$sstatus" -eq 5 ]; then saw_5xx=1
+      elif [ "$sstatus" -ne 0 ]; then echo "logs: summary failed"; logs_bad=1; fi
+    else
+      echo "logs: no lines captured — verify vercel logs access"
+    fi
   fi
   continue_after=0
   [ "$(date +%s)" -ge "$end" ] && break
@@ -74,7 +83,12 @@ if printf '%s\n' "$envout" | $SUM has-env SENTRY_DSN; then
 else
   echo "Sentry is not enabled (SENTRY_DSN not set in production)"
 fi
-if [ -n "$fixture" ]; then echo "smoke: skipped"; exit 3; fi
-[ "$smoke_fail" -eq 0 ] && echo "smoke: all passes ok" || echo "smoke: at least one pass FAILED"
+if [ -n "$fixture" ]; then echo "smoke: skipped"
+elif [ "$smoke_fail" -eq 0 ]; then echo "smoke: all passes ok"
+else echo "smoke: at least one pass FAILED"; fi
+[ "$saw_5xx" -eq 0 ] || echo "logs: at least one 5xx — check the routes above"
+[ "$smoke_fail" -eq 0 ] || exit 1
+[ "$saw_5xx" -eq 0 ] || exit 5
 [ "$logs_bad" -eq 0 ] || exit 4
-exit $smoke_fail
+[ -z "$fixture" ] || exit 3
+exit 0

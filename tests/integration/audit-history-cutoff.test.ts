@@ -127,9 +127,13 @@ describe("go-live audit cutoff (dev DB)", { timeout: 60_000 }, () => {
     expect(at).toBeLessThanOrEqual(Date.now() + 5_000);
   });
 
-  it("the CLI refuses a bad org, a bad --at, an unknown org and the production host", () => {
+  it("the CLI refuses a bad org, a bad or future --at, an unknown org and the production host", () => {
     expect(spawnScript(["--org", "nope"]).stderr).toContain("--org must be an organization uuid");
     expect(spawnScript(["--org", org, "--at", "yesterday"]).stderr).toContain("--at must be an ISO timestamp");
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    const ahead = spawnScript(["--org", org, "--at", future]);
+    expect(ahead.status).toBe(1);
+    expect(ahead.stderr).toContain("--at can't be in the future");
     expect(spawnScript(["--org", randomUUID()]).stderr).toContain("no organization");
     const prod = spawnScript(["--org", org], {
       ...process.env,

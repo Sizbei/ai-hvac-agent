@@ -3,6 +3,7 @@ import {
   parsePreviewStatus,
   previewExpiryDelayMs,
   previewStatusDiffers,
+  previewSyncEnabled,
   shownPreview,
 } from "./preview-sync";
 
@@ -79,5 +80,16 @@ describe("parsePreviewStatus", () => {
     ["numeric target", { success: true, data: { previewing: true, targetUserId: 5 } }],
   ])("null for %s", (_n, json) => {
     expect(parsePreviewStatus(json)).toBeNull();
+  });
+});
+
+describe("previewSyncEnabled (final wave L4)", () => {
+  it("runs for the platform owner, previewing or not", () => {
+    expect(previewSyncEnabled({ platformUi: true, previewing: false })).toBe(true);
+    expect(previewSyncEnabled({ platformUi: false, previewing: true })).toBe(true);
+  });
+
+  it("never runs for an org user (no preview can start for them)", () => {
+    expect(previewSyncEnabled({ platformUi: false, previewing: false })).toBe(false);
   });
 });

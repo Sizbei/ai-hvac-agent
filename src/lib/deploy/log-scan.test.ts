@@ -73,4 +73,27 @@ describe("summarizeLogLines", () => {
     const s = summarizeLogLines([json({ statusCode: 500 })]);
     expect(s.byRoute).toEqual({ "(unknown)": 1 });
   });
+
+  it("text fallback: a 5xx counts only right after a path or as status=", () => {
+    const s = summarizeLogLines([
+      "GET /admin/requests 503",
+      "/api/chat 500 12ms",
+      "status=502 /api/cron/sweep",
+      "statusCode: 504",
+    ]);
+    expect(s.status5xx).toBe(4);
+    expect(s.byRoute).toEqual({ "/admin/requests": 1, "/api/chat": 1, "/api/cron/sweep": 1, "(unknown)": 1 });
+  });
+
+  it("text fallback: durations, sizes and counts in the 500s are not 5xx", () => {
+    const s = summarizeLogLines([
+      "GET /admin/requests 200 took 512 ms",
+      "Compiled /admin in 503 ms",
+      "fetched 550 rows",
+      "500 /Jane_Smith/ok-route",
+      "boom 502 /secret-1234567/x",
+    ]);
+    expect(s.status5xx).toBe(0);
+    expect(s.byRoute).toEqual({});
+  });
 });

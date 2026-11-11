@@ -13,6 +13,7 @@ import { OrgNameProvider } from '@/components/admin/org-name-context';
 import { PlatformUiProvider } from '@/components/admin/platform-ui-context';
 import { PreviewBanner } from '@/components/admin/preview-banner';
 import { usePreviewSync } from '@/hooks/use-preview-sync';
+import { previewSyncEnabled } from '@/lib/admin/preview-sync';
 import type { AdminRole } from '@/lib/auth/types';
 
 interface DashboardShellProps {
@@ -60,7 +61,12 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const mobileTitle = useMobileTitle(setupPlacement, mapEnabled);
-  usePreviewSync(preview !== null, preview?.targetUserId ?? null, preview?.exp ?? null);
+  usePreviewSync(
+    previewSyncEnabled({ platformUi, previewing: preview !== null }),
+    preview !== null,
+    preview?.targetUserId ?? null,
+    preview?.exp ?? null,
+  );
 
   const handleMobileClose = useCallback(() => {
     setIsMobileOpen(false);

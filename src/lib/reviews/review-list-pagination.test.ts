@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 interface CapturedQuery {
   where: unknown;
   hasLimit: boolean;
+  fields?: Record<string, unknown>;
 }
 
 const { selectQueue, captured, chain } = vi.hoisted(() => {
@@ -40,8 +41,8 @@ const { selectQueue, captured, chain } = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/db', () => {
-  const make = () => {
-    const capture: CapturedQuery = { where: undefined, hasLimit: false };
+  const make = (fields?: Record<string, unknown>) => {
+    const capture: CapturedQuery = { where: undefined, hasLimit: false, fields };
     captured.push(capture);
     return chain(selectQueue.shift() ?? [], capture);
   };
@@ -176,5 +177,25 @@ describe('listReviews', () => {
       customerId: 'c-1',
       customerName: 'Dana Halvorsen',
     });
+  });
+
+  it('takes customerId from the visibility-gated customer join, so a hidden customer reads null', async () => {
+    queuePage([{
+      id: 'rr-1',
+      serviceRequestId: 'sr-1',
+      referenceNumber: 'HVAC-1',
+      customerId: null,
+      customerNameEncrypted: null,
+      status: 'sent',
+      rating: null,
+      publicClicked: false,
+      sentAt: null,
+      respondedAt: null,
+      createdAt: { toISOString: () => '2024-01-01T00:00:00.000Z' },
+    }]);
+    const { reviews } = await listReviews(ORG, {}, VISIBLE_ONLY);
+    // captured[1] = rows query: the id comes from the joined customer row.
+    expect(captured[1]?.fields?.customerId).toBe('c.id');
+    expect(reviews[0]).toMatchObject({ customerId: null, customerName: null });
   });
 });

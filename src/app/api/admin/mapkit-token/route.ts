@@ -16,7 +16,7 @@ import { SignJWT, importPKCS8 } from "jose";
 import { getAdminSession } from "@/lib/auth/session";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
-import { getFeatures } from "@/lib/tenancy/features";
+import { getCachedFeatures } from "@/lib/tenancy/features";
 
 // Tokens are per-request (origin claim) and short-lived — never cacheable.
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Map is a per-org switch (off by default); fail closed if it can't be read.
-    if (!(await getFeatures(session.organizationId)).map) {
+    if (!(await getCachedFeatures(session.organizationId)).map) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/session", () => ({ getAdminSession: vi.fn() }));
 vi.mock("@/lib/auth/authz", () => ({ isPlatformAdmin: vi.fn() }));
-vi.mock("@/lib/tenancy/features", () => ({ getFeatures: vi.fn() }));
+vi.mock("@/lib/tenancy/features", () => ({ getCachedFeatures: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn() }, errorCode: () => undefined }));
 vi.mock("@/lib/admin/preview-targets", () => ({ findPreviewTarget: vi.fn() }));
 const cookieJar = new Map<string, string>();
@@ -14,7 +14,7 @@ vi.mock("next/headers", () => ({ cookies: () => cookiesFn() }));
 
 import { getAdminSession } from "@/lib/auth/session";
 import { isPlatformAdmin } from "@/lib/auth/authz";
-import { getFeatures } from "@/lib/tenancy/features";
+import { getCachedFeatures } from "@/lib/tenancy/features";
 import { DEFAULT_FEATURES } from "@/lib/tenancy/feature-flags";
 import type { AdminSessionPayload } from "@/lib/auth/types";
 import { findPreviewTarget } from "@/lib/admin/preview-targets";
@@ -32,7 +32,7 @@ const SESSION: AdminSessionPayload = {
 
 const session = vi.mocked(getAdminSession);
 const platform = vi.mocked(isPlatformAdmin);
-const features = vi.mocked(getFeatures);
+const features = vi.mocked(getCachedFeatures);
 const target = vi.mocked(findPreviewTarget);
 
 const SECRET = "test-auth-secret-for-viewer";

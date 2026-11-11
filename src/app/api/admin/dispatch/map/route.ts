@@ -17,7 +17,7 @@ import { fetchAddressSuggestions } from "@/lib/address/photon";
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
-import { getFeatures } from "@/lib/tenancy/features";
+import { getCachedFeatures } from "@/lib/tenancy/features";
 import { IN_FLIGHT_STATUSES } from "@/lib/admin/request-status";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +67,7 @@ export async function GET() {
 
   try {
     // Map is a per-org switch (off by default); fail closed if it can't be read.
-    if (!(await getFeatures(session.organizationId)).map) {
+    if (!(await getCachedFeatures(session.organizationId)).map) {
       return errorResponse("Not found", "NOT_FOUND", 404);
     }
 

@@ -43,10 +43,18 @@ function fromJson(line: string): { status: number | null; path: string | null } 
   }
 }
 
+/**
+ * A status only where a log puts one: right after the request path
+ * ("GET /x 503") or as `status=` / `statusCode:`. A bare number in the 500s
+ * (a duration, a size, a count) is not a status.
+ */
 function fromText(line: string): { status: number | null; path: string | null } {
-  const status = line.match(/(?:^|\s)([1-5]\d\d)(?:\s|$)/);
+  const afterPath = line.match(/(?:^|\s)(\/\S*)\s+([1-5]\d\d)(?=\s|$)/);
+  if (afterPath) return { status: Number(afterPath[2]), path: afterPath[1] };
+  const keyed = line.match(/\bstatus(?:Code)?\s*[=:]\s*([1-5]\d\d)\b/i);
+  if (!keyed) return { status: null, path: null };
   const path = line.match(/(?:^|\s)(\/[^\s]*)/);
-  return { status: status ? Number(status[1]) : null, path: path ? path[1] : null };
+  return { status: Number(keyed[1]), path: path ? path[1] : null };
 }
 
 export function summarizeLogLines(lines: string[]): LogSummary {

@@ -3,7 +3,7 @@
  * Time to page frame and time to first data row for every admin nav page.
  *
  *   node scripts/agent/measure-latency.mjs [--base http://localhost:3000] [--runs 5] [--out <file>]
- *     [--preview-as <userId>]
+ *     [--preview-as <userId>] [--prod]
  *
  * Each run loads /admin, waits for it to settle, clicks the sidebar link and
  * measures from the click (plan ruling 14):
@@ -14,12 +14,18 @@
  *
  * Session: on localhost it is minted with `MINT_EMAIL=<dev non-demo admin>`
  * (reads .env.local = DEV). On any other base set HVAC_SESSION to the raw
- * hvac_admin_session cookie value. Measure a local `next build && next start`;
- * never point this at production without the user's say-so.
+ * hvac_admin_session cookie value. Measure a local `next build && next start`.
  *
- * --preview-as <userId> measures as that user ("View as", spec P7): it adds a
- * dev hvac_preview cookie from mint-preview-cookie.mjs, bound to the session.
- * Localhost only — refused for any other base.
+ * A non-local base is refused without --prod (the user's say-so only). Admin
+ * page loads write onboarding stamps, so there --preview-as <userId> measures
+ * read-only with HVAC_PREVIEW (the raw hvac_preview cookie value); without
+ * --preview-as the run warns that it writes stamps (latency-run.ts).
+ *
+ * --preview-as <userId> on localhost measures as that user ("View as", spec
+ * P7) with a dev hvac_preview cookie from mint-preview-cookie.mjs, bound to
+ * the session.
+ *
+ * Exits 1 when any page never measured a first row (every run failed).
  */
 import { execFileSync, spawnSync } from "child_process";
 import { writeFileSync } from "fs";
@@ -49,14 +55,23 @@ const out = opt("out", "");
 const previewAs = opt("preview-as", "");
 const { hostname } = new URL(base);
 const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
-if (previewAs && !isLocal) {
-  console.error("--preview-as mints a dev cookie and is for localhost only.");
-  process.exit(1);
-}
 
 const { LATENCY_PAGES, formatLatencyTable } = await import(
   "../../src/lib/admin/latency-stats.ts"
 );
+const { latencyExitCode, latencyRunPlan } = await import("../../src/lib/admin/latency-run.ts");
+
+const plan = latencyRunPlan({
+  isLocal,
+  prod: args.includes("--prod"),
+  previewAs,
+  envPreviewCookie: Boolean(process.env.HVAC_PREVIEW),
+});
+if (!plan.ok) {
+  console.error(plan.error);
+  process.exit(1);
+}
+if (plan.warning) console.error(`Warning: ${plan.warning}`);
 
 function sessionToken() {
   if (process.env.HVAC_SESSION) return process.env.HVAC_SESSION;
@@ -109,15 +124,18 @@ const settled = (page) =>
   }, null, { timeout: 30000 });
 
 const token = sessionToken();
-const previewCookie = previewAs
-  ? execFileSync("npx", ["tsx", "scripts/agent/mint-preview-cookie.mjs", previewAs], {
-      encoding: "utf8",
-      env: { ...process.env, HVAC_SESSION: token },
-    })
-      .trim()
-      .split("\n")
-      .pop()
-  : null;
+const previewCookie =
+  plan.preview === "env"
+    ? process.env.HVAC_PREVIEW
+    : plan.preview === "mint"
+      ? execFileSync("npx", ["tsx", "scripts/agent/mint-preview-cookie.mjs", previewAs], {
+          encoding: "utf8",
+          env: { ...process.env, HVAC_SESSION: token },
+        })
+          .trim()
+          .split("\n")
+          .pop()
+      : null;
 const browser = await chromium.launch();
 const rows = [];
 try {
@@ -142,9 +160,12 @@ try {
           .locator(`aside a[href="${norm(href)}"], aside a[href="${norm(href)}/"]`)
           .first();
         await link.waitFor({ timeout: 10000 });
-        const measured = page.evaluate(observeAfterClick, norm(href));
-        await link.click();
-        const r = await measured;
+        // Observe from before the click; awaited together so a failed click
+        // never leaves the observer's promise rejecting unhandled.
+        const [r] = await Promise.all([
+          page.evaluate(observeAfterClick, norm(href)),
+          link.click(),
+        ]);
         if (r.frame !== null) row.frame.push(r.frame);
         if (r.row !== null) row.firstRow.push(r.row);
       } catch (err) {
@@ -164,3 +185,4 @@ const table = formatLatencyTable(rows);
 const header = `# ${new Date().toISOString()}  base=${base}  runs=${runs}  (ms from click)\n`;
 console.log(header + table);
 if (out) writeFileSync(out, header + table + "\n");
+process.exitCode = latencyExitCode(rows);

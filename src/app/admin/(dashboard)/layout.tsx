@@ -11,7 +11,7 @@ import { db } from '@/lib/db';
 import { organizations, organizationSettings } from '@/lib/db/schema';
 import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
 import { isDemoOrg } from '@/lib/tenancy/demo-mode';
-import { loadOrgRow } from '@/lib/tenancy/org-row';
+import { loadOrgRowCached } from '@/lib/tenancy/org-row';
 import { parseFeatures } from '@/lib/tenancy/feature-flags';
 import type { SetupPlacement } from '@/components/admin/nav-items';
 import { isOrgActive } from '@/lib/billing/entitlements';
@@ -31,19 +31,24 @@ export default async function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const signedIn = await getAdminSession();
+  if (!signedIn) {
+    redirect('/admin/login');
+  }
+  // The org lookups start alongside the viewer (they need only the org id)
+  // and fail independently: a miss on one never changes what the other
+  // decides. Neither rejects, so an early redirect leaves nothing unhandled.
+  const orgReads = Promise.all([
+    loadBillingState(signedIn.organizationId),
+    loadSetupPlacement(signedIn.organizationId),
+  ]);
   const viewer = await getViewerContext();
 
   if (!viewer) {
     redirect('/admin/login');
   }
   const { session } = viewer;
-
-  // The two lookups run concurrently and fail independently: a miss on one
-  // never changes what the other decides.
-  const [{ billingAttention, orgName, mapEnabled }, setupPlacement] = await Promise.all([
-    loadBillingState(session.organizationId),
-    loadSetupPlacement(session.organizationId),
-  ]);
+  const [{ billingAttention, orgName, mapEnabled }, setupPlacement] = await orgReads;
 
   // While previewing, the chip shows the target (m14); the banner names the real viewer's mode.
   const chip = chipIdentity(session, viewer.preview);
@@ -83,7 +88,7 @@ const loadBillingState = cache(async function loadBillingState(
   organizationId: string,
 ): Promise<{ billingAttention: boolean; orgName: string | undefined; mapEnabled: boolean }> {
   try {
-    const org = await loadOrgRow(organizationId);
+    const org = await loadOrgRowCached(organizationId);
     return {
       billingAttention: org ? !isOrgActive(org) : false,
       orgName: org?.name ?? undefined,

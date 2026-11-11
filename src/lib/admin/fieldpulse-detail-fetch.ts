@@ -27,3 +27,32 @@ export function fieldpulseDataFromDetail(
   if (!isPlainObject(row)) return null;
   return isPlainObject(row.fieldpulseData) ? row.fieldpulseData : null;
 }
+
+type FieldpulseData = Record<string, unknown> | null;
+
+/**
+ * A per-page-lifetime loader: one request per record, shared by every row
+ * that opens it (re-expanding a row, or two lists showing one record). A
+ * failed load rejects and is dropped, so the next open retries. Holds at most
+ * `max` records, dropping the oldest.
+ */
+export function createFieldpulseDetailLoader(
+  fetcher: (url: string) => Promise<Response>,
+  max = 50,
+): (record: FieldpulseDetailRecord, id: string) => Promise<FieldpulseData> {
+  const cache = new Map<string, Promise<FieldpulseData>>();
+  return (record, id) => {
+    const url = fieldpulseDetailUrl(record, id);
+    const hit = cache.get(url);
+    if (hit) return hit;
+    const pending = fetcher(url)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("load failed"))))
+      .then((body: unknown) => fieldpulseDataFromDetail(body, record));
+    cache.set(url, pending);
+    pending.catch(() => {
+      if (cache.get(url) === pending) cache.delete(url);
+    });
+    if (cache.size > max) cache.delete(cache.keys().next().value as string);
+    return pending;
+  };
+}

@@ -18,6 +18,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+const invalidateOrgRow = vi.fn();
+vi.mock("@/lib/tenancy/org-row", () => ({
+  invalidateOrgRow: (id: string) => invalidateOrgRow(id),
+}));
+
 import { updateOrgFeatures } from "./platform-features";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -77,5 +82,19 @@ describe("updateOrgFeatures", () => {
   it("returns null when the org does not exist", async () => {
     batch.mockResolvedValue([[], undefined]);
     expect(await updateOrgFeatures(ORG, { map: true }, ACTOR)).toBeNull();
+  });
+});
+
+describe("updateOrgFeatures invalidates the org row cache (final wave M2)", () => {
+  it("drops this instance's cached row after the write", async () => {
+    batch.mockResolvedValue([[{ featureFlags: { map: false } }], undefined]);
+    await updateOrgFeatures(ORG, { map: false }, ACTOR);
+    expect(invalidateOrgRow).toHaveBeenCalledWith(ORG);
+  });
+
+  it("invalidates even when the org is missing", async () => {
+    batch.mockResolvedValue([[], undefined]);
+    await updateOrgFeatures(ORG, { map: false }, ACTOR);
+    expect(invalidateOrgRow).toHaveBeenCalledWith(ORG);
   });
 });

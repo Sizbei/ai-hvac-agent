@@ -12,6 +12,7 @@ import { useSetupPlacement } from '@/components/admin/setup-placement-context';
 import { useOrgName } from '@/components/admin/org-name-context';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
+import { patchGuide } from '@/lib/admin/guide-patch';
 import { nextRows, requiredMeta } from '@/lib/admin/setup-view';
 import {
   cardTitle,
@@ -191,19 +192,8 @@ export function SetupCard() {
     focusPending.current = true;
     setWelcomeHidden(true);
     if (!body) return;
-    try {
-      const res = await adminFetch('/api/admin/guide', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) console.warn('[setup-card] guide_dismiss_failed', res.status);
-      await refreshOnboarding({ force: true });
-    } catch (err) {
-      // The row stays hidden for this visit either way.
-      if (err instanceof AdminAuthRedirectError) return;
-      console.warn('[setup-card] guide_dismiss_failed');
-    }
+    // The row stays hidden for this visit either way; refetch only after a stored write.
+    if (await patchGuide(body)) await refreshOnboarding({ force: true });
   }
 
   const welcomeOnly = state.view === 'welcome-only';

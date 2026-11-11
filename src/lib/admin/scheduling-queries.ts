@@ -18,7 +18,6 @@ import {
   inArray,
   isNull,
   isNotNull,
-  or,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -39,6 +38,7 @@ import {
 } from "@/lib/ai/dispatch/booking-quality";
 import { withTenant } from "@/lib/db/tenant";
 import { visibleRows, type Visibility } from "./visibility";
+import { needsPlacementWhere } from "./unscheduled-sql";
 import { logger } from "@/lib/logger";
 import {
   rankTechnicians,
@@ -52,7 +52,6 @@ import { loadDispatchSignals } from "@/lib/ai/dispatch/signals";
 import { recordStatusEvent } from "@/lib/admin/status-events";
 import {
   isTerminal,
-  NEEDS_PLACEMENT_STATUSES,
   OPEN_STATUSES,
   type RequestStatus,
 } from "./request-status";
@@ -329,7 +328,7 @@ export async function getScheduledJobsForRange(
 
 /**
  * Open requests that still need to be PLACED on the calendar: status
- * pending/scheduled/assigned/in_progress and either unassigned (no technician)
+ * pending through in_progress (NEEDS_PLACEMENT_STATUSES) and either unassigned (no technician)
  * OR missing an arrival window. Assigned/in-progress jobs that already have a
  * window are excluded by the OR condition (both isNull branches fail).
  * Backs the "unscheduled jobs" view in S2. Oldest first so the
@@ -349,19 +348,8 @@ export async function listUnscheduledRequests(
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
     })
     .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        inArray(serviceRequests.status, [...NEEDS_PLACEMENT_STATUSES]),
-        // "Unscheduled" = not yet fully placed: no tech, or no arrival window.
-        or(
-          isNull(serviceRequests.assignedTo),
-          isNull(serviceRequests.arrivalWindowStart),
-        )!,
-        visibleRows(serviceRequests, vis),
-      ),
-    )
+    // "Unscheduled" = not yet fully placed: no tech, or no arrival window.
+    .where(needsPlacementWhere(organizationId, visibleRows(serviceRequests, vis)))
     .orderBy(asc(serviceRequests.createdAt));
 
   return rows.map(toScheduledJob);

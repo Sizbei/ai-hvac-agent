@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getViewerContext } from "@/lib/auth/viewer";
-import { getHistoryCutoff } from "@/lib/tenancy/features";
+import { getCachedHistoryCutoff } from "@/lib/tenancy/features";
 import { getAuditLog } from "@/lib/admin/audit-queries";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     // cutoff read throws to the 500 below rather than showing all history.
     const since = viewer.showHidden
       ? undefined
-      : ((await getHistoryCutoff(session.organizationId)) ?? undefined);
+      : ((await getCachedHistoryCutoff(session.organizationId)) ?? undefined);
 
     const result = await getAuditLog(session.organizationId, {
       action,
