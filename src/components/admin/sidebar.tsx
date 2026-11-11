@@ -288,7 +288,7 @@ export function Sidebar({
               >
                 <Search className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" />
                 <span className="flex-1 text-left">Search</span>
-                <kbd className="font-mono text-[11px] [color:var(--sidebar-foreground-dim)]">⌘K</kbd>
+                <kbd className="max-md:hidden font-mono text-[11px] [color:var(--sidebar-foreground-dim)]">⌘K</kbd>
               </button>
             </div>
 
@@ -402,7 +402,7 @@ export function Sidebar({
               >
                 <Search className="size-4 shrink-0 [color:var(--sidebar-foreground-dim)]" />
                 <span className="flex-1 text-left">Search</span>
-                <kbd className="font-mono text-[11px] [color:var(--sidebar-foreground-dim)]">⌘K</kbd>
+                <kbd className="max-md:hidden font-mono text-[11px] [color:var(--sidebar-foreground-dim)]">⌘K</kbd>
               </button>
             )}
           </div>

@@ -147,7 +147,7 @@ export function DashboardStatCards({
             label="Overdue invoices"
             value={overdueInvoices ? String(overdueInvoices.count) : '—'}
             icon={Receipt}
-            sublabel={overdueInvoices ? `${formatCentsExact(overdueInvoices.cents)} outstanding` : undefined}
+            sublabel={overdueInvoices ? `${formatCentsExact(overdueInvoices.cents)} past due` : undefined}
             loading={isLoading}
             className={IN_STRIP}
           />

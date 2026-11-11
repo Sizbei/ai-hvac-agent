@@ -454,5 +454,9 @@
   {
     "id": "src/lib/ai/account-zips.ts#isVerifyLockedOut",
     "reason": "Security counter, not a display read: failed account-verification attempts must be counted across every session (hidden or not) or hiding a chat would reset the lockout."
+  },
+  {
+    "id": "src/lib/communication/consent.ts#checkSendAllowed",
+    "reason": "Send gate, not a display read: it reads the customer's hidden_from_org flag precisely so a hidden customer is refused."
   }
 ]

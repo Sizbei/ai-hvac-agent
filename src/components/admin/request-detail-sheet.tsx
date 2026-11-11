@@ -1592,7 +1592,7 @@ export function RequestDetailSheet({
                               onChange={(e) =>
                                 setHoldReasonInput(e.target.value as HoldReason)
                               }
-                              className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              className="flex h-9 max-sm:h-11 rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                               {HOLD_REASONS.map((r) => (
                                 <option key={r} value={r}>
@@ -1609,7 +1609,7 @@ export function RequestDetailSheet({
                               type="date"
                               value={followUpInput}
                               onChange={(e) => setFollowUpInput(e.target.value)}
-                              className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              className="flex h-9 max-sm:h-11 rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             />
                           </label>
                         </div>
@@ -1679,7 +1679,7 @@ export function RequestDetailSheet({
                             aria-label="Scheduled service date"
                             value={scheduledInput}
                             onChange={(e) => setScheduledInput(e.target.value)}
-                            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="flex h-9 max-sm:h-11 rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           />
                           <select
                             aria-label="Arrival window"
@@ -1689,7 +1689,7 @@ export function RequestDetailSheet({
                                 e.target.value ? (e.target.value as ArrivalWindow) : null,
                               )
                             }
-                            className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="flex h-9 max-sm:h-11 rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           >
                             {arrivalWindowInput === null && (
                               <option value="">Choose a window</option>
@@ -1791,7 +1791,7 @@ export function RequestDetailSheet({
                       placeholder="Add an internal note (not visible to the customer)…"
                       rows={2}
                       maxLength={5000}
-                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     <div className="flex items-center justify-between">
                       {noteError ? (

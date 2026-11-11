@@ -91,6 +91,8 @@ export function useAdminConversations(
 
     const cached = conversationsCache.get(key);
     const hasCachedData = cached !== null;
+    // A failed refresh over an out-of-date entry must say so, not pass as current.
+    const hasFreshData = conversationsCache.isFresh(key);
     if (hasCachedData) {
       setConversations(cached.data.conversations);
       setTotal(cached.data.total);
@@ -115,7 +117,7 @@ export function useAdminConversations(
 
       if (run !== runRef.current) return;
       if (!res.ok) {
-        if (run === runRef.current && !hasCachedData) {
+        if (run === runRef.current && !hasFreshData) {
           setError(CONVERSATIONS_LOAD_ERROR);
         }
         return;
@@ -149,7 +151,7 @@ export function useAdminConversations(
       }
     } catch (err) {
       if (err instanceof AdminAuthRedirectError) return;
-      if (run === runRef.current && !hasCachedData) {
+      if (run === runRef.current && !hasFreshData) {
         setError(CONVERSATIONS_LOAD_ERROR);
       }
     } finally {

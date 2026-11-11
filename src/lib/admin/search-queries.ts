@@ -464,7 +464,9 @@ export async function searchEstimates(
 
   const results: SearchResult[] = [];
   for (const row of rows) {
-    const estTitle = `EST-${row.id.slice(0, 8).toUpperCase()}`;
+    const estTitle = row.fieldpulseEstimateId
+      ? `Estimate #${row.fieldpulseEstimateId}`
+      : `EST-${row.id.slice(0, 8).toUpperCase()}`;
     const matches =
       row.id.toLowerCase().startsWith(term) ||
       (row.fieldpulseEstimateId?.toLowerCase().includes(term) ?? false);

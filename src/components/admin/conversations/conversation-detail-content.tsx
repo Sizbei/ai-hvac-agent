@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Trash2, Send, ArrowUpRight, Check, RotateCw } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -162,6 +162,11 @@ export function ConversationDetailContent({
     () => (conversationId ? (conversationDetailCache.get(conversationId)?.data ?? null) : null),
   );
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  // Which conversation the sheet shows now, for saves that finish after a switch.
+  const openIdRef = useRef(conversationId);
+  useEffect(() => {
+    openIdRef.current = conversationId;
+  }, [conversationId]);
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -331,7 +336,8 @@ export function ConversationDetailContent({
       }
       const body = (await res.json()) as { success: boolean; data: { handledAt: string | null } };
       setDetail((prev) => {
-        if (!prev) return prev;
+        // The sheet may have moved on to another conversation while this saved.
+        if (!prev || openIdRef.current !== conversationId) return prev;
         const next = { ...prev, handledAt: body.data.handledAt, needsAction: !handled };
         if (conversationId) conversationDetailCache.set(conversationId, next);
         return next;

@@ -258,7 +258,9 @@ export function renderSmsTemplate(
   // Check cache first
   let compiled = templateCache.get(template);
   if (!compiled) {
-    compiled = Handlebars.compile(template, { strict: true });
+    // A text message is plain text: HTML-escaping turns O'Neil & Sons into
+    // O&#x27;Neil &amp; Sons on the customer's phone and breaks link queries.
+    compiled = Handlebars.compile(template, { strict: true, noEscape: true });
     templateCache.set(template, compiled);
   }
 

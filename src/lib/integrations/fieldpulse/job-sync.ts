@@ -152,8 +152,10 @@ export async function pushJobToFieldpulse(
     // Already mapped → UPDATE the existing Fieldpulse job and stop (idempotent path).
     if (initial.fieldpulseJobId) {
       const fields = serviceRequestToJobFields(initial.jobFields);
+      // Schedule only. The description was sent when we created the job; on a
+      // job that came FROM FieldPulse it is the office's own text and must not
+      // be replaced with ours.
       await client.updateJob(initial.fieldpulseJobId, {
-        description: fields.description,
         scheduleStart: fields.scheduleStart,
         scheduleEnd: fields.scheduleEnd,
       });

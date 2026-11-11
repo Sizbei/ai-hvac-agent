@@ -66,7 +66,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, cardPayment
     syncedSource: invoice.syncedSource,
     customerId: invoice.customerId,
   });
-  const balance = invoice.totalCents - invoice.amountPaidCents;
+  const balance = Math.max(0, invoice.totalCents - invoice.amountPaidCents);
   const shownCents = invoice.state === 'paid' ? invoice.totalCents : balance;
   const isPartial = invoice.state !== 'paid' && invoice.amountPaidCents > 0;
   const cooldownActive = isCooldownActive(invoice.lastReminderSentAt ?? null);

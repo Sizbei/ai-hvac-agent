@@ -199,6 +199,7 @@ vi.mock('drizzle-orm', () => ({
   inArray: vi.fn((...args: unknown[]) => args),
   count: vi.fn(),
   gt: vi.fn((...args: unknown[]) => args),
+  isNotNull: vi.fn((...args: unknown[]) => args),
 }));
 
 vi.mock('@/lib/session', () => ({

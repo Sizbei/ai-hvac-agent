@@ -10,7 +10,7 @@
 
 import { db } from "@/lib/db";
 import { communicationJobs, communicationTemplates, communicationChannelEnum } from "@/lib/db/schema";
-import { eq, and, lt, lte, asc } from "drizzle-orm";
+import { eq, and, lt, lte, ne, asc } from "drizzle-orm";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { checkSendAllowed } from "./consent";
 import { sendSms } from "./twilio-adapter";
@@ -58,6 +58,9 @@ export async function queueCommunicationJob(job: {
   return created.id;
 }
 
+/** How long a message held back by quiet hours waits before the next try. */
+const QUIET_HOURS_RETRY_MS = 60 * 60 * 1000;
+
 /**
  * Process pending communication jobs
  *
@@ -74,6 +77,12 @@ export async function processPendingJobs(limit = 10): Promise<{
 }> {
   const now = new Date();
 
+  // If email isn't configured, do NOT claim email jobs: claiming then failing
+  // on getResend() would burn maxAttempts and silently drop every email. They
+  // stay pending and flush once RESEND_API_KEY is set. They are left out of the
+  // batch altogether, so a backlog of them can never crowd texts out of it.
+  const emailConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
+
   // Fetch pending jobs that are scheduled for now or earlier
   const pendingJobs = await db
     .select()
@@ -82,6 +91,7 @@ export async function processPendingJobs(limit = 10): Promise<{
       and(
         eq(communicationJobs.status, "pending"),
         lte(communicationJobs.scheduledFor, now),
+        emailConfigured ? undefined : ne(communicationJobs.channel, "email"),
       ),
     )
     .orderBy(asc(communicationJobs.scheduledFor), asc(communicationJobs.priority))
@@ -94,25 +104,9 @@ export async function processPendingJobs(limit = 10): Promise<{
   let succeeded = 0;
   let failed = 0;
 
-  // If email isn't configured, do NOT claim email jobs: claiming then failing
-  // on getResend() would burn maxAttempts and silently drop every email. Leave
-  // them pending so they flush once RESEND_API_KEY is set. Warn once per drain.
-  const emailConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
-  let warnedEmailDisabled = false;
-
   // Process each job
   for (const job of pendingJobs) {
     try {
-      if (job.channel === "email" && !emailConfigured) {
-        if (!warnedEmailDisabled) {
-          console.warn(
-            "[job-queue] RESEND_API_KEY not set — skipping email jobs (left pending, not failed). Set the key to flush them.",
-          );
-          warnedEmailDisabled = true;
-        }
-        continue;
-      }
-
       // CONSENT GATE (TCPA/CAN-SPAM): the send chokepoint. A do-not-contact
       // customer, a disabled channel/type, or quiet hours suppresses the send —
       // the job is cancelled, never delivered. Checked at SEND time (not just
@@ -123,6 +117,15 @@ export async function processPendingJobs(limit = 10): Promise<{
         channel: job.channel,
         triggerType: job.triggerType,
       });
+      if (!decision.allowed && decision.reason === "quiet_hours") {
+        // Quiet hours delay a message; they do not cancel it. Try again in an
+        // hour (consent is re-checked then).
+        await db
+          .update(communicationJobs)
+          .set({ scheduledFor: new Date(now.getTime() + QUIET_HOURS_RETRY_MS) })
+          .where(and(eq(communicationJobs.id, job.id), eq(communicationJobs.status, "pending")));
+        continue;
+      }
       if (!decision.allowed) {
         await db
           .update(communicationJobs)

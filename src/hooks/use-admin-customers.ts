@@ -74,6 +74,8 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
 
       const cached = customersCache.get(key);
       const hasCachedData = cached !== null;
+      // A failed refresh over an out-of-date entry must say so, not pass as current.
+      const hasFreshData = customersCache.isFresh(key);
       if (hasCachedData) {
         setError(null);
         setCustomers(cached.data.customers);
@@ -106,13 +108,13 @@ export function useAdminCustomers(params: UseAdminCustomersParams = {}) {
             total: json.data.total,
             propertyTypes: json.data.propertyTypes,
           });
-        } else if (!hasCachedData) {
+        } else if (!hasFreshData) {
           setError(CUSTOMERS_LOAD_FAILED);
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
         if (isStaleResponse(seq, seqRef.current)) return;
-        if (!hasCachedData) setError(CUSTOMERS_OFFLINE);
+        if (!hasFreshData) setError(CUSTOMERS_OFFLINE);
       } finally {
         if (!isStaleResponse(seq, seqRef.current)) setIsLoading(false);
       }

@@ -457,7 +457,7 @@ export default function InvoicesPage() {
               placeholder="Min"
               value={minDollars}
               onChange={(e) => setMinDollars(e.target.value)}
-              className="w-[62px] max-sm:min-h-11 bg-transparent font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
+              className="w-[62px] max-sm:min-h-11 bg-transparent font-mono text-base sm:text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
               aria-label="Minimum balance in dollars"
             />
             <span aria-hidden="true" className="h-[18px] w-px shrink-0 bg-border" />
@@ -468,7 +468,7 @@ export default function InvoicesPage() {
               placeholder="Max"
               value={maxDollars}
               onChange={(e) => setMaxDollars(e.target.value)}
-              className="w-[62px] max-sm:min-h-11 bg-transparent pl-2.5 pr-2.5 font-mono text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
+              className="w-[62px] max-sm:min-h-11 bg-transparent pl-2.5 pr-2.5 font-mono text-base sm:text-[13px] tabular-nums outline-none placeholder:font-sans placeholder:text-foreground-faint"
               aria-label="Maximum balance in dollars"
             />
           </div>

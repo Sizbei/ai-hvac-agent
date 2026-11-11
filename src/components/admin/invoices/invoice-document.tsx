@@ -7,6 +7,7 @@ import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 import { docDateLabel, invoiceDocModel } from './invoice-document-model';
 import { signatureBlock, type DocumentSignature } from './invoice-signature-model';
 import { lineQuantityLabel } from '@/lib/admin/line-quantity';
+import { fpDiscountCents } from '@/lib/admin/margin';
 
 export interface OrgIdentity {
   readonly companyName: string;
@@ -48,6 +49,9 @@ export function InvoiceDocument({
   onSignatureLoad,
 }: Props) {
   const m = invoiceDocModel(invoice);
+  // FieldPulse's subtotal is already net of its invoice-level discount; show it
+  // so the lines add up.
+  const discountCents = fpDiscountCents(invoice.fieldpulseData);
   const sig = signatureBlock(invoice, signatureUnavailable);
 
   // The sheet is pinned to --surface-raised (pure white): this is paper, and it
@@ -193,6 +197,9 @@ export function InvoiceDocument({
 
           {/* Totals */}
           <div className="w-56 shrink-0 space-y-0">
+            {discountCents > 0 && (
+              <TotalsRow label="Discount" value={`−${formatCentsExact(discountCents)}`} />
+            )}
             <TotalsRow label="Subtotal" value={formatCentsExact(invoice.subtotalCents)} />
             {invoice.taxCents > 0 && (
               <TotalsRow label="Sales tax" value={formatCentsExact(invoice.taxCents)} />

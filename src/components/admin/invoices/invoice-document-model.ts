@@ -35,7 +35,10 @@ export interface InvoiceDocModel {
 }
 
 export function invoiceDocModel(inv: InvoiceDetailView, now: Date = new Date()): InvoiceDocModel {
-  const amountDueCents = inv.totalCents - inv.amountPaidCents;
+  // Nothing is due on a paid or void invoice, and an overpayment is not a
+  // negative balance.
+  const amountDueCents =
+    inv.state === 'paid' || inv.state === 'void' ? 0 : Math.max(0, inv.totalCents - inv.amountPaidCents);
   // Real issue date when the source system provides one (FP/HCP mirrors);
   // row-creation time only for native invoices.
   const invoiceDate = new Date(inv.issuedAt ?? inv.createdAt);

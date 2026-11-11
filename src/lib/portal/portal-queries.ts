@@ -20,7 +20,7 @@ import "server-only";
  *    selected into a portal payload. Customers must not see cost.
  */
 import { randomBytes, createHash } from "node:crypto";
-import { asc, desc, eq, inArray, ne } from "drizzle-orm";
+import { asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customers,
@@ -230,7 +230,9 @@ export async function getPortalData(
       state: invoices.state,
       totalCents: invoices.totalCents,
       amountPaidCents: invoices.amountPaidCents,
-      createdAt: invoices.createdAt,
+      // The real invoice date when the source system gave one; our row-creation
+      // time is the import day for mirrored invoices.
+      createdAt: sql<Date>`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`.mapWith(invoices.createdAt),
     })
     .from(invoices)
     .where(
@@ -239,9 +241,11 @@ export async function getPortalData(
         organizationId,
         eq(invoices.customerId, customerId),
         ne(invoices.state, "draft"),
+        // Rows hidden from the office are hidden from the customer too.
+        eq(invoices.hiddenFromOrg, false),
       ),
     )
-    .orderBy(desc(invoices.createdAt));
+    .orderBy(desc(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`));
 
   // Estimates — status + headline total + (server-side) approval token so the
   // page can deep-link to the existing /estimates/[token] e-sign page. The token

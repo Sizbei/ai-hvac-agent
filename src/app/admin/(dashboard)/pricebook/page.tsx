@@ -182,7 +182,7 @@ export default function PricebookPage() {
           <Input
             ref={searchRef}
             aria-label="Search pricebook"
-            placeholder="Search by name, SKU, or description..."
+            placeholder="Search name, SKU or description…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"

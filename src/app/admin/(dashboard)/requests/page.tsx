@@ -56,20 +56,22 @@ export default function AdminRequestsPage() {
   // The open request lives in the URL (`?request=<id>`): a link to it can be
   // shared, and opening one from the list pushes a history entry so Back (or a
   // phone's back swipe) closes the sheet instead of leaving Requests.
-  const pushedEntryRef = useRef(false);
+  const pushedEntryRef = useRef<string | false>(false);
   const openRequest = useCallback((id: string) => {
     if (!pushedEntryRef.current) {
       const sp = new URLSearchParams(window.location.search);
       sp.set('request', id);
       window.history.pushState(null, '', `${window.location.pathname}?${sp.toString()}`);
-      pushedEntryRef.current = true;
+      pushedEntryRef.current = id;
     }
     setSelectedRequestId(id);
   }, []);
   const closeRequest = useCallback(() => {
-    if (pushedEntryRef.current) {
-      // Consume our entry; popstate then clears the selection.
-      pushedEntryRef.current = false;
+    const pushed = pushedEntryRef.current;
+    pushedEntryRef.current = false;
+    // Only when our entry is still the current one (search may have navigated
+    // to another request on top of it): consume it; popstate clears the sheet.
+    if (pushed && new URLSearchParams(window.location.search).get('request') === pushed) {
       window.history.back();
       return;
     }

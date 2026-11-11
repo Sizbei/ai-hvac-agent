@@ -18,7 +18,7 @@
  *   6. background: Housecall Pro job push + customer-equipment record
  */
 import { after } from "next/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import {
@@ -254,12 +254,11 @@ export async function submitSessionServiceRequest(params: {
               communicationPreferences.organizationId,
               communicationPreferences.customerId,
             ],
-            // An intake session is not a verified identity. On a customer who
-            // ALREADY has a preference it may only narrow consent (opt out),
-            // never switch texting back on over a choice staff or the customer
-            // made earlier — staff re-enable it from the customer's profile.
+            // The customer's latest answer wins. A STOP reply is kept separately
+            // (doNotContact) and is checked first on every send, so opting in
+            // here can never override it.
             set: {
-              smsEnabled: sql`${communicationPreferences.smsEnabled} AND ${data.smsConsent}`,
+              smsEnabled: data.smsConsent,
               updatedAt: new Date(),
             },
           })

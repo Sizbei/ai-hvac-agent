@@ -461,7 +461,7 @@ export async function sendInvoicePayLink(
       triggerType: "invoice_sent",
       templateVariables: {
         customerName: contact.name ?? "",
-        amount: formatCentsExact(inv.totalCents),
+        amount: formatCentsExact(inv.totalCents - inv.amountPaidCents),
         invoiceNumber: invoiceRef(invoiceId),
         payLink,
         companyName: brand.companyName,

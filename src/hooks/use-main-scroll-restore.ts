@@ -53,6 +53,8 @@ export function useMainScrollRestore(
     };
     el.addEventListener('wheel', stop, { passive: true });
     el.addEventListener('touchmove', stop, { passive: true });
+    el.addEventListener('pointerdown', stop, { passive: true });
+    window.addEventListener('keydown', stop);
 
     const onScroll = () => positions.current.set(pathname, el.scrollTop);
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -60,6 +62,8 @@ export function useMainScrollRestore(
       cancelled = true;
       el.removeEventListener('wheel', stop);
       el.removeEventListener('touchmove', stop);
+      el.removeEventListener('pointerdown', stop);
+      window.removeEventListener('keydown', stop);
       el.removeEventListener('scroll', onScroll);
     };
   }, [ref, pathname]);

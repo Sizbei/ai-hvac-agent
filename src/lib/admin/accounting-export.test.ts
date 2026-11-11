@@ -95,6 +95,7 @@ vi.mock('drizzle-orm', () => ({
   and: (...conds: unknown[]) => ({ kind: 'and', conds }),
   or: (...conds: unknown[]) => ({ kind: 'or', conds }),
   isNull: (col: unknown) => ({ kind: 'isNull', col }),
+  notInArray: (col: unknown, values: unknown) => ({ kind: 'notInArray', col, values }),
   isNotNull: (col: unknown) => ({ kind: 'isNotNull', col }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     kind: 'sql',

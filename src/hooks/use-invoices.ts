@@ -158,6 +158,8 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
 
       const cached = invoicesCache.get(key);
       const hasCachedData = cached !== null;
+      // A failed refresh over an out-of-date entry must say so, not pass as current.
+      const hasFreshData = invoicesCache.isFresh(key);
 
       if (hasCachedData) {
         setInvoices(cached.data.invoices);
@@ -176,7 +178,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
         const res = await adminFetch(`/api/admin/invoices${buildQuery(params)}`);
         if (run !== runRef.current) return;
         if (!res.ok) {
-          if (!hasCachedData) setError('Couldn’t load invoices. Please try again.');
+          if (!hasFreshData) setError('Couldn’t load invoices. Please try again.');
           return;
         }
         const body = (await res.json()) as {
@@ -214,7 +216,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
-        if (run === runRef.current && !hasCachedData) setError('Could not connect to server. Please try again.');
+        if (run === runRef.current && !hasFreshData) setError('Could not connect to server. Please try again.');
       } finally {
         if (run === runRef.current) setIsLoading(false);
       }

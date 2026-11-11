@@ -100,6 +100,8 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
 
       const cached = pricebookCache.get(key);
       const hasCachedData = cached !== null;
+      // A failed refresh over an out-of-date entry must say so, not pass as current.
+      const hasFreshData = pricebookCache.isFresh(key);
       if (hasCachedData) {
         setItems(cached.data.items);
         setTotal(cached.data.total);
@@ -131,12 +133,12 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
             total: json.data.total,
             types: json.data.types ?? [],
           });
-        } else if (!hasCachedData) {
+        } else if (!hasFreshData) {
           setError(json.error?.message ?? 'Couldn’t load pricebook. Please try again.');
         }
       } catch (err) {
         if (err instanceof AdminAuthRedirectError) return;
-        if (run === runRef.current && !hasCachedData) setError('Network error');
+        if (run === runRef.current && !hasFreshData) setError('Network error');
       } finally {
         if (run === runRef.current) setIsLoading(false);
       }

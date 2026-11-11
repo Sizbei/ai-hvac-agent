@@ -442,11 +442,11 @@ function WeekView({
               >
                 {weekday}{' '}
                 <span
-                  className={`font-mono tabular-nums ${
+                  className={`font-mono tabular-nums max-sm:block ${
                     isToday ? 'font-semibold' : 'font-normal text-muted-foreground'
                   }`}
                 >
-                  {wall.month}/{wall.day}
+                  <span className="max-sm:hidden">{wall.month}/</span>{wall.day}
                 </span>
               </button>
               <div className="relative">

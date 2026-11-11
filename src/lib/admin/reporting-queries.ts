@@ -215,22 +215,31 @@ export async function getSalesReport(
     db
       .select({
         created: count(),
-        sold: count(sql`CASE WHEN ${estimates.status} = 'sold' THEN 1 END`),
+        // FieldPulse's own status wins, exactly as on the Estimates board
+        // (estimate-queries.ts BUCKET_CASE_SQL): Accepted/Completed is sold,
+        // Lost is dismissed, and a FieldPulse Draft is not yet an open offer.
+        sold: count(
+          sql`CASE WHEN ${estimates.status} = 'sold' OR lower(coalesce(${estimates.fieldpulseStatusName}, '')) IN ('accepted','completed') THEN 1 END`,
+        ),
         expired: count(
-          sql`CASE WHEN ${estimates.status} = 'expired'
+          sql`CASE WHEN lower(coalesce(${estimates.fieldpulseStatusName}, '')) NOT IN ('accepted','completed','lost','draft')
+                    AND (${estimates.status} = 'expired'
                     OR (${estimates.status} = 'open'
                         AND ${estimates.expiresAt} IS NOT NULL
-                        AND ${estimates.expiresAt} < ${now})
+                        AND ${estimates.expiresAt} < ${now}))
                    THEN 1 END`,
         ),
         open: count(
           sql`CASE WHEN ${estimates.status} = 'open'
+                    AND lower(coalesce(${estimates.fieldpulseStatusName}, '')) NOT IN ('accepted','completed','lost','draft')
                     AND (${estimates.expiresAt} IS NULL
                          OR ${estimates.expiresAt} >= ${now})
                    THEN 1 END`,
         ),
         dismissed: count(
-          sql`CASE WHEN ${estimates.status} = 'dismissed' THEN 1 END`,
+          sql`CASE WHEN lower(coalesce(${estimates.fieldpulseStatusName}, '')) NOT IN ('accepted','completed')
+                    AND (${estimates.status} = 'dismissed' OR lower(coalesce(${estimates.fieldpulseStatusName}, '')) = 'lost')
+                   THEN 1 END`,
         ),
       })
       .from(estimates)

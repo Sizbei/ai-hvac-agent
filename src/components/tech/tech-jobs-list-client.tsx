@@ -343,7 +343,9 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
         {current.length > 0 ? (
           <JobList jobs={current} now={now} showOverdue />
         ) : (
-          <p className="py-12 text-center text-[15px] text-muted-foreground">{EMPTY_COPY.today}</p>
+          <p className="py-12 text-center text-[15px] text-muted-foreground">
+            {older.length > 0 ? 'No visits today. Your open jobs from earlier are below.' : EMPTY_COPY.today}
+          </p>
         )}
         {older.length > 0 && <OlderJobs jobs={older} now={now} />}
       </div>

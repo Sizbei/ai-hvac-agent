@@ -29,7 +29,7 @@
  * Eastern on Nov 5 is Nov 5, not UTC's Nov 6), and rows are sorted by date
  * within each section.
  */
-import { and, or, eq, gte, lte, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, or, eq, gte, lte, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   invoices,
@@ -43,6 +43,9 @@ import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
 import { dateInZone } from "@/lib/admin/zoned-date";
 
 /** QBO-style account names the journal posts against. */
+/** A draft was never billed and a void was cancelled: neither is a sale. */
+const BILLED_STATES = notInArray(invoices.state, ["draft", "void"]);
+
 export type AccountName =
   | "Sales Revenue"
   | "Sales Tax Payable"
@@ -176,6 +179,7 @@ export async function getAccountingExport(
           organizationId,
           isNull(invoices.fieldpulseInvoiceId),
           isNull(invoices.hcpInvoiceId),
+          BILLED_STATES,
           gte(invoices.createdAt, fromDate),
           lte(invoices.createdAt, toDate),
         ),
@@ -201,6 +205,7 @@ export async function getAccountingExport(
           invoices,
           organizationId,
           or(isNotNull(invoices.fieldpulseInvoiceId), isNotNull(invoices.hcpInvoiceId))!,
+          BILLED_STATES,
           gte(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`, fromDate),
           lte(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`, toDate),
         ),

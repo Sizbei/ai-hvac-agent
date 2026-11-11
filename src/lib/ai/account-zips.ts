@@ -23,8 +23,10 @@ const MAX_LOCATIONS = 10;
  * no defence: a session is free to start, and a service area has only a dozen
  * or so ZIPs, so a handful of fresh sessions would guess any customer's ZIP.
  * Once this many of a customer's sessions have FAILED verification inside the
- * window, nothing matches for that customer until it passes — they are sent to
- * the office instead.
+ * window, nothing matches for that customer until those sessions age out — they
+ * are sent to the office instead. The cost is accepted: someone who knows a
+ * customer's phone number can lock that customer's balance lookup for a day,
+ * which is better than letting them guess the ZIP. Booking is unaffected.
  */
 const MAX_FAILED_SESSIONS = 3;
 const FAILED_WINDOW_MS = 24 * 60 * 60 * 1000;

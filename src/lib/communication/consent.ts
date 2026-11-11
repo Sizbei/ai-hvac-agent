@@ -13,7 +13,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { communicationPreferences } from "@/lib/db/schema";
+import { communicationPreferences, customers } from "@/lib/db/schema";
 import { findCustomerMatchCandidates } from "@/lib/admin/crm-queries";
 import type { CustomerMatchCandidate } from "@/lib/admin/customer-match";
 import type { communicationTriggerTypeEnum } from "@/lib/db/schema";
@@ -177,6 +177,21 @@ export async function checkSendAllowed(params: {
 
   if (prefs.doNotContact) {
     return { allowed: false, reason: "do_not_contact" };
+  }
+
+  // A customer the office has marked do-not-service, or one hidden from the
+  // org at go-live, is never messaged — whatever their channel preferences say
+  // (imported customers have no preferences row and default to "on").
+  const [customer] = await db
+    .select({ doNotService: customers.doNotService, hiddenFromOrg: customers.hiddenFromOrg })
+    .from(customers)
+    .where(and(eq(customers.organizationId, organizationId), eq(customers.id, customerId)))
+    .limit(1);
+  if (customer?.doNotService) {
+    return { allowed: false, reason: "do_not_service" };
+  }
+  if (customer?.hiddenFromOrg) {
+    return { allowed: false, reason: "hidden_customer" };
   }
 
   const channelOn =

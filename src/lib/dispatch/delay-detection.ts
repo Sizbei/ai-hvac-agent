@@ -7,11 +7,14 @@
  * sharpen it later), so it works today against arrival_window_end. Pure detection
  * is unit-tested; the org query + SMS live alongside.
  */
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { serviceRequests, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { NOT_STARTED_STATUSES } from "@/lib/admin/request-status";
+
+/** A window that ended longer ago than this is history, not a late job. */
+const STALE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** True when the job's arrival window passed (by more than the grace) and the
  * tech hasn't started it yet. Pure. */
@@ -58,6 +61,11 @@ export async function findLateJobsForOrg(
         and(
           inArray(serviceRequests.status, [...NOT_STARTED_STATUSES]),
           isNotNull(serviceRequests.arrivalWindowEnd),
+          // Only windows that ended in the last day: imported jobs keep an old
+          // "en route" status forever and must not page the dispatcher, nor
+          // may rows hidden from the org.
+          gt(serviceRequests.arrivalWindowEnd, new Date(now.getTime() - STALE_WINDOW_MS)),
+          eq(serviceRequests.hiddenFromOrg, false),
         )!,
       ),
     );

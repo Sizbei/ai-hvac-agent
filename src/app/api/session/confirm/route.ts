@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customerSessions, serviceRequests } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
@@ -91,6 +91,9 @@ export async function POST(request: NextRequest) {
       .where(
         and(
           eq(serviceRequests.organizationId, organizationId),
+          // Only bookings made through the assistant: FieldPulse-synced jobs,
+          // membership visits and office-made requests have no session.
+          isNotNull(serviceRequests.sessionId),
           gt(serviceRequests.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)),
         ),
       );
