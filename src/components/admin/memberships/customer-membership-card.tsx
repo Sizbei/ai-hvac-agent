@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { BadgeCheck } from 'lucide-react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -223,9 +224,9 @@ export function CustomerMembershipCard({
             {activePlans.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 No active plans.{' '}
-                <a href="/admin/membership-plans" className="underline">
+                <Link href="/admin/membership-plans" className="underline">
                   Create one first.
-                </a>
+                </Link>
               </p>
             ) : (
               <div className="flex items-center gap-2">

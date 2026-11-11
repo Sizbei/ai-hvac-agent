@@ -22,7 +22,7 @@ on:
 
 jobs:
   ping:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # One step, so a failure in the first endpoint cannot silently skip the
       # rest. Every endpoint is pinged, then the step fails if any did not

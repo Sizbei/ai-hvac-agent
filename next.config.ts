@@ -4,9 +4,6 @@ import { withSentryConfig } from "@sentry/nextjs";
 const nextConfig: NextConfig = {
   // cacheComponents temporarily disabled due to Next.js 16 + icon metadata conflict
   // cacheComponents: true,
-  experimental: {
-    instantNavigationDevToolsToggle: true,
-  },
   serverExternalPackages: ["pino", "pino-pretty"],
   // Baseline security headers for EVERY route — including ones the edge
   // middleware (src/proxy.ts) doesn't match (e.g. "/", "/chat", "/widget.js").

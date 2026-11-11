@@ -8,7 +8,7 @@ on:
 
 jobs:
   type-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +20,7 @@ jobs:
       - run: npx tsc --noEmit
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,7 +34,7 @@ jobs:
   # DB/secret-dependent integration suites (see vitest.config.ts +
   # TESTING.md), so it runs green with no database and gates every PR.
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,7 +49,7 @@ jobs:
   # continue-on-error keeps the run visible (and its report uploaded) without
   # gating. Remove continue-on-error once a DB-backed environment is wired up.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
           retention-days: 7
 
   security-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Advisory only: bare `npm audit` exits 1 on the known, deliberately-deferred
     # CVEs (next/drizzle-kit/promptfoo — fixes are breaking major downgrades), so
     # this hard-failed on every run. Keep the report visible (uploaded/logged)
@@ -93,7 +93,7 @@ jobs:
   # Skills honesty gate: every src/scripts path cited in .claude/skills must
   # exist — a skill citing a dead path misleads every future agent session.
   verify-skills:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
