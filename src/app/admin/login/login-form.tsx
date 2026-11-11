@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AuthShell } from '@/components/auth/auth-shell';
 import { signupEnabledFromEnv } from '@/lib/auth/signup-enabled';
-import type { LoginMode } from '@/lib/auth/login-mode';
+import { resolveLoginMode, type LoginMode } from '@/lib/auth/login-mode';
 
 /** Generic, non-enumerating messages for the ?error= codes the OIDC callback
  * redirects with. All denial paths map to a single uninformative message. */
@@ -43,6 +44,15 @@ interface LoginFormProps {
   readonly mode: LoginMode;
   /** True when Google OIDC is configured server-side; gates the button. */
   readonly googleEnabled: boolean;
+}
+
+/** Picks the login mode from the URL (?password=1) in the browser, so the page
+ * can be static. Must render under a Suspense boundary (useSearchParams). */
+export function LoginFormFromUrl({ googleEnabled }: { readonly googleEnabled: boolean }) {
+  const passwordParam = useSearchParams().get('password') ?? undefined;
+  return (
+    <LoginForm mode={resolveLoginMode({ googleEnabled, passwordParam })} googleEnabled={googleEnabled} />
+  );
 }
 
 export function LoginForm({ mode, googleEnabled }: LoginFormProps) {

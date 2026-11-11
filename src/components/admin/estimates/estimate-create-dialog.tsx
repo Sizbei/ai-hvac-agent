@@ -96,7 +96,9 @@ export function EstimateCreateDialog({
   pickCustomer = false,
   onCreated,
 }: EstimateCreateDialogProps) {
-  const { items, isLoading: pricebookLoading } = usePricebook({ limit: 20000 });
+  // The whole catalog is only needed once the dialog is open; this component is
+  // mounted (closed) in every request sheet and customer profile.
+  const { items, isLoading: pricebookLoading } = usePricebook({ limit: 20000, enabled: open });
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const { taxRates } = useTaxRates();
   const taxBps = defaultTaxBps(taxRates);

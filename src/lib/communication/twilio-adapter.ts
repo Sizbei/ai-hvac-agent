@@ -5,7 +5,10 @@
  * Validates phone numbers and handles delivery status webhooks.
  */
 
-import { Twilio } from "twilio";
+// Type-only: the SDK itself (a ~3.6 MB chunk) is imported on the first send,
+// not at module load — this module sits on the import chain of the chat route
+// and most admin APIs, which never send a text on a typical request.
+import type { Twilio } from "twilio";
 
 let _twilio: Twilio | null = null;
 
@@ -17,7 +20,7 @@ let _twilio: Twilio | null = null;
  * vars are absent — only an actual SMS send fails, and only then, with a clear
  * error.
  */
-function getTwilio(): Twilio {
+async function getTwilio(): Promise<Twilio> {
   if (_twilio) return _twilio;
   const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const token = process.env.TWILIO_AUTH_TOKEN?.trim();
@@ -27,7 +30,8 @@ function getTwilio(): Twilio {
   if (!token) {
     throw new Error("TWILIO_AUTH_TOKEN environment variable is not set");
   }
-  _twilio = new Twilio(sid, token);
+  const { Twilio: TwilioClient } = await import("twilio");
+  _twilio = new TwilioClient(sid, token);
   return _twilio;
 }
 
@@ -81,7 +85,7 @@ export async function sendSms(options: {
     }
 
     // Send message
-    const message = await getTwilio().messages.create({
+    const message = await (await getTwilio()).messages.create({
       body: options.body,
       to,
       from,
@@ -152,7 +156,7 @@ export async function getMessageStatus(messageSid: string): Promise<{
   errorMessage?: string;
 }> {
   try {
-    const message = await getTwilio().messages(messageSid).fetch();
+    const message = await (await getTwilio()).messages(messageSid).fetch();
 
     return {
       sid: message.sid,

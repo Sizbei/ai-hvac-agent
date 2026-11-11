@@ -75,6 +75,7 @@ import { SyncPill } from '@/components/admin/sync-pill';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
 import { canSaveSchedule, scheduleInputsFrom } from '@/lib/admin/request-schedule-inputs';
 import { cancelRequestDescription, sheetVisitView } from '@/lib/admin/request-visit-view';
+import { loadTechnicians } from '@/hooks/use-admin-technicians';
 
 // Only manual targets can ever be a transition button — narrowing the map to
 // those keys makes any drift from the state machine a compile error rather than
@@ -848,23 +849,11 @@ export function RequestDetailSheet({
     if (techniciansLoadedRef.current) return;
     techniciansLoadedRef.current = true;
 
-    async function loadTechnicians(): Promise<void> {
-      try {
-        const res = await fetch('/api/admin/technicians');
-        if (!res.ok) return;
-        const body = (await res.json()) as {
-          success: boolean;
-          data: { technicians: TechnicianRecord[] };
-        };
-        if (body.success) {
-          setTechnicians(body.data.technicians);
-        }
-      } catch {
-        // Non-fatal: technician dropdown will be empty
-      }
-    }
-
-    loadTechnicians();
+    // Shared with the filter bar and create dialog: one request per page.
+    // Non-fatal on failure: the technician dropdown is just empty.
+    void loadTechnicians().then((result) => {
+      if (result.ok) setTechnicians(result.technicians);
+    });
   }, []);
 
   // Fetch request detail when requestId changes

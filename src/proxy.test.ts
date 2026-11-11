@@ -115,6 +115,17 @@ describe("proxy on /tech (Task 19)", () => {
     expect(config.matcher).toContain("/tech/:path*");
   });
 
+  it("other /api routes are matched only while a View-as cookie is present", () => {
+    // The customer chat, webhooks and crons must not pay for the proxy; the
+    // read-only preview gate must still see every /api write.
+    expect(config.matcher).not.toContain("/api/:path*");
+    expect(config.matcher).toContain("/api/admin/:path*");
+    expect(config.matcher).toContainEqual({
+      source: "/api/:path*",
+      has: [{ type: "cookie", key: PREVIEW_COOKIE }],
+    });
+  });
+
   it("a real technician (no preview cookie) never consults the preview gate", async () => {
     const cases = [
       req("/tech/jobs", { cookies: { hvac_tech_session: "tech-token" } }),

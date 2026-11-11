@@ -50,6 +50,8 @@ interface UsePricebookParams {
   readonly includeInactive?: boolean;
   readonly isLaborItem?: boolean;
   readonly sort?: PricebookSortKey;
+  /** False skips the fetch (e.g. a closed dialog). Defaults to true. */
+  readonly enabled?: boolean;
 }
 
 interface UsePricebookResult {
@@ -74,6 +76,7 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
   const includeInactive = params.includeInactive ?? false;
   const isLaborItem = params.isLaborItem ?? false;
   const sort = params.sort ?? '';
+  const enabled = params.enabled ?? true;
 
   const key = `pricebook:${page}:${limit}:${type}:${search}:${includeInactive}:${isLaborItem}:${sort}`;
 
@@ -140,8 +143,9 @@ export function usePricebook(params: UsePricebookParams = {}): UsePricebookResul
   // not synchronously during the effect, so this is not a render loop.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
+    if (!enabled) return;
     void fetch_();
-  }, [fetch_]);
+  }, [fetch_, enabled]);
 
   const refetch = useCallback(() => fetch_({ bust: true }), [fetch_]);
 

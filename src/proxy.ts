@@ -184,5 +184,19 @@ async function routeRequest(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*", "/admin/:path*", "/embed/:path*", "/embed", "/tech/:path*"],
+  // The proxy is its own function in front of every matched request, so it
+  // only matches what it actually decides on: the admin session gate, /embed's
+  // frame policy, and the technician pages. Every OTHER /api route (customer
+  // chat, session, voice/SMS webhooks, crons, health) is matched only while a
+  // "View as" cookie is present — that is the one thing the proxy does there
+  // (refuse writes). Their security headers come from next.config.ts headers().
+  // The cookie key must be a literal: it is PREVIEW_COOKIE ("hvac_preview").
+  matcher: [
+    "/api/admin/:path*",
+    "/admin/:path*",
+    "/embed/:path*",
+    "/embed",
+    "/tech/:path*",
+    { source: "/api/:path*", has: [{ type: "cookie", key: "hvac_preview" }] },
+  ],
 };

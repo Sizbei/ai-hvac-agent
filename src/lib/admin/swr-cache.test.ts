@@ -21,19 +21,36 @@ describe('createSwrCache', () => {
     expect(typeof result?.ts).toBe('number');
   });
 
-  it('get returns null (and removes the entry) when TTL has expired', () => {
+  it('keeps an entry paintable past its TTL (stale-while-revalidate)', () => {
     vi.setSystemTime(new Date('2026-07-10T00:00:00Z'));
-    const cache = createSwrCache<string>(60_000); // 60 second TTL
+    const cache = createSwrCache<string>(60_000); // 60 second freshness window
     cache.set('key1', 'value1');
 
-    // Move time forward past TTL
-    vi.setSystemTime(new Date('2026-07-10T00:01:01Z')); // 61 seconds later
-    const result = cache.get('key1');
-    expect(result).toBeNull();
+    vi.setSystemTime(new Date('2026-07-10T00:05:00Z')); // 5 minutes later
+    expect(cache.get('key1')?.data).toBe('value1');
+  });
 
-    // Verify entry was deleted
-    const secondCheck = cache.get('key1');
-    expect(secondCheck).toBeNull();
+  it('isFresh follows the caller TTL, not the stale-paint window', () => {
+    vi.setSystemTime(new Date('2026-07-10T00:00:00Z'));
+    const cache = createSwrCache<string>(60_000);
+    expect(cache.isFresh('key1')).toBe(false);
+    cache.set('key1', 'value1');
+    expect(cache.isFresh('key1')).toBe(true);
+    vi.setSystemTime(new Date('2026-07-10T00:01:01Z'));
+    expect(cache.isFresh('key1')).toBe(false);
+    expect(cache.get('key1')?.data).toBe('value1');
+  });
+
+  it('drops an entry once it is older than the stale-paint window', () => {
+    vi.setSystemTime(new Date('2026-07-10T00:00:00Z'));
+    const cache = createSwrCache<string>(60_000);
+    cache.set('key1', 'value1');
+
+    vi.setSystemTime(new Date('2026-07-10T00:31:00Z')); // 31 minutes later
+    expect(cache.get('key1')).toBeNull();
+    // The entry is gone, not just hidden.
+    vi.setSystemTime(new Date('2026-07-10T00:00:30Z'));
+    expect(cache.get('key1')).toBeNull();
   });
 
   it('set overwrites a previous entry', () => {

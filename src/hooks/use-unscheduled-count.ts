@@ -46,7 +46,7 @@ export function useUnscheduledCount(): UseUnscheduledCountResult {
   useEffect(() => {
     isMountedRef.current = true;
     // Fresh cache hit → skip the immediate network fetch; the poll still runs.
-    if (countCache.get(CACHE_KEY) === null) {
+    if (!countCache.isFresh(CACHE_KEY)) {
       void fetchCount();
     }
     const intervalId = setInterval(() => {

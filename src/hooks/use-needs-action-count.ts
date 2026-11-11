@@ -40,7 +40,7 @@ export function useNeedsActionCount(): number {
 
   useEffect(() => {
     isMountedRef.current = true;
-    if (countCache.get(CACHE_KEY) === null) void fetchCount();
+    if (!countCache.isFresh(CACHE_KEY)) void fetchCount();
     const intervalId = setInterval(() => void fetchCount(), POLL_INTERVAL_MS);
     const onChanged = () => void fetchCount();
     window.addEventListener(CONVERSATIONS_CHANGED_EVENT, onChanged);

@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   // cacheComponents temporarily disabled due to Next.js 16 + icon metadata conflict
   // cacheComponents: true,
   serverExternalPackages: ["pino", "pino-pretty"],
+  // Every admin route is dynamic (the layout reads the session cookie), and a
+  // dynamic page's payload is not reused by default — so returning to a page
+  // seconds later waited on the server again before anything painted. Reuse
+  // it for 30 s; pages fetch their own data client-side and still revalidate.
+  experimental: { staleTimes: { dynamic: 30 } },
   // Baseline security headers for EVERY route — including ones the edge
   // middleware (src/proxy.ts) doesn't match (e.g. "/", "/chat", "/widget.js").
   // We set only universally-safe headers here; frame control (X-Frame-Options

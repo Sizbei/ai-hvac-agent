@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   ChevronLeft,
   ChevronRight,
@@ -92,6 +92,7 @@ export function Sidebar({
   onMobileClose,
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [isMobile, setIsMobile] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { count: unscheduledCount } = useUnscheduledCount();
@@ -175,6 +176,11 @@ export function Sidebar({
       return (
         <Link
           href={item.href}
+          // Intent prefetch: fetch the full page payload + its code on hover,
+          // focus or touch, so the click itself has nothing left to wait for.
+          onMouseEnter={() => router.prefetch(item.href)}
+          onFocus={() => router.prefetch(item.href)}
+          onTouchStart={() => router.prefetch(item.href)}
           ref={isActive ? scrollActiveIntoView : undefined}
           aria-current={isActive ? 'page' : undefined}
           className={cn(
@@ -232,7 +238,7 @@ export function Sidebar({
         </Link>
       );
     },
-    [badges, isItemActive, scrollActiveIntoView],
+    [badges, isItemActive, scrollActiveIntoView, router],
   );
 
   // Shared rail surface: a light sunken column separated from the canvas by a

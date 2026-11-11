@@ -1,8 +1,6 @@
 import type { Instrumentation } from 'next';
 import { registerOTel } from '@vercel/otel';
-import * as Sentry from '@sentry/nextjs';
 import { validateEnvVars } from '@/lib/env-validation';
-import { initSentryServer, initSentryEdge } from '@/lib/observability/sentry';
 
 /**
  * OpenTelemetry registration for observability.
@@ -12,7 +10,7 @@ import { initSentryServer, initSentryEdge } from '@/lib/observability/sentry';
  *
  * @see https://vercel.com/docs/observability/otel-integration
  */
-export function register() {
+export async function register() {
   // Validate environment variables at startup to fail fast on missing config
   validateEnvVars();
 
@@ -20,8 +18,10 @@ export function register() {
     serviceName: 'ai-hvac-agent',
   });
 
-  // DEGRADE-SAFE error tracking: both inits no-op unless SENTRY_DSN is set, so
-  // a deploy without Sentry configured behaves exactly as before.
+  // DEGRADE-SAFE error tracking: without SENTRY_DSN the SDK is never even
+  // loaded (it is ~1.3 MB and ran on every function boot for nothing).
+  if (!process.env.SENTRY_DSN) return;
+  const { initSentryServer, initSentryEdge } = await import('@/lib/observability/sentry');
   if (process.env.NEXT_RUNTIME === 'edge') {
     initSentryEdge();
   } else {
@@ -42,5 +42,8 @@ export const onRequestError: Instrumentation.onRequestError = (
   request,
   context,
 ) => {
-  Sentry.captureRequestError(err, request, context);
+  if (!process.env.SENTRY_DSN) return;
+  void import('@sentry/nextjs').then((Sentry) =>
+    Sentry.captureRequestError(err, request, context),
+  );
 };
