@@ -3,18 +3,11 @@
  * variants are pinned in node tests. Imports types and a constant from the
  * client-safe guide module.
  */
-import {
-  HISTORY_CONTACT_FALLBACK,
-  type AdminGuidePayload,
-  type LessonId,
-} from "./admin-guide-state";
+import type { AdminGuidePayload, LessonId } from "./admin-guide-state";
 
 export interface LessonContext {
   readonly payLinks: boolean;
   readonly hasFieldPulse: boolean;
-  readonly historyHidden: boolean;
-  /** Display name to ask for hidden history (never an email). */
-  readonly historyContact: string;
 }
 
 export interface Lesson {
@@ -27,13 +20,11 @@ export interface Lesson {
 
 /**
  * When `guide` is null or the onboarding GET failed: no FieldPulse or pay-link
- * claims, history note on, generic contact.
+ * claims.
  */
 export const CONSERVATIVE_LESSON_CONTEXT: LessonContext = Object.freeze({
   payLinks: false,
   hasFieldPulse: false,
-  historyHidden: true,
-  historyContact: HISTORY_CONTACT_FALLBACK,
 });
 
 export function lessonContext(guide: AdminGuidePayload | null): LessonContext {
@@ -41,8 +32,6 @@ export function lessonContext(guide: AdminGuidePayload | null): LessonContext {
   return {
     payLinks: guide.payLinks,
     hasFieldPulse: guide.hasFieldPulse,
-    historyHidden: guide.historyHidden,
-    historyContact: guide.historyContact,
   };
 }
 
@@ -50,16 +39,7 @@ const showMe = (page: string, id: LessonId) => `${page}?from=tour&lesson=${id}`;
 const join = (...parts: (string | false)[]) => parts.filter(Boolean).join(" ");
 
 function requestsLead(ctx: LessonContext): string | false {
-  if (!ctx.hasFieldPulse) return false;
-  return ctx.historyHidden
-    ? "Your upcoming FieldPulse work carried over as requests."
-    : "Your FieldPulse jobs are requests here.";
-}
-
-function historyNote(ctx: LessonContext): string | false {
-  if (!ctx.historyHidden) return false;
-  const records = ctx.hasFieldPulse ? "Older FieldPulse records" : "Older records";
-  return `${records} are hidden for a clean start. Ask ${ctx.historyContact} if you need them back.`;
+  return ctx.hasFieldPulse && "Your FieldPulse jobs are requests here.";
 }
 
 /** The five stops, in order, with the D3 variants applied. */
@@ -89,10 +69,7 @@ export function buildLessons(ctx: LessonContext): readonly Lesson[] {
     {
       id: "customers",
       title: "Every customer in one place",
-      copy: join(
-        "Each customer’s requests, equipment, estimates and invoices live on their page.",
-        historyNote(ctx),
-      ),
+      copy: "Each customer’s requests, equipment, estimates and invoices live on their page.",
       href: showMe("/admin/customers", "customers"),
     },
     {

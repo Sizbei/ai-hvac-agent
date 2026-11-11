@@ -208,9 +208,13 @@ export function BillingPanel() {
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {formatPrice(plan.priceCents)}
-                    {plan.priceCents > 0 ? `/${plan.interval}` : ''} ·{' '}
-                    {plan.entitlements.maxStaff} staff
+                    {/* A free plan is already named Free; don't repeat it. */}
+                    {plan.priceCents > 0
+                      ? `${formatPrice(plan.priceCents)}/${plan.interval} · `
+                      : plan.label === 'Free'
+                        ? ''
+                        : 'Free · '}
+                    Up to {plan.entitlements.maxStaff} staff
                   </p>
                 </div>
                 {plan.priceCents > 0 && !isCurrent && (

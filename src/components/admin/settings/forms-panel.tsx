@@ -63,7 +63,7 @@ export function FormsPanel() {
       ) : forms.length === 0 ? (
         <EmptyState
           icon={ListChecks}
-          title="No forms yet."
+          title="No forms yet"
           description="Forms you build here show in the technician app."
           action={newButton}
         />

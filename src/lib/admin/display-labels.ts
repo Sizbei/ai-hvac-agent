@@ -4,19 +4,22 @@
  * form dialogs never render "water_leak" or "follow_up". Sentence case per the
  * copy canon. Pure — safe for client components and plain vitest.
  */
-import { ISSUE_TYPE_LABELS } from "@/lib/admin/create-request";
+import { codeOrTextLabel, issueTypeLabel } from "@/lib/admin/request-labels";
 
 export interface LabeledOption {
   readonly value: string;
   readonly label: string;
 }
 
-/** "follow_up" → "Follow up". The fallback for any code without a curated label. */
+/** "follow_up" → "Follow up"; free text (a FieldPulse job title) as typed.
+ * The one shared rule lives in request-labels (`codeOrTextLabel`). */
 export function humanizeCode(code: string | null | undefined): string {
-  if (!code) return "";
-  const spaced = code.replace(/_/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "";
+  return codeOrTextLabel(code);
 }
+
+/** Request issue type ("water_leak" → "Water leak"); same helper as the
+ * requests, calendar and dispatch surfaces. */
+export { issueTypeLabel };
 
 function labelFrom(
   labels: Readonly<Record<string, string>>,
@@ -25,11 +28,6 @@ function labelFrom(
 ): string {
   if (!code) return fallback;
   return labels[code] ?? (humanizeCode(code) || fallback);
-}
-
-/** Request issue type ("water_leak" → "Water leak"). */
-export function issueTypeLabel(code: string | null | undefined): string {
-  return labelFrom(ISSUE_TYPE_LABELS, code, "Service request");
 }
 
 export const NOTE_TYPE_OPTIONS: readonly LabeledOption[] = [

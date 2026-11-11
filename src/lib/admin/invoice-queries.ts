@@ -6,6 +6,7 @@
  * first-class (a half-built payments path breaks on the first chargeback).
  */
 import { randomUUID } from "node:crypto";
+import { displayCustomerName } from "@/lib/admin/customer-name-display";
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql, sum, type SQL } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
 import { db } from "@/lib/db";
@@ -963,6 +964,27 @@ export async function collectedThisMonthCents(
   return netCollectedCents(receivedRows[0]?.value, refundedRows[0]?.value);
 }
 
+/**
+ * Whether the org has any visible FieldPulse or Housecall Pro invoice. An
+ * org-level fact (no list filters), so the "Collected this month" note does
+ * not change with the tab, search or loading state.
+ */
+export async function hasSyncedInvoices(organizationId: string, vis: Visibility): Promise<boolean> {
+  const [row] = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(
+      withTenant(
+        invoices,
+        organizationId,
+        sql`(${invoices.fieldpulseInvoiceId} is not null or ${invoices.hcpInvoiceId} is not null)`,
+        visibleRows(invoices, vis),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
 /** received − refunded, each a possibly-null/string SQL sum. */
 export function netCollectedCents(received: unknown, refunded: unknown): number {
   const toCents = (v: unknown): number => {
@@ -1234,8 +1256,10 @@ export async function listInvoices(
       case 'balance-high':
         return desc(sql`${invoices.totalCents} - ${invoices.amountPaidCents}`);
       case 'age-oldest':
-        // Unpaid invoices ordered by age descending; paid/zero-balance invoices sorted last.
-        return desc(sql`case when ${invoices.totalCents} > ${invoices.amountPaidCents} then extract(epoch from now() - coalesce(${invoices.issuedAt}, ${invoices.createdAt})) else -1 end`);
+        // Most overdue first: unpaid invoices by the date their age chip counts
+        // from (the due date when the source gave one, else the issue date), so
+        // the chips read in descending order; paid/zero-balance invoices last.
+        return desc(sql`case when ${invoices.totalCents} > ${invoices.amountPaidCents} then -extract(epoch from coalesce(${invoices.dueDate}, ${invoices.issuedAt}, ${invoices.createdAt}))::double precision else '-infinity'::double precision end`);
       case 'newest':
       default:
         return desc(sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`);
@@ -1360,7 +1384,7 @@ export async function listInvoices(
     const sliced = filtered.slice(offset, offset + limit);
     const invoiceRows = sliced.map(({ fieldpulseInvoiceId, hcpInvoiceId, nameEncrypted, ...r }) => ({
       ...r,
-      customerName: safeDecryptName(nameEncrypted),
+      customerName: displayCustomerName(safeDecryptName(nameEncrypted)),
       syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
     }));
 
@@ -1379,7 +1403,7 @@ export async function listInvoices(
 
   const invoiceRows = rows.map(({ fieldpulseInvoiceId, hcpInvoiceId, nameEncrypted, ...r }) => ({
     ...r,
-    customerName: safeDecryptName(nameEncrypted),
+    customerName: displayCustomerName(safeDecryptName(nameEncrypted)),
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
   }));
 
@@ -1678,7 +1702,7 @@ export async function getInvoiceDetailById(
         : null,
     syncedSource: deriveSyncedSource(fieldpulseInvoiceId, hcpInvoiceId),
     fieldpulseData: (fieldpulseData as Record<string, unknown> | null) ?? null,
-    customerName: safeDecryptName(nameEncrypted),
+    customerName: displayCustomerName(safeDecryptName(nameEncrypted)),
     customerAddress: safeDecryptName(addressEncrypted),
     customerPhone: safeDecryptName(phoneEncrypted),
     lineItems,

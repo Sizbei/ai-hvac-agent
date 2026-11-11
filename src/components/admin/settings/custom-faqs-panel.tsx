@@ -91,7 +91,7 @@ export function CustomFaqsPanel({
               id="faq-question"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Do you offer a maintenance membership?"
+              placeholder="Do you offer maintenance contracts?"
               maxLength={300}
             />
           </div>
@@ -101,7 +101,7 @@ export function CustomFaqsPanel({
               id="faq-answer"
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
-              placeholder="Yes! Our Comfort Club is $19/mo and includes two tune-ups a year…"
+              placeholder="Yes. We offer scheduled maintenance contracts. Call us for a quote…"
               maxLength={2000}
               rows={3}
             />
@@ -117,7 +117,7 @@ export function CustomFaqsPanel({
               id="faq-triggers"
               value={triggersRaw}
               onChange={(e) => setTriggersRaw(e.target.value)}
-              placeholder="membership, comfort club, maintenance plan"
+              placeholder="maintenance contract, service agreement, maintenance plan"
             />
           </div>
         </CardContent>

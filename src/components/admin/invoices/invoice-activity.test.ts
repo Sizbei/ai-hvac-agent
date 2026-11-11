@@ -88,3 +88,26 @@ it('payment and refund rows carry the amount and method', () => {
     'Invoice created',
   ]);
 });
+
+it('a mirrored invoice is created in its source system on its issue date, not on the import day', () => {
+  const evs = buildActivity({
+    createdAt: d('2026-07-09'),
+    issuedAt: d('2024-12-01'),
+    syncedSource: 'fieldpulse',
+    lastReminderSentAt: null,
+    payments: [{
+      id: 'p1', amountCents: 4083438, status: 'succeeded', isDeposit: false, createdAt: d('2024-12-20'),
+      method: 'other', checkNumber: null, provider: 'fieldpulse', refunds: [],
+    }],
+  });
+  expect(evs.map((e) => e.label)).toEqual([
+    'Payment recorded in FieldPulse · $40,834.38',
+    'Invoice created in FieldPulse',
+  ]);
+  expect(evs[1].at).toEqual(d('2024-12-01'));
+});
+
+it('a native invoice keeps "Invoice created" at its row time', () => {
+  const evs = buildActivity({ createdAt: d('2026-06-01'), syncedSource: null, lastReminderSentAt: null, payments: [] });
+  expect(evs).toEqual([{ kind: 'created', at: d('2026-06-01'), label: 'Invoice created' }]);
+});

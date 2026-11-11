@@ -218,7 +218,7 @@ export const COMMUNICATION_TRIGGER_TYPES = [
   { value: "appointment_cancelled", label: "Appointment cancelled" },
   { value: "technician_enroute", label: "Technician en route" },
   { value: "technician_arrived", label: "Technician arrived" },
-  { value: "job_completed", label: "Job completed" },
+  { value: "job_completed", label: "Visit completed" },
   { value: "review_request", label: "Review text" },
   { value: "follow_up", label: "Follow up" },
   { value: "escalation", label: "Escalation" },

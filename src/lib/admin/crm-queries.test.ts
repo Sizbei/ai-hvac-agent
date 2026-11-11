@@ -115,21 +115,27 @@ vi.mock('drizzle-orm', () => ({
   // column names) so tests can assert on a fragment the way the fieldpulse
   // suite matches raw SQL text — searching the column object alone would match
   // regardless of which terms the predicate carries.
-  sql: (strings: TemplateStringsArray, ...values: unknown[]) => {
-    let text = '';
-    strings.raw.forEach((part, i) => {
-      text += part;
-      if (i < values.length) {
-        const value = values[i];
-        text +=
-          value && typeof value === 'object' && '__sql' in value
-            ? (value as { __sql: string }).__sql
-            : String(value);
-      }
-    });
-    sqlFragments.push(text);
-    return { __sql: text };
-  },
+  sql: Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => {
+      let text = '';
+      strings.raw.forEach((part, i) => {
+        text += part;
+        if (i < values.length) {
+          const value = values[i];
+          text +=
+            value && typeof value === 'object' && '__sql' in value
+              ? (value as { __sql: string }).__sql
+              : String(value);
+        }
+      });
+      sqlFragments.push(text);
+      // `as` names a computed column in a subquery; non-enumerable so the
+      // fragment still deep-equals { __sql }.
+      return Object.defineProperty({ __sql: text }, 'as', { value: () => ({ __sql: text }) });
+    },
+    // visibleRowsSql builds its alias predicate with sql.raw.
+    { raw: (text: string) => ({ __sql: text }) },
+  ),
   inArray: (...a: unknown[]) => a,
   isNull: (c: unknown) => c,
   isNotNull: (c: unknown) => c,

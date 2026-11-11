@@ -179,7 +179,7 @@ describe("onboarding store", () => {
     const a = refreshOnboarding();
     const guide = {
       welcomeDue: true, lastLesson: "schedule", tourStartedAt: "2026-11-10T12:00:00.000Z", tourCompletedAt: null,
-      readOnly: false, payLinks: false, hasFieldPulse: true, historyHidden: true, historyContact: "Ray",
+      readOnly: false, payLinks: false, hasFieldPulse: true,
     } as const;
     pending[0].resolve(ok({ ...payload(0), guide }));
     await a;

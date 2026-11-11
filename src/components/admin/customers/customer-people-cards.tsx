@@ -1,15 +1,17 @@
 'use client';
 
-import { Calendar, Wrench } from 'lucide-react';
+import { Calendar, Receipt, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   customerInitials,
   customerCity,
-  lastSeenLabel,
+  customerActivity,
 } from '@/lib/admin/customer-display';
+import { formatPhoneDisplay } from '@/lib/admin/contact-format';
 import { lastSeenDotClass } from '@/lib/admin/status-colors';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
 
 interface CustomerPeopleCardsProps {
   readonly customers: readonly CustomerListRecord[];
@@ -27,14 +29,16 @@ function PeopleCard({
   readonly active: boolean;
 }) {
   const city = customerCity(customer.address);
-  const sub = city ?? customer.email ?? customer.phone ?? 'No contact on file';
+  const sub =
+    city ?? customer.email ?? formatPhoneDisplay(customer.phone) ?? 'No contact on file';
+  const activity = customerActivity(customer);
 
   return (
     <button
       type="button"
       onClick={() => onSelect(customer.id)}
       aria-current={active ? 'true' : undefined}
-      className={`flex flex-col gap-3 rounded-lg border p-4 text-left transition-colors duration-100 motion-reduce:transition-none ${
+      className={`flex min-w-0 flex-col gap-3 rounded-lg border p-4 text-left transition-colors duration-100 motion-reduce:transition-none ${
         active
           ? 'border-marker bg-primary-soft shadow-[inset_2px_0_0_var(--marker)]'
           : 'border-border-strong bg-surface hover:bg-row-hover'
@@ -50,7 +54,7 @@ function PeopleCard({
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <p className="truncate text-sm font-medium">{customer.name ?? 'Unknown'}</p>
+            <p className="truncate text-sm font-medium">{customerNameLabel(customer.name)}</p>
             {customer.fieldpulseCustomerId && (
               <SyncPill source="fieldpulse" size="sm" />
             )}
@@ -59,14 +63,19 @@ function PeopleCard({
         </div>
       </div>
 
-      {/* booking count */}
-      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+      {/* request / invoice / equipment counts */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Calendar className="size-3.5 text-foreground-faint" />
           <span className="font-mono font-medium tabular-nums text-foreground">
             {customer.requestCount}
           </span>
           request{customer.requestCount === 1 ? '' : 's'}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Receipt className="size-3.5 text-foreground-faint" />
+          <span className="font-mono tabular-nums">{customer.invoiceCount}</span>
+          invoice{customer.invoiceCount === 1 ? '' : 's'}
         </span>
         <span className="flex items-center gap-1.5">
           <Wrench className="size-3.5 text-foreground-faint" />
@@ -79,12 +88,10 @@ function PeopleCard({
       <div className="flex items-center justify-between border-t border-border pt-2.5 text-xs">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           <span
-            className={`size-1.5 rounded-[1px] ${lastSeenDotClass(customer.lastServiceDate)}`}
+            className={`size-1.5 rounded-[1px] ${lastSeenDotClass(activity.date)}`}
             aria-hidden
           />
-          {customer.lastServiceDate
-            ? `Last service ${lastSeenLabel(customer.lastServiceDate)}`
-            : 'No completed service yet'}
+          {activity.label}
         </span>
         {customer.archivedAt && (
           <Badge variant="outline" className="text-[10px]">

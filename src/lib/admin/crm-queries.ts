@@ -28,7 +28,7 @@ import {
   membershipStatusEnum,
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
-import { visibleRows, type Visibility } from "./visibility";
+import { visibleRows, visibleRowsSql, type Visibility } from "./visibility";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
 import { logAudit } from "@/lib/admin/audit";
 import {
@@ -64,6 +64,7 @@ import type {
   UpdateCustomerResult,
 } from "./crm-types";
 import { equipmentRecords, liveEquipmentCount } from "./crm-equipment-records";
+import { displayCustomerName } from "./customer-name-display";
 
 function safeDecrypt(ciphertext: string | null): string | null {
   if (!ciphertext) return null;
@@ -98,6 +99,55 @@ const searchScanCache = new CustomerScanCache<SearchScanRow>();
  */
 export function invalidateCustomerSearchCache(organizationId: string): void {
   searchScanCache.deleteByPrefix(customerScanKeyOrgPrefix(organizationId));
+}
+
+/** Postgres timestamptz text ("2025-07-28 00:00:00+00") as ISO, which every
+ * browser parses; null when absent or unreadable. */
+function pgTimestampTextToIso(text: string | null): string | null {
+  if (!text) return null;
+  const d = new Date(text);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * Table-qualified column references for the correlated subqueries below
+ * (static template text, so no helper is called at import time). Drizzle
+ * leaves columns unqualified in a single-table select, and inside the
+ * invoice subquery an unqualified "id" would bind to the invoice's own id.
+ */
+const customersId = (): SQL => sql`"customers"."id"`;
+
+/** The earliest of some ISO dates (nulls ignored). */
+function earliestIso(dates: readonly (string | null)[]): string {
+  const present = dates.filter((d): d is string => d !== null).sort();
+  return present[0] ?? new Date(0).toISOString();
+}
+
+/**
+ * Invoice activity for one customer row, as correlated subqueries keyed on
+ * `id` (the customers id column of whichever relation the query reads). A
+ * draft or void invoice is not activity. Imported FieldPulse customers carry
+ * most of their history as invoices, not requests, so the directory reads
+ * both.
+ */
+function invoiceActivityCols(id: SQL, organizationId: string, vis: Visibility) {
+  return {
+    invoiceCount: sql<number>`(select count(*)::int from invoices iv where iv.customer_id = ${id} and iv.organization_id = ${organizationId} and ${visibleRowsSql("iv", vis)})`,
+    lastInvoiceDate: sql<string | null>`(select max(coalesce(iv.issued_at, iv.created_at))::text from invoices iv where iv.customer_id = ${id} and iv.organization_id = ${organizationId} and iv.state not in ('draft', 'void') and ${visibleRowsSql("iv", vis)})`,
+  };
+}
+
+/**
+ * The directory's sort key: the customer's latest activity (newest invoice or
+ * request), else when a native customer was added. An imported customer with
+ * no activity has no meaningful date (its created_at is the import day), so
+ * it sorts after everyone with one.
+ */
+function lastActivitySql(organizationId: string, vis: Visibility): SQL<string | null> {
+  return sql<string | null>`coalesce(greatest(
+    (select max(coalesce(iv.issued_at, iv.created_at)) from invoices iv where iv.customer_id = ${customersId()} and iv.organization_id = ${organizationId} and iv.state not in ('draft', 'void') and ${visibleRowsSql("iv", vis)}),
+    (select max(sr.created_at) from service_requests sr where sr.customer_id = ${customersId()} and sr.organization_id = ${organizationId} and ${visibleRowsSql("sr", vis)})
+  ), case when "customers"."fieldpulse_customer_id" is null then "customers"."created_at" end)`;
 }
 
 /**
@@ -205,9 +255,12 @@ export async function getCustomers(
     readonly lastServiceDate: string | null;
   };
 
-  const mapRow = (row: ListRow): CustomerListRecord => ({
+  const mapRow = (row: ListRow & {
+    readonly invoiceCount: number;
+    readonly lastInvoiceDate: string | null;
+  }): CustomerListRecord => ({
     id: row.id,
-    name: safeDecrypt(row.nameEncrypted),
+    name: displayCustomerName(safeDecrypt(row.nameEncrypted)),
     phone: safeDecrypt(row.phoneEncrypted),
     email: safeDecrypt(row.emailEncrypted),
     address: safeDecrypt(row.addressEncrypted),
@@ -215,6 +268,8 @@ export async function getCustomers(
     equipmentCount: row.equipmentCount ?? 0,
     requestCount: row.requestCount ?? 0,
     lastServiceDate: row.lastServiceDate,
+    invoiceCount: row.invoiceCount ?? 0,
+    lastInvoiceDate: pgTimestampTextToIso(row.lastInvoiceDate),
     createdAt: row.createdAt.toISOString(),
     customerType: row.customerType,
     membershipStatus: row.membershipStatus,
@@ -237,17 +292,26 @@ export async function getCustomers(
     anonymizedAt: customers.anonymizedAt,
   } as const;
 
-  // Newest first; erased rows (only present with "Show archived") go last.
+  // Most recent activity first (see lastActivitySql); erased rows (only
+  // present with "Show archived") go last.
+  const lastActivity = lastActivitySql(organizationId, vis);
+  const activityOrder = [
+    sql`${lastActivity} desc nulls last`,
+    desc(customers.createdAt),
+    desc(customers.id),
+  ];
   const listOrder = includeArchived
-    ? [sql`${customers.anonymizedAt} is not null`, desc(customers.createdAt), desc(customers.id)]
-    : [desc(customers.createdAt), desc(customers.id)];
+    ? [sql`${customers.anonymizedAt} is not null`, ...activityOrder]
+    : activityOrder;
 
   if (!search) {
-    // Fast path. Pick the page's customer ids FIRST (indexed created_at order +
-    // LIMIT), THEN aggregate over just those rows — the LIMIT sits below the
-    // join, so we never join every customer. Page + total + types run together.
+    // Fast path. Pick the page's customer ids FIRST (last-activity order +
+    // LIMIT; the order runs two indexed correlated subqueries per visible
+    // customer, ~64 ms at 2.6k), THEN aggregate over just those rows — the
+    // LIMIT sits below the join, so we never join every customer. Page + total
+    // + types run together.
     const pageSub = db
-      .select(customerCols)
+      .select({ ...customerCols, lastActivityAt: lastActivity.as("last_activity_at") })
       .from(customers)
       .where(and(whereClause, visibleRows(customers, vis)))
       .orderBy(...listOrder)
@@ -270,6 +334,7 @@ export async function getCustomers(
         archivedAt: pageSub.archivedAt,
         anonymizedAt: pageSub.anonymizedAt,
         ...aggCols,
+        ...invoiceActivityCols(sql`"page"."id"`, organizationId, vis),
       })
       .from(pageSub)
       .leftJoin(customerEquipment, eq(customerEquipment.customerId, pageSub.id))
@@ -290,8 +355,14 @@ export async function getCustomers(
         pageSub.fieldpulseCustomerId,
         pageSub.archivedAt,
         pageSub.anonymizedAt,
+        pageSub.lastActivityAt,
       )
-      .orderBy(sql`${pageSub.anonymizedAt} is not null`, desc(pageSub.createdAt));
+      .orderBy(
+        sql`${pageSub.anonymizedAt} is not null`,
+        sql`${pageSub.lastActivityAt} desc nulls last`,
+        desc(pageSub.createdAt),
+        desc(pageSub.id),
+      );
 
     const countPromise = db
       .select({ n: count() })
@@ -314,7 +385,10 @@ export async function getCustomers(
   // decrypted and filtered here. Reading every row's ciphertext is the slow part
   // (~800 KB at 2.6k customers), so the scan is cached per instance and only
   // re-read when a one-row fingerprint of the same filtered set changes. The
-  // counts are then aggregated for the returned page only.
+  // scan is in last-activity order, so the fingerprint also covers the org's
+  // invoice and request activity: a new or changed invoice or request re-reads
+  // the scan instead of serving the old order. The counts are then aggregated
+  // for the returned page only.
   const scanKey = customerScanKey(
     organizationId,
     includeArchived,
@@ -327,6 +401,8 @@ export async function getCustomers(
   const fingerprintPromise = db
     .select({
       fp: sql<string>`md5(coalesce(string_agg(${customers.id}::text || coalesce(${customers.nameEncrypted}, '') || coalesce(${customers.phoneEncrypted}, '') || coalesce(${customers.emailEncrypted}, '') || coalesce(${customers.addressEncrypted}, '') || coalesce(${customers.anonymizedAt}::text, ''), ',' order by ${customers.createdAt} desc, ${customers.id} desc), ''))`,
+      activity: sql<string>`(select count(*)::text || coalesce(max(iv.updated_at)::text, '') from invoices iv where iv.organization_id = ${organizationId} and ${visibleRowsSql("iv", vis)})
+        || '|' || (select count(*)::text || coalesce(max(sr.updated_at)::text, '') from service_requests sr where sr.organization_id = ${organizationId} and ${visibleRowsSql("sr", vis)})`,
     })
     .from(customers)
     .where(and(whereClause, visibleRows(customers, vis)));
@@ -334,7 +410,7 @@ export async function getCustomers(
     fingerprintPromise,
     typesPromise,
   ]);
-  const fingerprint = fingerprintRows[0]?.fp ?? "";
+  const fingerprint = `${fingerprintRows[0]?.fp ?? ""}:${fingerprintRows[0]?.activity ?? ""}`;
 
   let scan = searchScanCache.get(scanKey, fingerprint);
   if (!scan) {
@@ -373,7 +449,7 @@ export async function getCustomers(
   }
 
   const pageRows = await db
-    .select({ ...customerCols, ...aggCols })
+    .select({ ...customerCols, ...aggCols, ...invoiceActivityCols(customersId(), organizationId, vis) })
     .from(customers)
     .leftJoin(customerEquipment, eq(customerEquipment.customerId, customers.id))
     .leftJoin(
@@ -416,7 +492,7 @@ export async function getCustomerById(
   // Equipment and notes below are children of this row: read only once it passed.
   if (!row) return null;
 
-  const [equipmentRows, noteRows, followUpRows, historyRows, requestCountRows, lastServiceRows] =
+  const [equipmentRows, noteRows, followUpRows, historyRows, requestCountRows, lastServiceRows, activityRows] =
     await Promise.all([
       db
         .select()
@@ -527,7 +603,20 @@ export async function getCustomerById(
             visibleRows(serviceRequests, vis),
           ),
         ),
+
+      // First and last activity for the header. Imported customers' created_at
+      // is the import day, so "customer since" reads their earliest invoice or
+      // request; "last invoiced" stands in when no request was ever completed.
+      db
+        .select({
+          firstInvoice: sql<string | null>`(select min(coalesce(iv.issued_at, iv.created_at))::text from invoices iv where iv.customer_id = ${customersId()} and iv.organization_id = ${organizationId} and ${visibleRowsSql("iv", vis)})`,
+          lastInvoice: invoiceActivityCols(customersId(), organizationId, vis).lastInvoiceDate,
+          firstRequest: sql<string | null>`(select min(sr.created_at)::text from service_requests sr where sr.customer_id = ${customersId()} and sr.organization_id = ${organizationId} and ${visibleRowsSql("sr", vis)})`,
+        })
+        .from(customers)
+        .where(withTenant(customers, organizationId, eq(customers.id, customerId), visibleRows(customers, vis))),
     ]);
+  const activity = activityRows[0];
 
   return {
     id: row.id,
@@ -541,6 +630,12 @@ export async function getCustomerById(
     equipmentCount: liveEquipmentCount(equipmentRows),
     requestCount: requestCountRows[0]?.value ?? 0,
     lastServiceDate: lastServiceRows[0]?.value ?? null,
+    lastInvoiceDate: pgTimestampTextToIso(activity?.lastInvoice ?? null),
+    customerSince: earliestIso([
+      row.createdAt.toISOString(),
+      pgTimestampTextToIso(activity?.firstInvoice ?? null),
+      pgTimestampTextToIso(activity?.firstRequest ?? null),
+    ]),
     customerType: row.customerType,
     membershipStatus: row.membershipStatus,
     fieldpulseCustomerId: row.fieldpulseCustomerId,

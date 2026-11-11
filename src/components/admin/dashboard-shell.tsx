@@ -20,6 +20,8 @@ import type { BillingEntry } from '@/lib/admin/billing-entry';
 
 interface DashboardShellProps {
   readonly orgName?: string;
+  /** The org's logo_url (server-decided); the brand mark falls back when null. */
+  readonly logoUrl?: string | null;
   /** The account chip: the "View as" target's name and email while previewing. */
   readonly adminName: string;
   readonly adminEmail: string;
@@ -53,6 +55,7 @@ function useMobileTitle(placement: SetupPlacement, mapEnabled: boolean): string 
 
 export function DashboardShell({
   orgName,
+  logoUrl,
   adminName,
   adminEmail,
   platformUi,
@@ -89,6 +92,7 @@ export function DashboardShell({
             <div className="flex h-dvh bg-background-admin dark:bg-background">
               <Sidebar
                 orgName={orgName}
+                logoUrl={logoUrl}
                 adminName={adminName}
                 adminEmail={adminEmail}
                 role={role}
@@ -99,7 +103,7 @@ export function DashboardShell({
               />
               <div className="flex flex-1 flex-col overflow-hidden">
                 {preview && <PreviewBanner line={preview.line} />}
-                <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} orgName={orgName} />
+                <AdminHeader onMenuClick={handleMenuClick} title={mobileTitle} orgName={orgName} logoUrl={logoUrl} />
                 {billingAttention && (
                   <div
                     role="alert"

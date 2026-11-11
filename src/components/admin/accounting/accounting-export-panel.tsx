@@ -97,7 +97,7 @@ export function AccountingExportPanel({ readOnly = false }: { readonly readOnly?
           refunds are negative; sales tax posts to Sales Tax Payable, not
           revenue. Dates are your business days in your time zone. Import only
           the rows marked Yes in the Import column — the others are already
-          booked in FieldPulse or HCP.
+          booked in FieldPulse or Housecall Pro.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

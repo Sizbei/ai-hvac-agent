@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  paymentChipLabel,
+  paymentWhenLabel,
   canOfferFinancing,
   RECORD_PAYMENT_METHODS,
   RECORD_PAYMENT_NETWORK_COPY,
@@ -229,5 +231,24 @@ describe("canOfferFinancing", () => {
     expect(canOfferFinancing({ customerId: "c1", amountCents: 1000 })).toBe(true);
     expect(canOfferFinancing({ customerId: null, amountCents: 1000 })).toBe(false);
     expect(canOfferFinancing({ customerId: "c1", amountCents: 0 })).toBe(false);
+  });
+});
+
+describe("paymentChipLabel", () => {
+  it("a FieldPulse mirror names FieldPulse instead of Other", () => {
+    expect(paymentChipLabel({ method: "other", checkNumber: null, provider: "fieldpulse" })).toBe("In FieldPulse");
+  });
+  it("our payments keep the method summary", () => {
+    expect(paymentChipLabel({ method: "check", checkNumber: "1042", provider: "manual" })).toBe("Check · #1042");
+  });
+});
+
+describe("paymentWhenLabel", () => {
+  const NOON_UTC = new Date("2024-12-20T12:00:00Z");
+  it("a FieldPulse payment shows its day only, never a made-up time", () => {
+    expect(paymentWhenLabel(NOON_UTC, "fieldpulse", "America/New_York")).toBe("Dec 20, 2024");
+  });
+  it("our payments show the moment in the business time zone", () => {
+    expect(paymentWhenLabel(new Date("2026-11-06T03:26:00Z"), "manual", "America/New_York")).toBe("Nov 5, 2026, 10:26 PM");
   });
 });

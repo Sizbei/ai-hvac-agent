@@ -44,7 +44,8 @@ export async function readAdminGuide(
     adminGuideSelectSql({
       organizationId: viewer.session.organizationId,
       userId: subject.userId,
-      contactEmails: platformAdminEmails(),
+      // The guide no longer names a contact; readHistoryContact reads it.
+      contactEmails: [],
     }),
   );
   const row = (res.rows[0] ?? {}) as Row;
@@ -55,8 +56,6 @@ export async function readAdminGuide(
     // Same parse as getFeatures(org), read in this SELECT; a failed read is guide: null.
     payLinks: parseFeatures(row.feature_flags).payLinks,
     hasFieldPulse: row.has_field_pulse === true,
-    historyHidden: !viewer.showHidden,
-    contactName: typeof row.contact_name === "string" ? row.contact_name : null,
   });
 }
 

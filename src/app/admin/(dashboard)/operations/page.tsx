@@ -31,6 +31,7 @@ import {
   timeToPaidSublabel,
   dispatcherSublabel,
   dispatchHealthSublabel,
+  bookedSublabel,
 } from '@/lib/admin/operations-format';
 
 const PRESETS = [
@@ -152,12 +153,7 @@ export default function OperationsPage() {
           loading={isLoading}
           sublabel={
             metrics
-              ? `Booked here · ${(
-                  (metrics.jobsBooked.current ?? 0) / Math.max(1, metrics.rangeDays)
-                ).toFixed(1)} / day avg` +
-                ((metrics.importedJobsCurrent ?? 0) > 0
-                  ? ` · +${metrics.importedJobsCurrent} imported`
-                  : '')
+              ? bookedSublabel(metrics.jobsBooked.current ?? 0, metrics.rangeDays, metrics.importedJobsCurrent ?? 0)
               : undefined
           }
         />

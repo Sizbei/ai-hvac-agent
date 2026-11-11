@@ -6,6 +6,7 @@ import {
   listInvoices,
   getInvoiceSummaryStats,
   collectedThisMonthCents,
+  hasSyncedInvoices,
   createInvoiceFromSoldEstimate,
   INVOICE_SORT_KEYS,
   type InvoiceSortKey,
@@ -94,10 +95,11 @@ export async function GET(request: NextRequest) {
       return errorResponse("minCents must be ≤ maxCents", "VALIDATION_ERROR", 400);
     }
 
-    const [listResult, stats, collected] = await Promise.all([
+    const [listResult, stats, collected, synced] = await Promise.all([
       listInvoices(session.organizationId, { page, limit, search, state, overdue, source, sort, customerId, serviceRequestId, unreminded, minCents, maxCents }, viewer),
       getInvoiceSummaryStats(session.organizationId, viewer),
       collectedThisMonthCents(session.organizationId, viewer),
+      hasSyncedInvoices(session.organizationId, viewer),
     ]);
 
     const response = successResponse({
@@ -106,6 +108,7 @@ export async function GET(request: NextRequest) {
       sourceCounts: listResult.sourceCounts,
       stats,
       collectedThisMonthCents: collected,
+      hasSyncedInvoices: synced,
       // Card payments are off while the provider is the mock; the list labels
       // its customer-link action accordingly.
       cardPaymentsEnabled: cardPaymentsEnabled(),

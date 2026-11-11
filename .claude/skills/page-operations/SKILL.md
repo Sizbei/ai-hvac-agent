@@ -46,6 +46,8 @@ fixed, not the selected range).
   within `ASSIGNED_AT_CREATION_SECONDS` (60 s) of creation: those were booked
   with a technician already chosen, not answered by a dispatcher. Without
   this the headline read "1 s".
+- "Requests booked" sublabel via `bookedSublabel` (operations-format.ts): under
+  1 a day it reads per week ("0.3 / week avg"), never "0.0 / day avg".
 - AR amount columns are `w-28 shrink-0` so six-figure synced totals line up.
 - Time to paid (2026-11-06) is the MEDIAN from issue (`coalesce(issuedAt,
   createdAt)`) to the last succeeded payment, for invoices paid in the window

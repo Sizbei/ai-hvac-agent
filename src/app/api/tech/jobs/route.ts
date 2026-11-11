@@ -4,6 +4,11 @@
  * Lists the calling technician's visits (assignment rows) by range: today / upcoming / past, with the
  * address decrypted (the tech needs it to drive there). Reuses the JWT admin
  * session (technician role). Tenant-scoped to the tech's org.
+ *
+ * No visibleRows filter, by design: hidden history (`hidden_from_org`) hides
+ * rows from the office view only. A technician still sees every job assigned
+ * to them, including old imported ones (the "Older open jobs" group), and
+ * nothing else. This route sits outside the visibility-coverage scan roots.
  */
 import { asc, eq, isNull, or, sql } from "drizzle-orm";
 import { getTechSession } from "@/lib/auth/tech-session";
@@ -14,6 +19,8 @@ import { decrypt } from "@/lib/crypto";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 import { businessTodayIso } from "@/lib/admin/availability-queries";
+import { customerAddressFallbackSql, customerNameFallbackSql } from "@/lib/tech/customer-fallback-sql";
+import { displayCustomerName, isDeletedFieldpulsePlaceholder } from "@/lib/admin/customer-name-display";
 import { classifyVisit, VISIT_RANGES, PAST_WINDOW_DAYS, type VisitRange } from "@/lib/tech/visit-range";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +32,12 @@ function safeDecrypt(v: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/** A customer deleted in FieldPulse has no real name: the card leads with the address instead,
+ * and says "No name on file" only when there is no address either. */
+function cardCustomerName(name: string | null, address: string | null): string | null {
+  return isDeletedFieldpulsePlaceholder(name) && address ? null : displayCustomerName(name);
 }
 
 const windowStart = sql<Date | null>`COALESCE(${appointments.startsAt}, ${serviceRequests.arrivalWindowStart})`.mapWith(serviceRequests.arrivalWindowStart);
@@ -56,7 +69,9 @@ export async function GET(request: Request) {
         arrivalWindowStart: windowStart,
         arrivalWindowEnd: windowEnd,
         addressEncrypted: serviceRequests.addressEncrypted,
+        addressFromCustomer: customerAddressFallbackSql(),
         customerNameEncrypted: serviceRequests.customerNameEncrypted,
+        customerNameFromCustomer: customerNameFallbackSql(),
         accessNotes: serviceRequests.accessNotes,
         appointmentId: appointments.id,
         appointmentNumber: appointments.appointmentNumber,
@@ -107,7 +122,10 @@ export async function GET(request: Request) {
             todayIso,
           ) === range,
       )
-      .map((r) => ({
+      .map((r) => {
+        // Imported jobs keep the name and address on the customer row.
+        const address = safeDecrypt(r.addressEncrypted) ?? safeDecrypt(r.addressFromCustomer);
+        return {
         id: r.id,
         referenceNumber: r.referenceNumber,
         status: r.status,
@@ -117,14 +135,18 @@ export async function GET(request: Request) {
         scheduledDate: r.scheduledDate?.toISOString() ?? null,
         arrivalWindowStart: r.arrivalWindowStart?.toISOString() ?? null,
         arrivalWindowEnd: r.arrivalWindowEnd?.toISOString() ?? null,
-        address: safeDecrypt(r.addressEncrypted),
-        customerName: safeDecrypt(r.customerNameEncrypted),
+        address,
+        customerName: cardCustomerName(
+          safeDecrypt(r.customerNameEncrypted) ?? safeDecrypt(r.customerNameFromCustomer),
+          address,
+        ),
         accessNotes: r.accessNotes,
         appointmentId: r.appointmentId,
         appointmentNumber: r.appointmentNumber,
         assignmentStatus: r.assignmentStatus,
         isLead: r.isLead,
-      }));
+        };
+      });
     if (range === "past") jobs.reverse();
 
     return successResponse({ jobs });

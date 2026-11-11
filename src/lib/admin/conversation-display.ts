@@ -4,7 +4,7 @@
  * No I/O, no server-only imports: the inbox components and the queries share
  * these, and they are unit-tested in conversation-display.test.ts.
  */
-import { humanizeCode, issueTypeLabel, urgencyLabel } from "@/lib/admin/request-labels";
+import { humanizeSnake, issueTypeLabel, urgencyLabel } from "@/lib/admin/request-labels";
 
 /**
  * "Needs action" = escalated, and nobody has marked it handled since the
@@ -183,11 +183,11 @@ function formatField(format: FieldFormat, value: string): { value: string; href?
     case "urgency":
       return { value: urgencyLabel(value) };
     case "enum":
-      return { value: ENUM_SHAPE.test(value) ? humanizeCode(value) : value };
+      return { value: ENUM_SHAPE.test(value) ? humanizeSnake(value) : value };
     case "text":
       // Free text, but the bot sometimes stores an enum here
       // (problemDuration: "a_few_days" / "partially_working").
-      return { value: ENUM_SHAPE.test(value) && value.includes("_") ? humanizeCode(value) : value };
+      return { value: ENUM_SHAPE.test(value) && value.includes("_") ? humanizeSnake(value) : value };
   }
 }
 

@@ -82,7 +82,7 @@ export function useAgenda(enabled = true): UseAgendaResult {
     } catch (e) {
       console.error('[agenda] load failed', e);
       if (isMountedRef.current) {
-        setError('Couldn’t load older bookings. Please try again.');
+        setError('Couldn’t load older requests. Please try again.');
       }
     } finally {
       inFlightRef.current = false;

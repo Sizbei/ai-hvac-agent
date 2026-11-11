@@ -15,6 +15,7 @@
  * └────────────────────────────────────────────────────────────────────────────┘
  */
 import { getFieldpulseConfig, type FieldpulseConfig } from "./config";
+import { buildFpEstimateStatusLookup, type FpEstimateStatusLookup } from "./estimate-status";
 import type {
   CreateCustomerInput,
   CreateJobInput,
@@ -256,6 +257,13 @@ export interface FieldpulseClient {
    * The per-id response carries `custom_status` which is absent from list rows.
    */
   getEstimate(estimateId: string): Promise<FieldpulseEstimate | null>;
+
+  /**
+   * The company's estimate status workflows (GET /estimates/status-workflows),
+   * flattened to status_id → { name, type }. Throws when FieldPulse can't be
+   * reached, so a caller never mistakes an outage for "no statuses".
+   */
+  listEstimateStatuses(): Promise<FpEstimateStatusLookup>;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -449,6 +457,7 @@ function toCustomer(raw: unknown): FieldpulseCustomer {
     accountType,
     isTaxExempt,
     billingAddress,
+    createdAt: str(obj.created_at),
     // Import-internal: raw payload so importers can feed it to buildFpSpillover.
     _raw: obj,
   };
@@ -663,6 +672,8 @@ function toEstimate(raw: unknown): FieldpulseEstimate | null {
     customerId: idStr(obj.customer_id),
     jobId: idStr(obj.job_id),
     status: str(obj.status),
+    statusId: idStr(obj.status_id),
+    acceptedAt: str(obj.estimate_accept_at),
     subtotalCents: dollarsToCents(obj.subtotal),
     taxCents: dollarsToCents(obj.tax),
     totalCents: dollarsToCents(obj.total) ?? dollarsToCents(obj.grand_total),
@@ -1217,6 +1228,11 @@ export class RestFieldpulseClient implements FieldpulseClient {
       // Return null on 404 or malformed payload.
       return null;
     }
+  }
+
+  async listEstimateStatuses(): Promise<FpEstimateStatusLookup> {
+    const raw = await this.request("/estimates/status-workflows", { method: "GET" });
+    return buildFpEstimateStatusLookup(unwrap(raw));
   }
 
   async listJobInvoices(

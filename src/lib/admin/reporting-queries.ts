@@ -28,6 +28,14 @@ import { visibleRows, type Visibility } from "./visibility";
 import { withoutRetiredDemoUsers } from "./retired-demo-users";
 import { decrypt } from "@/lib/crypto";
 import { locationDisplayLabel } from "./report-format";
+import { EFFECTIVE_CREATED_AT_SQL } from "./estimate-effective-date";
+
+/**
+ * When an invoice was really issued: the source system's date for FieldPulse /
+ * HCP mirrors (`createdAt` is only the import run), the row's own time for
+ * native ones. Same expression as /admin/invoices and the accounting export.
+ */
+const INVOICE_ISSUED_SQL = sql`coalesce(${invoices.issuedAt}, ${invoices.createdAt})`;
 
 /** Decrypts a ciphertext column, returning null on absent/corrupt input. */
 function safeDecrypt(ciphertext: string | null | undefined): string | null {
@@ -56,13 +64,23 @@ export interface SalesReport {
   /** grossCollectedCents - refundedCents (native net). */
   readonly netCollectedCents: number;
   /** SYNCED revenue: paid-to-date (as reported by the FSM) on FSM-synced invoices
-   * CREATED in the period. Reported SEPARATELY from native so the two sources are
+   * ISSUED in the period (source-system date, not the import run). Reported SEPARATELY from native so the two sources are
    * never blended into one double-counted total (a synced invoice has no native
    * payment rows, so it would otherwise be invisible in collected revenue).
    * BASIS CAVEAT: this is a creation-cohort, paid-to-date figure — NOT a
    * payment-date sum like native grossCollectedCents. Synced invoices carry no
-   * per-payment dates, so it cannot be payment-date-scoped; treat the two bases
-   * as related but not identical (don't naively add them as one "collected"). */
+   * per-payment dates, so it cannot be payment-date-scoped: it includes money
+   * received after the period on invoices issued in it, and misses money
+   * received in the period on older invoices.
+   *
+   * The Reports "Net revenue" headline (`netRevenueTile`) still adds the two,
+   * by decision: for an org that takes most of its money in FieldPulse/HCP a
+   * native-only headline reads near $0. There is no double count (FieldPulse
+   * payment mirrors are excluded from grossCollectedCents, HCP payments are
+   * never stored as native payments, and synced invoices refuse native
+   * payments), but the sum mixes the two bases, so the tile's sublabel names
+   * each part and its basis. Anything else that needs one consistent basis
+   * must read the two fields separately. */
   readonly syncedCollectedCents: number;
   /** Open balance across ALL invoices in state 'open' (= nativeArCents + syncedArCents). */
   readonly outstandingArCents: number;
@@ -194,7 +212,8 @@ export async function getSalesReport(
       .from(invoices)
       .where(withTenant(invoices, organizationId, eq(invoices.state, "open"), sql`${invoices.amountPaidCents} < ${invoices.totalCents}`, visibleRows(invoices, vis))),
 
-    // Estimate buckets in ONE pass, created within the period. Expiry is lazy
+    // Estimate buckets in ONE pass, created within the period (FieldPulse's
+    // created date for imports — the row's createdAt is the import run). Expiry is lazy
     // (expiresAt is only enforced at approval), so an 'open' estimate whose
     // expiresAt is in the past is bucketed as expired here, NOT open. `dismissed`
     // is its own branch (status has 4 values: open/sold/dismissed/expired) so
@@ -227,13 +246,13 @@ export async function getSalesReport(
         withTenant(
           estimates,
           organizationId,
-          gte(estimates.createdAt, fromDate),
-          lte(estimates.createdAt, toDate),
+          gte(EFFECTIVE_CREATED_AT_SQL, fromDate),
+          lte(EFFECTIVE_CREATED_AT_SQL, toDate),
           visibleRows(estimates, vis),
         ),
       ),
 
-    // Invoices created within the period + how many are paid.
+    // Invoices issued within the period + how many are paid.
     db
       .select({
         created: count(),
@@ -244,13 +263,13 @@ export async function getSalesReport(
         withTenant(
           invoices,
           organizationId,
-          gte(invoices.createdAt, fromDate),
-          lte(invoices.createdAt, toDate),
+          gte(INVOICE_ISSUED_SQL, fromDate),
+          lte(INVOICE_ISSUED_SQL, toDate),
           visibleRows(invoices, vis),
         ),
       ),
 
-    // Synced collected revenue: amount paid on FSM-synced invoices created in the
+    // Synced collected revenue: amount paid on FSM-synced invoices issued in the
     // period. Synced invoices mirror FSM billing and carry no native payment
     // rows, so without this they'd be invisible in collected revenue. Kept as its
     // OWN figure (never folded into grossCollectedCents) so native + synced are
@@ -263,8 +282,8 @@ export async function getSalesReport(
           invoices,
           organizationId,
           sql`(${invoices.fieldpulseInvoiceId} IS NOT NULL OR ${invoices.hcpInvoiceId} IS NOT NULL)`,
-          gte(invoices.createdAt, fromDate),
-          lte(invoices.createdAt, toDate),
+          gte(INVOICE_ISSUED_SQL, fromDate),
+          lte(INVOICE_ISSUED_SQL, toDate),
           visibleRows(invoices, vis),
         ),
       ),

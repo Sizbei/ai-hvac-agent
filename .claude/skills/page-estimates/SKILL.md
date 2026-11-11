@@ -22,7 +22,8 @@ page `src/app/admin/(dashboard)/estimates/[id]/page.tsx` · create dialog
 search params. 60s SWR cache. KPI stats (openCents, staleCents, wonCents,
 lostCents, winRatePct, avgOpenAgeDays) come from the server in the same
 response — no client-side reduce. PER_PAGE=50. Default tab is "Open" (the
-actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
+actionable follow-up list). Every bucket lists newest first (Open used to lead
+with the oldest, which on imported history opened on months-dead proposals). Stale = open >14 days. Search debounced 300ms.
 
 **Invariants (violate = bug):**
 - List rows carry only `LIST_ESTIMATE_FIELDS` (`src/lib/admin/estimate-queries.ts`;
@@ -103,6 +104,13 @@ actionable follow-up list). Stale = open >14 days. Search debounced 300ms.
   (`canOfferFinancing`).
 
 **Field estimates (M3c):** title 'Field estimate', no approval token, 30-day expiry, sold on the technician's phone. `estimates.sold_via` ('portal' | 'office' | 'field', NULL before M3c) and `sold_by` (technician for field, admin for office). Detail Approval card (names in bold as before): field → 'Signed by <name>.' + 'Signed on site with <technician> · <time>'; office → 'Marked sold by <admin>'; old rows unchanged (`approvalLines`, `src/lib/admin/estimate-approval-copy.ts`). `Sold, not invoiced` tab (`bucket=not_invoiced`): native sold, no invoice of any state with this `estimate_id`, not on the job's invoice. Generate (`createInvoiceFromSoldEstimate`) refuses while the field bill holds the lines and returns that invoice; both insert paths write `estimate_line_item_id` with v7 ids in line order. A voided office invoice ends office billing (Generate returns it). The detail carries a read-only `jobInvoiceId` (`billingInvoiceIdSql` when no office invoice exists); a billed estimate shows no Generate, only "Invoice created" or "On the job's invoice" with View invoice (`estimateInvoiceCard`, `src/lib/admin/estimate-detail-display.ts`). Approval and Created dates use the business timezone (`businessWhen`/`businessDay`). `useEstimates` guards fetches per key (`src/lib/admin/keyed-fetch.ts`), so a `?bucket=` deep link loads that bucket on first load.
+
+**Imported display (2026-11-11):** the FieldPulse import puts each estimate
+in one option named "FieldPulse"; the detail titles it "Estimate"
+(`estimateOptionTitle`). Line "× qty" uses `lineQuantity`
+(`src/lib/admin/line-quantity.ts`) so fractional FP hours read 2.5, not 3.
+`EFFECTIVE_CREATED_AT_SQL` lives in `src/lib/admin/estimate-effective-date.ts`
+(shared with reports).
 
 **Gotchas:**
 - Hidden rows (go-live P6): list, KPI tiles and detail read visible rows only

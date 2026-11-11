@@ -54,8 +54,8 @@ import { LocationsSection } from '@/components/admin/customers/locations-section
 import { ContactsSection } from '@/components/admin/customers/contacts-section';
 import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import { CustomerBookingsSection } from '@/components/admin/customers/customer-bookings-section';
-import { ScopedEstimatesSection } from '@/components/admin/estimates/scoped-estimates-section';
-import { ScopedInvoicesSection } from '@/components/admin/invoices/scoped-invoices-section';
+import { CustomerEstimatesCard } from '@/components/admin/customers/customer-estimates-card';
+import { CustomerInvoicesCard } from '@/components/admin/customers/customer-invoices-card';
 import { CustomerMembershipCard } from '@/components/admin/memberships/customer-membership-card';
 import { PortalLinkCard } from '@/components/admin/portal-link-card';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
@@ -69,7 +69,9 @@ import {
   issueTypeLabel,
   noteTypeLabel,
 } from '@/lib/admin/display-labels';
-import { lastSeenLabel } from '@/lib/admin/customer-display';
+import { customerActivity } from '@/lib/admin/customer-display';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
+import { formatAddressDisplay, formatPhoneDisplay } from '@/lib/admin/contact-format';
 
 /** Another row in this org sharing the target's email or phone hash — id +
  * server-side decrypted name only (customer-identity SPEC §5.1 disclosure). */
@@ -98,7 +100,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-6 border-b border-border py-2 last:border-b-0 last:pb-0">
-      <dt className="w-[140px] shrink-0 text-[13px] leading-5 text-muted-foreground">
+      <dt className="w-24 shrink-0 text-[13px] leading-5 text-muted-foreground sm:w-[140px]">
         {label}
       </dt>
       <dd
@@ -426,25 +428,20 @@ export default function CustomerDetailPage({
       {/* Header */}
       <PageHeader
         back={{ href: '/admin/customers', label: 'Customers' }}
-        title={customer.name ?? 'Unknown customer'}
-        subtitle={`Customer since ${formatDate(customer.createdAt)} · ${
-          customer.lastServiceDate
-            ? `Last service ${lastSeenLabel(customer.lastServiceDate)}`
-            : 'No completed service yet'
+        title={customerNameLabel(customer.name)}
+        subtitle={`Customer since ${formatDate(customer.customerSince)} · ${
+          customerActivity(customer).label
         }`}
         actions={
           <>
-            {/* Type + tax-exempt badges */}
-            <Badge
-              variant="outline"
-              className={
-                customer.customerType === 'commercial'
-                  ? 'bg-info-light text-info border-info/30'
-                  : 'bg-muted text-muted-foreground border-border'
-              }
-            >
-              {customer.customerType === 'commercial' ? 'Commercial' : 'Residential'}
-            </Badge>
+            {/* Type + tax-exempt badges. Residential is the column default (every
+                FieldPulse import got it, churches and schools included), so
+                only the deliberate Commercial mark is shown. */}
+            {customer.customerType === 'commercial' && (
+              <Badge variant="outline" className="bg-info-light text-info border-info/30">
+                Commercial
+              </Badge>
+            )}
             {customer.isTaxExempt === true && (
               <Badge variant="outline" className="bg-warning-light text-warning border-warning/30">
                 Tax-exempt
@@ -570,7 +567,7 @@ export default function CustomerDetailPage({
               label="Phone"
               value={
                 <a href={`tel:${customer.phone}`} className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center">
-                  {customer.phone}
+                  {formatPhoneDisplay(customer.phone)}
                 </a>
               }
               mono
@@ -580,14 +577,14 @@ export default function CustomerDetailPage({
             <DetailRow
               label="Email"
               value={
-                <a href={`mailto:${customer.email}`} className="inline-flex text-link hover:underline max-sm:min-h-11 max-sm:items-center">
+                <a href={`mailto:${customer.email}`} className="inline-flex max-w-full text-link [overflow-wrap:anywhere] hover:underline max-sm:min-h-11 max-sm:items-center">
                   {customer.email}
                 </a>
               }
             />
           )}
           {customer.address && (
-            <DetailRow label="Service address" value={customer.address} />
+            <DetailRow label="Service address" value={formatAddressDisplay(customer.address)} />
           )}
           {customer.propertyType && (
             <DetailRow
@@ -596,10 +593,16 @@ export default function CustomerDetailPage({
             />
           )}
           {/* Billing address — only when present and different from service address */}
-          {customer.billingAddress && customer.billingAddress !== customer.address && (
-            <DetailRow label="Billing address" value={customer.billingAddress} />
-          )}
+          {customer.billingAddress &&
+            formatAddressDisplay(customer.billingAddress) !== formatAddressDisplay(customer.address) && (
+              <DetailRow label="Billing address" value={formatAddressDisplay(customer.billingAddress)} />
+            )}
         </dl>
+        {!customer.phone && !customer.email && !customer.address && !customer.billingAddress && (
+          <p className="text-sm text-muted-foreground">
+            No phone, email or address on file. Use Edit to add them.
+          </p>
+        )}
       </SectionCard>
 
       {/* Bookings — real service_requests (service_history is empty for imports).
@@ -768,10 +771,10 @@ export default function CustomerDetailPage({
       )}
 
       {/* Estimates */}
-      <ScopedEstimatesSection customerId={id} variant="card" />
+      <CustomerEstimatesCard key={`estimates-${id}`} customerId={id} />
 
       {/* Invoices */}
-      <ScopedInvoicesSection customerId={id} variant="card" />
+      <CustomerInvoicesCard key={`invoices-${id}`} customerId={id} />
 
       {/* Notes */}
       <SectionCard
@@ -975,7 +978,7 @@ export default function CustomerDetailPage({
               </p>
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
                 {eraseSiblings.slice(0, MAX_SIBLINGS_SHOWN).map((sibling) => (
-                  <li key={sibling.id}>{sibling.name ?? 'Unknown customer'}</li>
+                  <li key={sibling.id}>{customerNameLabel(sibling.name)}</li>
                 ))}
                 {eraseSiblings.length > MAX_SIBLINGS_SHOWN && (
                   <li>

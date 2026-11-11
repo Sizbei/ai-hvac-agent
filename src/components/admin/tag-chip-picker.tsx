@@ -295,7 +295,7 @@ function TagChipPickerInner({
             value={newColor}
             onValueChange={(v) => v && setNewColor(v as TagColor)}
           >
-            <SelectTrigger aria-label="New tag colour" className="h-8 w-32">
+            <SelectTrigger aria-label="New tag color" className="h-8 w-32">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

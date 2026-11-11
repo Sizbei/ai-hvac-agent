@@ -1,3 +1,6 @@
+'use client';
+
+import { useCallback, useState } from 'react';
 import { Wind } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -8,6 +11,8 @@ interface BrandMarkProps {
   readonly compact?: boolean;
   /** Render the wordmark in light ink for dark/navy surfaces (the sidebar). */
   readonly onDark?: boolean;
+  /** The org's own logo (square mark). Replaces the lozenge; falls back to it if unset or it fails to load. */
+  readonly logoUrl?: string | null;
   readonly className?: string;
 }
 
@@ -16,9 +21,32 @@ interface BrandMarkProps {
  * lozenge plus a two-line wordmark ("Spears Services" / "Service Console").
  * Colors come from the brand tokens so light and dark themes both read well.
  */
-export function BrandMark({ name = 'Spears Services', compact = false, onDark = false, className }: BrandMarkProps) {
+export function BrandMark({ name = 'Spears Services', compact = false, onDark = false, logoUrl, className }: BrandMarkProps) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showLogo = Boolean(logoUrl) && failedUrl !== logoUrl;
+  // A server-rendered <img> can fail before React hydrates and attaches
+  // onError, which left a broken-image icon in the shell. Check on mount too.
+  const checkLoaded = useCallback(
+    (img: HTMLImageElement | null) => {
+      if (img && img.complete && img.naturalWidth === 0) setFailedUrl(logoUrl ?? null);
+    },
+    [logoUrl],
+  );
   return (
     <div className={cn('flex items-center gap-2.5', className)}>
+      {showLogo ? (
+        // eslint-disable-next-line @next/next/no-img-element -- org-supplied URL on any host; a 36px mark gains nothing from next/image
+        <img
+          ref={checkLoaded}
+          src={logoUrl as string}
+          alt=""
+          referrerPolicy="no-referrer"
+          width={36}
+          height={36}
+          onError={() => setFailedUrl(logoUrl ?? null)}
+          className="size-9 shrink-0 rounded-xl object-contain"
+        />
+      ) : (
       <span
         className={cn(
           'flex size-9 shrink-0 items-center justify-center rounded-xl',
@@ -30,6 +58,7 @@ export function BrandMark({ name = 'Spears Services', compact = false, onDark = 
       >
         <Wind className="size-5" />
       </span>
+      )}
       {!compact && (
         <span className="flex min-w-0 flex-col leading-none">
           <span

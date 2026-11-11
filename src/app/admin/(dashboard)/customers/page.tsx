@@ -9,6 +9,7 @@ import {
   Calendar,
   LayoutGrid,
   List as ListIcon,
+  Receipt,
   RefreshCw,
   Search,
   User,
@@ -43,7 +44,10 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
 import { SyncPill } from '@/components/admin/sync-pill';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
+import { formatAddressDisplay, formatPhoneDisplay } from '@/lib/admin/contact-format';
+import { countLabel, customerActivity } from '@/lib/admin/customer-display';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
 
 const ALL_PROPERTY_TYPES = 'all';
 const ALL_CUSTOMER_TYPES = 'all';
@@ -71,7 +75,7 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <p className="truncate font-medium">
-                {customer.name ?? 'Unknown'}
+                {customerNameLabel(customer.name)}
               </p>
               {customer.fieldpulseCustomerId && (
                 <SyncPill source="fieldpulse" size="md" />
@@ -83,7 +87,10 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
               )}
             </div>
             <p className="truncate text-sm text-muted-foreground">
-              {customer.address ?? customer.email ?? customer.phone ?? 'No contact info'}
+              {formatAddressDisplay(customer.address) ??
+                customer.email ??
+                formatPhoneDisplay(customer.phone) ??
+                'No contact on file'}
             </p>
           </div>
           <div className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
@@ -93,15 +100,16 @@ const CustomerRow = memo(function CustomerRow({ customer }: CustomerRowProps) {
               request{customer.requestCount === 1 ? '' : 's'}
             </span>
             <span className="flex items-center gap-1.5">
+              <Receipt className="size-3.5 text-foreground-faint" aria-hidden="true" />
+              <span className="font-mono tabular-nums">{customer.invoiceCount}</span>
+              invoice{customer.invoiceCount === 1 ? '' : 's'}
+            </span>
+            <span className="flex items-center gap-1.5">
               <Wrench className="size-3.5 text-foreground-faint" aria-hidden="true" />
               <span className="font-mono tabular-nums">{customer.equipmentCount}</span>
               equipment
             </span>
-            {customer.lastServiceDate && (
-              <span className="text-xs">
-                Last service {new Date(customer.lastServiceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </span>
-            )}
+            <span className="w-36 text-right text-xs">{customerActivity(customer).label}</span>
           </div>
         </CardContent>
       </Card>
@@ -270,7 +278,7 @@ export default function CustomersPage() {
             ? 'Loading…'
             : error
               ? undefined
-              : `${total} customer${total === 1 ? '' : 's'}`
+              : countLabel(total, 'customer')
         }
         actions={
           <Button onClick={handleShowCreate}>

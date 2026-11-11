@@ -65,7 +65,17 @@ vi.mock('drizzle-orm', () => ({
   isNull: (c: unknown) => ({ kind: 'isNull', c }),
   isNotNull: (c: unknown) => ({ kind: 'isNotNull', c }),
   inArray: (c: unknown, v: unknown) => ({ kind: 'inArray', c, v }),
-  sql: vi.fn((strings: TemplateStringsArray) => ({ kind: 'sql', text: strings.join('?') })),
+  // `raw` backs visibleRowsSql; `as` names a computed column in a subquery.
+  sql: Object.assign(
+    vi.fn((strings: TemplateStringsArray) => ({
+      kind: 'sql',
+      text: strings.join('?'),
+      as() {
+        return this;
+      },
+    })),
+    { raw: (text: string) => ({ kind: 'sql', text }) },
+  ),
 }));
 
 vi.mock('@/lib/db/schema', () => ({

@@ -4,7 +4,7 @@
  * All weights are constants (ML-tunable later). See the design spec.
  */
 import { formatCents } from "@/lib/admin/ops-insights-format";
-import { humanizeCode, inSentence, jobTypeLabel } from "@/lib/admin/request-labels";
+import { humanizeSnake, inSentence, jobTypeLabel } from "@/lib/admin/request-labels";
 
 /** Reasons read as short sentences: first letter capitalised, nothing else touched. */
 function sentenceCase(text: string): string {
@@ -111,7 +111,7 @@ const DURATION_FIT_PENALTY = 0.1;
 /** Office words for the skill a reason names: "service call", never "service_call". */
 function skillLabel(job: DispatchSignals['job']): string {
   if (job.jobType) return inSentence(jobTypeLabel(job.jobType));
-  if (job.systemType) return inSentence(humanizeCode(job.systemType));
+  if (job.systemType) return inSentence(humanizeSnake(job.systemType));
   return 'matching';
 }
 

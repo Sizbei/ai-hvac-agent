@@ -12,7 +12,8 @@ import {
 import type { AgendaBooking } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { REQUEST_STATUS_DOT, REQUEST_STATUS_DOT_DEFAULT } from '@/lib/admin/status-colors';
-import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel, issueTypeLabel } from '@/lib/admin/request-labels';
+import { LoadErrorState } from '@/components/admin/ui/load-error-state';
 
 interface AgendaViewProps {
   readonly bookings: readonly AgendaBooking[];
@@ -22,6 +23,8 @@ interface AgendaViewProps {
   readonly error: string | null;
   readonly onSelect: (id: string) => void;
   readonly onLoadOlder: () => void;
+  /** Reloads the first page after a failed load. */
+  readonly onRetry: () => void;
 }
 
 const MONTHS = [
@@ -117,16 +120,16 @@ function AgendaRow({
 
       {/* body */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-semibold">
+        <div className="line-clamp-2 break-words text-[13px] font-semibold sm:line-clamp-1">
           {issueTypeLabel(booking.issueType)}
         </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <span className="truncate font-medium text-foreground">
-            {booking.customerName ?? 'Unknown customer'}
+        <div className="mt-0.5 flex min-w-0 flex-col text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-2">
+          <span className="truncate font-medium text-foreground sm:max-w-[45%] sm:shrink-0">
+            {customerNameLabel(booking.customerName)}
           </span>
           {booking.address && (
             <>
-              <span aria-hidden>·</span>
+              <span aria-hidden className="hidden sm:inline">·</span>
               <span className="inline-flex min-w-0 items-center gap-1 truncate">
                 <MapPin className="size-3 shrink-0" />
                 <span className="truncate">{booking.address}</span>
@@ -170,6 +173,7 @@ export function AgendaView({
   error,
   onSelect,
   onLoadOlder,
+  onRetry,
 }: AgendaViewProps) {
   if (isLoading && bookings.length === 0) {
     return (
@@ -181,15 +185,20 @@ export function AgendaView({
     );
   }
 
+  // A failed first load must not read as an empty schedule.
+  if (bookings.length === 0 && error) {
+    return <LoadErrorState title="Couldn’t load the agenda." onRetry={onRetry} />;
+  }
+
   if (bookings.length === 0) {
     return (
       <div className="rounded-lg border border-border-strong bg-surface p-10 text-center">
         <span className="mx-auto flex size-10 items-center justify-center rounded-md bg-surface-sunken">
           <Inbox className="size-5 text-foreground-faint" />
         </span>
-        <p className="mt-3 text-[15px] font-medium">No bookings yet</p>
+        <p className="mt-3 text-[15px] font-medium">No requests yet</p>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          Bookings will appear here as they come in.
+          Requests will appear here as they come in.
         </p>
       </div>
     );
@@ -216,7 +225,7 @@ export function AgendaView({
                 </h2>
                 <span className="text-xs text-muted-foreground">
                   <span className="font-mono tabular-nums">{row.count}</span>{' '}
-                  booking{row.count === 1 ? '' : 's'}
+                  request{row.count === 1 ? '' : 's'}
                 </span>
               </div>
             );
@@ -251,7 +260,7 @@ export function AgendaView({
             disabled={isLoadingMore}
           >
             <CalendarClock className="size-4" />
-            {isLoadingMore ? 'Loading…' : 'Load older bookings'}
+            {isLoadingMore ? 'Loading…' : 'Load older requests'}
           </Button>
         </div>
       )}

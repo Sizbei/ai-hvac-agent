@@ -6,11 +6,14 @@ description: Use when working on the /admin/fieldpulse-import page — live impo
 # FieldPulse import (/admin/fieldpulse-import)
 
 **Purpose:** observe the status of the FieldPulse full-import pipeline in real
-time. Shows per-phase progress cards (all 11 pipeline phases) and, for the
-platform admin only (`usePlatformUi()`; not while previewing), a recent-runs
-history table. Auto-polls while any phase is actively running.
+time. Shows per-phase progress cards (all 11 pipeline phases) and a
+recent-runs history table. Platform users only: the server page gates on
+`seesPlatformUi(viewer)` (in-shell 404 otherwise, and while previewing) and the
+status API on `isPlatformAdmin(session)` (404). Auto-polls while any phase is
+actively running.
 
-**Files:** page `src/app/admin/(dashboard)/fieldpulse-import/page.tsx` · model
+**Files:** page (server gate) `src/app/admin/(dashboard)/fieldpulse-import/page.tsx` ·
+board `src/components/admin/fp-import/fieldpulse-import-board.tsx` · model
 `src/components/admin/fp-import/import-status-model.ts` · hook
 `src/hooks/use-fp-import-status.ts` · API
 `src/app/api/admin/integrations/fieldpulse/import-status/route.ts` · table
@@ -57,8 +60,8 @@ unknown it renders an indeterminate pulse bar.
 **Gotchas:**
 - When polling is active the Refresh button is hidden; it reappears when polling
   stops (idle state). Never show both at once.
-- `run.error` may be a long stack trace string; `break-words text-xs` on the error
-  paragraph prevents horizontal overflow. Keep those classes.
+- `run.error` is raw internal text (FieldPulse API errors, stack traces); the
+  card shows fixed human copy (`RUN_FAILED_COPY`), never the stored string.
 - `counts` is typed as `FpRunCounts` but stored as JSONB — cast required at
   read sites.
 

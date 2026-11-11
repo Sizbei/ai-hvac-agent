@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { AdminRequestListRow } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { ClipboardList } from 'lucide-react';
-import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel, issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface RequestTableProps {
   readonly requests: readonly AdminRequestListRow[];
@@ -48,13 +48,14 @@ const COLUMNS: ReadonlyArray<DataTableColumn<AdminRequestListRow>> = [
     // Capped so a long name or imported issue code can't push Status and
     // Assigned off the right edge at desktop widths.
     className: 'max-w-56 truncate',
-    cell: (r) => r.customerName ?? 'Unknown',
+    cell: (r) => <span title={customerNameLabel(r.customerName)}>{customerNameLabel(r.customerName)}</span>,
   },
   {
     key: 'issue',
     header: 'Issue',
     className: 'max-w-56 truncate',
-    cell: (r) => issueTypeLabel(r.issueType),
+    // Imported job titles run long; the full title is on hover.
+    cell: (r) => <span title={issueTypeLabel(r.issueType)}>{issueTypeLabel(r.issueType)}</span>,
   },
   {
     key: 'urgency',
@@ -131,7 +132,7 @@ function RequestCards({
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
-                  {r.customerName ?? 'Unknown'}
+                  {customerNameLabel(r.customerName)}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
                   {issueTypeLabel(r.issueType)} ·{' '}

@@ -7,6 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { VisitRange } from '@/lib/tech/visit-range';
+import { splitTodayJobs } from '@/lib/tech/today-groups';
+import { ChevronDown } from 'lucide-react';
 import { issueLabel, overdueLabel, visitBadge, visitWhen } from '@/lib/tech/job-display';
 import { GuideCard } from '@/components/tech/guide-card';
 import { pickTodayFirst, type TodayFirst } from '@/lib/tech/guide-view';
@@ -40,6 +42,7 @@ interface Job {
   readonly issueType: string;
   readonly urgency: string;
   readonly address: string | null;
+  readonly customerName: string | null;
   readonly scheduledDate: string | null;
   readonly arrivalWindowStart: string | null;
   readonly appointmentId: string;
@@ -149,6 +152,103 @@ function ClockButton() {
   );
 }
 
+/** One visit card. `showOverdue` is off inside the Older open jobs group, where every row is old. */
+function JobCard({ job, now, showOverdue }: { readonly job: Job; readonly now: Date; readonly showOverdue: boolean }) {
+  const when = visitWhen(job.arrivalWindowStart ?? job.scheduledDate, now);
+  const overdue = showOverdue
+    ? overdueLabel(job.scheduledDate ?? job.arrivalWindowStart, job.assignmentStatus, job.status, now)
+    : null;
+  return (
+    <Link href={`/tech/jobs/${job.id}?visit=${job.appointmentId}`}>
+      <Card className="transition-colors active:bg-accent">
+        <CardContent className="p-4">
+          <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <span className="font-mono text-[13px] font-medium tabular-nums">
+              {job.referenceNumber}
+              {job.appointmentNumber > 1 && ` · Visit ${job.appointmentNumber}`}
+            </span>
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              {overdue && (
+                <span className="rounded-[3px] border border-warning-border bg-warning-light px-2 py-0.5 text-[11px] font-medium text-warning-strong">
+                  {overdue}
+                </span>
+              )}
+              <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
+                {visitBadge(job.assignmentStatus, job.status)}
+              </span>
+            </span>
+          </div>
+          {/* Imported titles are shown as typed (caps, emoji): clamp and wrap so they can't break the card. */}
+          <p className="mt-1.5 line-clamp-3 text-[15px] font-medium [overflow-wrap:anywhere]">
+            {issueLabel(job.issueType)}
+            {job.isLead && (
+              <span className="ml-2 rounded-[3px] border border-border px-1.5 py-0.5 align-middle text-[11px] font-medium text-muted-foreground">
+                Lead
+              </span>
+            )}
+          </p>
+          {job.customerName && (
+            <p className="mt-1 text-[13px] font-medium [overflow-wrap:anywhere]">
+              {job.customerName}
+            </p>
+          )}
+          {job.address && (
+            <p className="mt-1 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+              {job.address}
+            </p>
+          )}
+          {when && (
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {when}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function JobList({ jobs, now, showOverdue }: { readonly jobs: readonly Job[]; readonly now: Date; readonly showOverdue: boolean }) {
+  return (
+    <ul className="space-y-3">
+      {jobs.map((job) => (
+        <li key={job.appointmentId}>
+          <JobCard job={job} now={now} showOverdue={showOverdue} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Collapsed by default: old open visits stay reachable without crowding today's work. */
+function OlderJobs({ jobs, now }: { readonly jobs: readonly Job[]; readonly now: Date }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="space-y-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="older-open-jobs"
+        onClick={() => setOpen((v) => !v)}
+        className="flex min-h-11 w-full items-center justify-between rounded-md border border-border bg-surface-raised px-4 text-left text-[15px] font-medium"
+      >
+        <span>
+          Older open jobs <span className="tabular-nums text-muted-foreground">({jobs.length})</span>
+        </span>
+        <ChevronDown aria-hidden className={`size-4 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <div id="older-open-jobs" className="space-y-3">
+          <p className="text-[13px] text-muted-foreground">
+            Scheduled more than a week ago and not closed yet. Ask the office if one is already done.
+          </p>
+          <JobList jobs={jobs} now={now} showOverdue={false} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function TechJobsListClient({ guideHidden }: { readonly guideHidden: boolean }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -177,7 +277,12 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
           setJobs(body.data.jobs);
           setError(null);
           if (isToday) {
-            setTodayFirst((prev) => (prev === 'unknown' ? pickTodayFirst(body.data.jobs) : prev));
+            setTodayFirst((prev) => {
+              if (prev !== 'unknown') return prev;
+              // The guide's "Open the job" points at today's work before an old open job.
+              const { current, older } = splitTodayJobs(body.data.jobs as Job[], now);
+              return pickTodayFirst(current.length > 0 ? current : older);
+            });
           }
         } else {
           setError('Failed to load jobs');
@@ -195,7 +300,7 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
       cancelled = true;
       controller.abort();
     };
-  }, [range]);
+  }, [range, now]);
 
   let content: React.ReactNode;
   if (isLoading) {
@@ -210,6 +315,18 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
     );
   } else if (error) {
     content = <p className="text-[15px] text-danger-strong">{error}</p>;
+  } else if (range === 'today') {
+    const { current, older } = splitTodayJobs(jobs, now);
+    content = (
+      <div className="space-y-4">
+        {current.length > 0 ? (
+          <JobList jobs={current} now={now} showOverdue />
+        ) : (
+          <p className="py-12 text-center text-[15px] text-muted-foreground">{EMPTY_COPY.today}</p>
+        )}
+        {older.length > 0 && <OlderJobs jobs={older} now={now} />}
+      </div>
+    );
   } else if (jobs.length === 0) {
     content = (
       <p className="py-12 text-center text-[15px] text-muted-foreground">
@@ -217,58 +334,7 @@ export function TechJobsListClient({ guideHidden }: { readonly guideHidden: bool
       </p>
     );
   } else {
-    content = (
-    <ul className="space-y-3">
-      {jobs.map((job) => {
-        const when = visitWhen(job.arrivalWindowStart ?? job.scheduledDate, now);
-        const overdue = overdueLabel(job.scheduledDate ?? job.arrivalWindowStart, job.assignmentStatus, job.status, now);
-        return (
-        <li key={job.appointmentId}>
-          <Link href={`/tech/jobs/${job.id}?visit=${job.appointmentId}`}>
-            <Card className="transition-colors active:bg-accent">
-              <CardContent className="p-4">
-                <div className="flex min-h-6 items-center justify-between gap-2">
-                  <span className="font-mono text-[13px] font-medium tabular-nums">
-                    {job.referenceNumber}
-                    {job.appointmentNumber > 1 && ` · Visit ${job.appointmentNumber}`}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    {overdue && (
-                      <span className="rounded-[3px] border border-warning-border bg-warning-light px-2 py-0.5 text-[11px] font-medium text-warning-strong">
-                        {overdue}
-                      </span>
-                    )}
-                    <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] text-muted-foreground">
-                      {visitBadge(job.assignmentStatus, job.status)}
-                    </span>
-                  </span>
-                </div>
-                <p className="mt-1.5 text-[15px] font-medium">
-                  {issueLabel(job.issueType)}
-                  {job.isLead && (
-                    <span className="ml-2 rounded-[3px] border border-border px-1.5 py-0.5 align-middle text-[11px] font-medium text-muted-foreground">
-                      Lead
-                    </span>
-                  )}
-                </p>
-                {job.address && (
-                  <p className="mt-1 text-[13px] text-muted-foreground">
-                    {job.address}
-                  </p>
-                )}
-                {when && (
-                  <p className="mt-1 text-[13px] text-muted-foreground">
-                    {when}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </Link>
-        </li>
-        );
-      })}
-    </ul>
-    );
+    content = <JobList jobs={jobs} now={now} showOverdue />;
   }
 
   return (

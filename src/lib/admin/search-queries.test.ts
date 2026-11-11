@@ -126,6 +126,24 @@ describe("searchCustomers", () => {
     expect(results[0].subtitle).toBe("dec:doe@example.com");
   });
 
+  it("matches a phone typed any way and shows it formatted", async () => {
+    mockSelect.mockReturnValue(
+      makeChain([
+        {
+          id: "c9",
+          nameEncrypted: "Chapel",
+          phoneEncrypted: "+1 (423) 555-0142",
+          emailEncrypted: null,
+          fieldpulseCustomerId: "fp-9",
+        },
+      ]),
+    );
+    // decrypt mock prefixes "dec:", which carries no digits.
+    const results = await searchCustomers(ORG, "423-555-0142", VISIBLE_ONLY);
+    expect(results).toHaveLength(1);
+    expect(results[0].subtitle).toBe("(423) 555-0142");
+  });
+
   it("excludes non-matching rows", async () => {
     const rows = [
       {
@@ -315,12 +333,12 @@ describe("searchJobs", () => {
     mockSelect.mockReturnValue(
       makeChain([
         { id: "r1", referenceNumber: "HVAC-1", issueType: "no_heat", requestNameEncrypted: "Ada", customerNameEncrypted: null },
-        { id: "r2", referenceNumber: "HVAC-2", issueType: "no_heat", requestNameEncrypted: null, customerNameEncrypted: "Watauga" },
+        { id: "r2", referenceNumber: "HVAC-2", issueType: "no_heat", requestNameEncrypted: null, customerNameEncrypted: "Birchvale" },
         { id: "r3", referenceNumber: "HVAC-3", issueType: "no_heat", requestNameEncrypted: null, customerNameEncrypted: null },
       ]),
     );
     const results = await searchJobs(ORG, "hvac", VISIBLE_ONLY);
-    expect(results.map((r) => r.title)).toEqual(["dec:Ada", "dec:Watauga", "HVAC-3"]);
+    expect(results.map((r) => r.title)).toEqual(["dec:Ada", "dec:Birchvale", "HVAC-3"]);
     expect(results[0].subtitle).toBe("HVAC-1 · No heat");
     expect(results[2].subtitle).toBe("No heat");
   });

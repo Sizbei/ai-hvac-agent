@@ -30,6 +30,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { ContactRecord } from "@/lib/admin/contact-types";
+import { formatPhoneDisplay } from "@/lib/admin/contact-format";
 
 const SAVE_COPY = "Couldn't save the contact. Please try again.";
 const INVALID_COPY =
@@ -412,7 +413,7 @@ export function ContactsSection({
                 </div>
                 {(c.phone || c.email) && (
                   <div className="flex flex-wrap gap-x-3 font-mono text-[13px] text-muted-foreground">
-                    {c.phone && <span>{c.phone}</span>}
+                    {c.phone && <span>{formatPhoneDisplay(c.phone)}</span>}
                     {c.email && <span className="break-all">{c.email}</span>}
                   </div>
                 )}

@@ -5,12 +5,14 @@
  *  - importEstimatesFromFieldpulse: full walk counts (fetched = items.length,
  *    total = null); deleted-skip classification; created/updated via pre-select;
  *    customer + job resolution; per-record error containment; once-per-run warn.
- *  - mapFpEstimateStatus: status mapping for all known + unknown values.
- *  - Phase 6 additions: line item synthetic option + upsert; status name enrichment
- *    via getEstimate; error containment on enrichment failure.
+ *  - Status: status_id resolved against the company workflows (once per run);
+ *    a workflow outage leaves existing statuses alone. Pure mapping is covered
+ *    in ../estimate-status.test.ts.
+ *  - Phase 6 additions: line item synthetic option + upsert.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { importEstimatesFromFieldpulse, mapFpEstimateStatus } from "./estimates";
+import { importEstimatesFromFieldpulse } from "./estimates";
+import { buildFpEstimateStatusLookup } from "../estimate-status";
 import type { FieldpulseEstimate } from "../types";
 import type { FieldpulseClient } from "../client";
 import type { PhaseResult } from "./run-import";
@@ -129,42 +131,28 @@ function makeCounts(): PhaseResult {
   return { fetched: 0, created: 0, updated: 0, skipped: 0, errors: 0 };
 }
 
+const STATUS_LOOKUP = buildFpEstimateStatusLookup([
+  {
+    id: 344746,
+    statuses: [
+      { id: 1878569, name: "Sent", type: "estimate_sent" },
+      { id: 1878570, name: "Accepted", type: "estimate_accepted" },
+      { id: 2225541, name: "Declined / Expired", type: "estimate_lost" },
+    ],
+  },
+]);
+
 function makeClient(
   items: FieldpulseEstimate[],
   totalCount: number | null = null,
-  getEstimateResult: FieldpulseEstimate | null = null,
 ): FieldpulseClient {
   return {
     listEstimates: vi.fn().mockResolvedValue({ items, totalCount }),
-    getEstimate: vi.fn().mockResolvedValue(getEstimateResult),
+    listEstimateStatuses: vi.fn().mockResolvedValue(STATUS_LOOKUP),
   } as unknown as FieldpulseClient;
 }
 
 const ORG = "org-test-uuid";
-
-// ── mapFpEstimateStatus unit tests ────────────────────────────────────────────
-
-describe("mapFpEstimateStatus", () => {
-  it("maps '1' → 'open'", () => expect(mapFpEstimateStatus("1")).toBe("open"));
-  it("maps 'draft' → 'open'", () => expect(mapFpEstimateStatus("draft")).toBe("open"));
-  it("maps 'open' → 'open'", () => expect(mapFpEstimateStatus("open")).toBe("open"));
-  it("maps '2' → 'sold'", () => expect(mapFpEstimateStatus("2")).toBe("sold"));
-  it("maps 'approved' → 'sold'", () => expect(mapFpEstimateStatus("approved")).toBe("sold"));
-  it("maps 'sold' → 'sold'", () => expect(mapFpEstimateStatus("sold")).toBe("sold"));
-  it("maps 'accepted' → 'sold'", () => expect(mapFpEstimateStatus("accepted")).toBe("sold"));
-  it("maps '3' → 'dismissed'", () => expect(mapFpEstimateStatus("3")).toBe("dismissed"));
-  it("maps 'void' → 'dismissed'", () => expect(mapFpEstimateStatus("void")).toBe("dismissed"));
-  it("maps 'declined' → 'dismissed'", () => expect(mapFpEstimateStatus("declined")).toBe("dismissed"));
-  it("maps 'dismissed' → 'dismissed'", () => expect(mapFpEstimateStatus("dismissed")).toBe("dismissed"));
-  it("maps 'rejected' → 'dismissed'", () => expect(mapFpEstimateStatus("rejected")).toBe("dismissed"));
-  it("maps '4' → 'expired'", () => expect(mapFpEstimateStatus("4")).toBe("expired"));
-  it("maps 'expired' → 'expired'", () => expect(mapFpEstimateStatus("expired")).toBe("expired"));
-  it("maps unknown string → 'open' (safe default)", () => expect(mapFpEstimateStatus("some_weird_status")).toBe("open"));
-  it("maps null → 'open'", () => expect(mapFpEstimateStatus(null)).toBe("open"));
-  it("maps undefined → 'open'", () => expect(mapFpEstimateStatus(undefined)).toBe("open"));
-});
-
-// ── importEstimatesFromFieldpulse tests ───────────────────────────────────────
 
 describe("importEstimatesFromFieldpulse", () => {
   beforeEach(() => {
@@ -354,8 +342,8 @@ describe("importEstimatesFromFieldpulse", () => {
     expect(counts.errors).toBe(0);
   });
 
-  it("logs unknown statuses once at end", async () => {
-    const est = makeEstimate({ id: "70000001", status: "weird_status" });
+  it("logs status ids missing from every workflow once at end", async () => {
+    const est = makeEstimate({ id: "70000001", statusId: "999" });
     const client = makeClient([est]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
@@ -364,8 +352,8 @@ describe("importEstimatesFromFieldpulse", () => {
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ unknownStatuses: { weird_status: 1 } }),
-      expect.stringContaining("unknown FP status codes"),
+      expect.objectContaining({ unknownStatusIds: { "999": 1 } }),
+      expect.stringContaining("not in any FP estimate workflow"),
     );
   });
 
@@ -468,52 +456,117 @@ describe("importEstimatesFromFieldpulse", () => {
     });
   });
 
-  // ── Phase 6: status name enrichment ──────────────────────────────────────
+  // ── Status from the company workflow ─────────────────────────────────────
 
-  it("stores fieldpulseStatusName from getEstimate customStatus", async () => {
-    const est = makeEstimate({ id: "70000001" });
-    const client = makeClient(
-      [est],
-      null,
-      makeEstimate({ id: "70000001", customStatus: "Sent" }),
-    );
+  it("stores the workflow status and its FieldPulse name on insert and re-sync", async () => {
+    const est = makeEstimate({ id: "70000001", statusId: "2225541" });
+    const client = makeClient([est]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
     const { values: valuesMock, onConflictDoUpdate } = wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
-    // fieldpulseStatusName should be "Sent" in the insert values
     const insertedValues = valuesMock.mock.calls[0]?.[0];
-    expect(insertedValues?.fieldpulseStatusName).toBe("Sent");
-    // And in the onConflictDoUpdate set
+    expect(insertedValues?.status).toBe("dismissed");
+    expect(insertedValues?.fieldpulseStatusName).toBe("Declined / Expired");
     const updateSet = onConflictDoUpdate.mock.calls[0]?.[0]?.set;
-    expect(updateSet?.fieldpulseStatusName).toBe("Sent");
+    expect(updateSet?.status).toBe("dismissed");
+    expect(updateSet?.fieldpulseStatusName).toBe("Declined / Expired");
   });
 
-  it("continues with null fieldpulseStatusName when getEstimate throws", async () => {
-    const est = makeEstimate({ id: "70000001" });
-    const client = {
-      listEstimates: vi.fn().mockResolvedValue({ items: [est], totalCount: null }),
-      getEstimate: vi.fn().mockRejectedValue(new Error("Network failure")),
-    } as unknown as FieldpulseClient;
+  it("marks sold only on FieldPulse acceptance evidence", async () => {
+    const sent = makeEstimate({ id: "70000001", statusId: "1878569" });
+    const accepted = makeEstimate({ id: "70000002", statusId: "1878569", acceptedAt: "2026-07-01 10:00:00" });
+    const client = makeClient([sent, accepted]);
     const counts = makeCounts();
     wireSelects([[], [], []]);
     const { values: valuesMock } = wireSimpleInsert();
 
     await importEstimatesFromFieldpulse(ORG, counts, client);
 
-    // Record is still created
+    expect(valuesMock.mock.calls[0]?.[0]?.status).toBe("open");
+    expect(valuesMock.mock.calls[1]?.[0]?.status).toBe("sold");
+  });
+
+  it("leaves existing status and name alone when the workflows can't be read", async () => {
+    const est = makeEstimate({ id: "70000001", statusId: "2225541" });
+    const client = {
+      listEstimates: vi.fn().mockResolvedValue({ items: [est], totalCount: null }),
+      listEstimateStatuses: vi.fn().mockRejectedValue(new Error("Network failure")),
+    } as unknown as FieldpulseClient;
+    const counts = makeCounts();
+    wireSelects([[], [], []]);
+    const { values: valuesMock, onConflictDoUpdate } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
     expect(counts.created).toBe(1);
     expect(counts.errors).toBe(0);
-    // fieldpulseStatusName defaults to null
-    const insertedValues = valuesMock.mock.calls[0]?.[0];
-    expect(insertedValues?.fieldpulseStatusName).toBeNull();
-    // A warn is logged for the enrichment failure
+    // A new row lands open with no name; an existing row keeps what it had.
+    expect(valuesMock.mock.calls[0]?.[0]?.status).toBe("open");
+    expect(valuesMock.mock.calls[0]?.[0]?.fieldpulseStatusName).toBeNull();
+    const updateSet = onConflictDoUpdate.mock.calls[0]?.[0]?.set;
+    expect(updateSet).not.toHaveProperty("status");
+    expect(updateSet).not.toHaveProperty("fieldpulseStatusName");
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ fpEstimateId: "70000001" }),
-      expect.stringContaining("per-id enrichment failed"),
+      expect.objectContaining({ orgId: ORG }),
+      expect.stringContaining("status workflows unavailable"),
     );
+  });
+
+  it("treats an empty workflow list like a failed read: existing rows keep status and name", async () => {
+    const est = makeEstimate({ id: "70000001", statusId: "2225541" });
+    const client = {
+      listEstimates: vi.fn().mockResolvedValue({ items: [est], totalCount: null }),
+      listEstimateStatuses: vi.fn().mockResolvedValue(new Map()),
+    } as unknown as FieldpulseClient;
+    const counts = makeCounts();
+    wireSelects([[], [], []]);
+    const { values: valuesMock, onConflictDoUpdate } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    expect(valuesMock.mock.calls[0]?.[0]?.status).toBe("open");
+    const updateSet = onConflictDoUpdate.mock.calls[0]?.[0]?.set;
+    expect(updateSet).not.toHaveProperty("status");
+    expect(updateSet).not.toHaveProperty("fieldpulseStatusName");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: ORG }),
+      expect.stringContaining("came back empty"),
+    );
+  });
+
+  it("keeps an existing row's status and name when its status id is in no workflow", async () => {
+    const unknown = makeEstimate({ id: "70000001", statusId: "999" });
+    const acceptedUnknown = makeEstimate({ id: "70000002", statusId: "999", acceptedAt: "2026-07-01 10:00:00" });
+    const client = makeClient([unknown, acceptedUnknown]);
+    const counts = makeCounts();
+    wireSelects([[], [], []]);
+    const { onConflictDoUpdate } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    const first = onConflictDoUpdate.mock.calls[0]?.[0]?.set;
+    expect(first).not.toHaveProperty("status");
+    expect(first).not.toHaveProperty("fieldpulseStatusName");
+    const second = onConflictDoUpdate.mock.calls[1]?.[0]?.set;
+    expect(second?.status).toBe("sold");
+    expect(second).not.toHaveProperty("fieldpulseStatusName");
+  });
+
+  it("moves created_at back to FieldPulse's date on re-sync, never forward", async () => {
+    const est = makeEstimate({ id: "70000001", createdAt: "2026-06-01 09:00:00" });
+    const client = makeClient([est]);
+    const counts = makeCounts();
+    wireSelects([[{ fieldpulseEstimateId: "70000001" }], [], []]);
+    const { onConflictDoUpdate } = wireSimpleInsert();
+
+    await importEstimatesFromFieldpulse(ORG, counts, client);
+
+    const updateSet = onConflictDoUpdate.mock.calls[0]?.[0]?.set;
+    expect(updateSet?.createdAt).toBeDefined();
+    expect(updateSet?.createdAt).not.toBeInstanceOf(Date);
   });
 });
 

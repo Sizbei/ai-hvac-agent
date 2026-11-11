@@ -18,6 +18,7 @@ vi.mock('@/lib/admin/invoice-queries', () => ({
   listInvoices: vi.fn().mockResolvedValue({ invoices: [], total: 0, sourceCounts: {} }),
   getInvoiceSummaryStats: vi.fn().mockResolvedValue({}),
   collectedThisMonthCents: vi.fn().mockResolvedValue(0),
+  hasSyncedInvoices: vi.fn().mockResolvedValue(true),
   createInvoiceFromSoldEstimate: vi.fn(),
   INVOICE_SORT_KEYS: new Set<string>(),
 }));
@@ -41,6 +42,7 @@ import {
   collectedThisMonthCents,
   createInvoiceFromSoldEstimate,
   getInvoiceSummaryStats,
+  hasSyncedInvoices,
   listInvoices,
 } from '@/lib/admin/invoice-queries';
 import { logAudit } from '@/lib/admin/audit';
@@ -73,6 +75,16 @@ describe('GET /api/admin/invoices caching', () => {
     expect(listInvoices).toHaveBeenLastCalledWith('org-1', expect.any(Object), viewer);
     expect(getInvoiceSummaryStats).toHaveBeenLastCalledWith('org-1', viewer);
     expect(collectedThisMonthCents).toHaveBeenLastCalledWith('org-1', viewer);
+    expect(hasSyncedInvoices).toHaveBeenLastCalledWith('org-1', viewer);
+  });
+
+  it('reports synced invoices as an org-level fact, whatever the list filters', async () => {
+    getAdminSession.mockResolvedValue({
+      userId: 'u1', organizationId: 'org-1', email: 'a@x.com', name: 'A', role: 'admin',
+    });
+    const res = await GET(new NextRequest('https://app.example.com/api/admin/invoices?source=native&search=zz'));
+    expect((await res.json()).data.hasSyncedInvoices).toBe(true);
+    expect(hasSyncedInvoices).toHaveBeenLastCalledWith('org-1', expect.anything());
   });
 });
 

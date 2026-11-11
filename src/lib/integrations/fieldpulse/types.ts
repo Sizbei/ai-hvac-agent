@@ -33,8 +33,10 @@ export interface FieldpulseCustomer {
   // mapper; retained here so types.ts mirrors the raw API shape.
   readonly leadSource?: string | null;
   // ── Field-parity P1 additions ──
-  // Raw FP account_type string (e.g. "residential", "commercial"). NULL when absent.
+  // Raw FP account_type string (live: "company" | "individual"). NULL when absent.
   readonly accountType?: string | null;
+  // FP created_at ("2026-07-06 16:27:03", bare UTC). NULL when absent.
+  readonly createdAt?: string | null;
   // Whether this customer is tax-exempt per FP. NULL when absent.
   readonly isTaxExempt?: boolean | null;
   // Billing address fields — only when has_different_billing_address is true in FP.
@@ -282,7 +284,11 @@ export interface FieldpulseEstimate {
   readonly id: string;
   readonly customerId?: string | null;
   readonly jobId?: string | null;
-  readonly status?: string | null; // FP status string — mapped best-effort
+  readonly status?: string | null; // FP `status` — always 1 on estimates; not the stage, never mapped
+  /** FP status_id: the estimate's status in the company's workflow (see estimate-status.ts). */
+  readonly statusId?: string | null;
+  /** FP estimate_accept_at: when the customer accepted. NULL when never accepted. */
+  readonly acceptedAt?: string | null;
   readonly subtotalCents?: number | null;
   readonly taxCents?: number | null;
   readonly totalCents?: number | null;

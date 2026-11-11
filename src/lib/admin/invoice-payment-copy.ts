@@ -97,6 +97,30 @@ export function paymentMethodSummary(method: string, checkNumber: string | null)
   return checkNumber ? `${label} · #${checkNumber}` : label;
 }
 
+/** The method chip: a FieldPulse mirror says where it was taken, not "Other". */
+export function paymentChipLabel(p: { method: string; checkNumber: string | null; provider: string }): string {
+  return p.provider === "fieldpulse" ? "In FieldPulse" : paymentMethodSummary(p.method, p.checkNumber);
+}
+
+/**
+ * When a payment was taken. A FieldPulse mirror carries a date only (pinned to
+ * noon UTC), so it shows the day with no made-up time; ours show the moment in
+ * the business time zone, whoever is looking.
+ */
+export function paymentWhenLabel(createdAt: Date, provider: string, timeZone: string): string {
+  if (provider === "fieldpulse") {
+    return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(createdAt);
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(createdAt);
+}
+
 /** Extra success copy after a refund; manual money goes back by hand. */
 export function refundSuccessCopy(provider: string): string | null {
   return provider === "manual"

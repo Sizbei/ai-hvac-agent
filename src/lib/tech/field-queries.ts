@@ -22,6 +22,12 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import {
+  customerAddressFallbackSql,
+  customerNameFallbackSql,
+  customerPhoneFallbackSql,
+} from "@/lib/tech/customer-fallback-sql";
+import { displayCustomerName } from "@/lib/admin/customer-name-display";
+import {
   findAllAssignments,
   findReadableJob,
   hasOtherOpenRows,
@@ -127,8 +133,11 @@ export async function getTechJobSummary(
       arrivalWindowStart: serviceRequests.arrivalWindowStart,
       arrivalWindowEnd: serviceRequests.arrivalWindowEnd,
       customerNameEncrypted: serviceRequests.customerNameEncrypted,
+      customerNameFromCustomer: customerNameFallbackSql(),
       customerPhoneEncrypted: serviceRequests.customerPhoneEncrypted,
+      customerPhoneFromCustomer: customerPhoneFallbackSql(),
       addressEncrypted: serviceRequests.addressEncrypted,
+      addressFromCustomer: customerAddressFallbackSql(),
       accessNotes: serviceRequests.accessNotes,
       fieldpulseJobId: serviceRequests.fieldpulseJobId,
       hcpJobId: serviceRequests.hcpJobId,
@@ -186,9 +195,12 @@ export async function getTechJobSummary(
     scheduledDate: row.scheduledDate?.toISOString() ?? null,
     arrivalWindowStart: row.arrivalWindowStart?.toISOString() ?? null,
     arrivalWindowEnd: row.arrivalWindowEnd?.toISOString() ?? null,
-    customerName: safeDecrypt(row.customerNameEncrypted),
-    customerPhone: safeDecrypt(row.customerPhoneEncrypted),
-    address: safeDecrypt(row.addressEncrypted),
+    // Imported jobs: the name, phone and address live on the customer row.
+    customerName: displayCustomerName(
+      safeDecrypt(row.customerNameEncrypted) ?? safeDecrypt(row.customerNameFromCustomer),
+    ),
+    customerPhone: safeDecrypt(row.customerPhoneEncrypted) ?? safeDecrypt(row.customerPhoneFromCustomer),
+    address: safeDecrypt(row.addressEncrypted) ?? safeDecrypt(row.addressFromCustomer),
     accessNotes: row.accessNotes,
     assignment,
     activeVisitId,

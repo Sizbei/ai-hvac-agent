@@ -9,12 +9,13 @@
  * `details` column only ever holds field NAMES / ids (never decrypted PII), so
  * it is safe to return verbatim.
  */
-import { and, eq, gte, sql, count, desc, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, sql, count, desc, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { auditLog, users } from "@/lib/db/schema";
+import { auditLog, jobTypes, serviceRequests, tagTypes, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import type { AuditLogEntry, AuditLogFilters, AuditLogPage } from "./audit-types";
-import { VISIBLE_ONLY, visibleRowsSql } from "./visibility";
+import { auditDetailIds } from "./audit-format";
+import { SHOW_ALL, VISIBLE_ONLY, visibleRows, visibleRowsSql, type Visibility } from "./visibility";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 50;
@@ -97,6 +98,12 @@ export async function getAuditLog(
       .orderBy(sql`${auditLog.action} ASC`),
   ]);
 
+  const refs = await resolveAuditRefs(
+    organizationId,
+    rows.flatMap((r) => auditDetailIds(r.details)),
+    filters.visibleOnly ? VISIBLE_ONLY : SHOW_ALL,
+  );
+
   const entries: readonly AuditLogEntry[] = rows.map((r) => ({
     id: r.id,
     action: r.action,
@@ -105,6 +112,7 @@ export async function getAuditLog(
     actorName: r.actorName,
     sessionId: r.sessionId,
     details: r.details,
+    refs: pickRefs(refs, auditDetailIds(r.details)),
     ipAddress: r.ipAddress,
     createdAt: r.createdAt.toISOString(),
   }));
@@ -114,4 +122,61 @@ export async function getAuditLog(
     total: countResult[0]?.value ?? 0,
     actions: actionRows.map((a) => a.action),
   };
+}
+
+function pickRefs(
+  all: ReadonlyMap<string, string>,
+  ids: readonly string[],
+): Readonly<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const id of ids) {
+    const label = all.get(id);
+    if (label) out[id] = label;
+  }
+  return out;
+}
+
+/**
+ * Display labels for the ids in a page of audit details, so the viewer never
+ * shows a raw id: staff names, request numbers, tag and job type names. All
+ * org-scoped; customer ids are not resolved (their names are PII). Ids that
+ * resolve to nothing (a deleted or hidden row) are simply left out by the formatter.
+ */
+async function resolveAuditRefs(
+  organizationId: string,
+  rawIds: readonly string[],
+  vis: Visibility,
+): Promise<ReadonlyMap<string, string>> {
+  const ids = [...new Set(rawIds)];
+  const labels = new Map<string, string>();
+  if (ids.length === 0) return labels;
+  const [staff, requests, tags, kinds] = await Promise.all([
+    db
+      .select({ id: users.id, label: users.name })
+      .from(users)
+      .where(withTenant(users, organizationId, inArray(users.id, ids))),
+    db
+      .select({ id: serviceRequests.id, label: serviceRequests.referenceNumber })
+      .from(serviceRequests)
+      .where(
+        withTenant(
+          serviceRequests,
+          organizationId,
+          inArray(serviceRequests.id, ids),
+          visibleRows(serviceRequests, vis),
+        ),
+      ),
+    db
+      .select({ id: tagTypes.id, label: tagTypes.name })
+      .from(tagTypes)
+      .where(withTenant(tagTypes, organizationId, inArray(tagTypes.id, ids))),
+    db
+      .select({ id: jobTypes.id, label: jobTypes.name })
+      .from(jobTypes)
+      .where(withTenant(jobTypes, organizationId, inArray(jobTypes.id, ids))),
+  ]);
+  for (const row of [...staff, ...requests, ...tags, ...kinds]) {
+    if (row.label) labels.set(row.id.toLowerCase(), row.label);
+  }
+  return labels;
 }

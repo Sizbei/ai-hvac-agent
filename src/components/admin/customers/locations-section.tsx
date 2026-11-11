@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TagChipPicker } from '@/components/admin/tag-chip-picker';
 import type { CustomerLocation } from '@/lib/admin/location-queries';
+import { formatAddressDisplay } from '@/lib/admin/contact-format';
 
 interface LocationsSectionProps {
   readonly customerId: string;
@@ -91,7 +92,7 @@ export function LocationsSection({ customerId }: LocationsSectionProps) {
             <li key={loc.id} className="flex items-center gap-3 px-4 py-2.5">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="truncate text-sm text-foreground">
-                  {loc.address ?? 'Address unavailable'}
+                  {formatAddressDisplay(loc.address) ?? 'Address unavailable'}
                 </span>
                 {loc.label && <span className="text-xs text-muted-foreground">{loc.label}</span>}
                 {loc.isPrimary && <ContextBadge variant="info" label="Primary" />}

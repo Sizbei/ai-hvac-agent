@@ -21,8 +21,6 @@ const GUIDE: AdminGuidePayload = {
   readOnly: false,
   payLinks: false,
   hasFieldPulse: false,
-  historyHidden: false,
-  historyContact: "your account administrator",
 };
 const STARTED: AdminGuidePayload = { ...GUIDE, tourStartedAt: "2026-11-10T12:00:00.000Z", lastLesson: "customers" };
 const COMPLETED: AdminGuidePayload = { ...STARTED, tourCompletedAt: "2026-11-10T13:00:00.000Z" };

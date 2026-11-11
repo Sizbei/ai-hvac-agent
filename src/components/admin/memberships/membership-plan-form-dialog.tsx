@@ -160,7 +160,7 @@ export function MembershipPlanFormDialog({
               id="plan-name"
               value={form.name}
               onChange={(e) => updateField('name', e.target.value)}
-              placeholder="e.g. Comfort Club"
+              placeholder="e.g. Ice machine maintenance"
               required
             />
           </div>
@@ -171,7 +171,7 @@ export function MembershipPlanFormDialog({
               id="plan-description"
               value={form.description}
               onChange={(e) => updateField('description', e.target.value)}
-              placeholder="Optional (e.g. 2 tune-ups/year + 15% off repairs)"
+              placeholder="Optional (e.g. quarterly cleaning and inspection)"
             />
           </div>
 

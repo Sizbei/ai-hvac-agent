@@ -14,6 +14,7 @@ import { SectionCard } from '@/components/admin/ui/section-card';
 import { SetupFinished } from '@/components/admin/setup/setup-finished';
 import { QuickTourSection } from '@/components/admin/setup/quick-tour-section';
 import { SetupHero } from '@/components/admin/setup/setup-hero';
+import { TutorialVideo } from '@/components/admin/setup/tutorial-video';
 import { SetupPhaseCard, StepList } from '@/components/admin/setup/setup-phase-card';
 import { useQuickTour } from '@/hooks/use-quick-tour';
 import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
@@ -271,6 +272,7 @@ export function SetupPageClient() {
     <PageShell narrow>
       <SetupHeader data={data} invite={showTourInvite(tour.mount, tour.progress)} />
       {tourAbove && tourSection}
+      <TutorialVideo />
       {primary}
       {!tourAbove && tourSection}
       {data && <SetupContent data={data} flipped={flipped} heroId={hero?.step?.id} />}

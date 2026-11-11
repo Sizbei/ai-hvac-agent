@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import type { SearchResult } from '@/lib/admin/search-queries';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { navGroupsFor, type SetupPlacement } from '@/components/admin/nav-items';
+import { usePlatformUi } from '@/components/admin/platform-ui-context';
 import { filterCommands, type CommandItem } from '@/lib/admin/nav-search';
 
 const TYPE_LABELS: Record<SearchResult['type'], string> = {
@@ -68,12 +69,13 @@ interface GlobalSearchProps {
 
 export function GlobalSearch({ placement, mapEnabled }: GlobalSearchProps) {
   /** Every admin destination, flattened — the ⌘K search matches these as "Pages". */
+  const platformUi = usePlatformUi();
   const navCommands: CommandItem[] = useMemo(
     () =>
-      navGroupsFor(placement, { map: mapEnabled }).flatMap((g) =>
+      navGroupsFor(placement, { map: mapEnabled, platformUi }).flatMap((g) =>
         g.items.map((it) => ({ label: it.label, href: it.href, group: g.heading })),
       ),
-    [placement, mapEnabled],
+    [placement, mapEnabled, platformUi],
   );
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');

@@ -32,7 +32,7 @@
  *    later provides a phone) creates a separate row that the dedupe can't see.
  *    Mitigation = later reconciliation pass (name+address match → suggest merge).
  */
-import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { customers } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
@@ -53,6 +53,8 @@ import type { FieldpulseClient } from "../client";
 import type { FieldpulseCustomer } from "../types";
 import type { PhaseResult } from "./run-import";
 import { buildFpSpillover } from "./spillover";
+import { keepEarliest } from "./keep-earliest";
+import { parseFpDate } from "../fp-dates";
 import {
   assertLegacyContactUniquesDropped,
   importSplitFpCustomer,
@@ -71,6 +73,8 @@ export interface MappedFpCustomer {
   readonly customerType: "residential" | "commercial" | null;
   readonly isTaxExempt: boolean | null;
   readonly billingAddress: string | null;
+  /** FP's own created_at; NULL when FP sent none. */
+  readonly createdAt: Date | null;
 }
 
 /**
@@ -143,27 +147,34 @@ export function mapFpCustomer(fp: FieldpulseCustomer): MapResult {
       customerType,
       isTaxExempt,
       billingAddress,
+      createdAt: parseFpDate(fp.createdAt),
     },
   };
 }
 
 /**
  * Map FP `account_type` string to the native customerTypeEnum.
- * "residential" / "commercial" map directly.
- * Anything else (including null/unknown) returns null → importer keeps the
- * existing default ("residential") without overwriting it.
- *
- * Decision: no separate `account_type` column added. The sanitized fixture
- * does not expose `account_type` and the live census is unverified; if future
- * FP data carries non-enum values, this returns null (safe default) and the
- * raw value is captured in spillover via the CUSTOMERS_ALLOWLIST.
+ * Live FieldPulse sends "company" or "individual" (2026-11-11 census: 2,099
+ * company, 533 individual, 24 absent); "commercial"/"residential" are accepted
+ * too. Anything else (including null/unknown) returns null → importer keeps
+ * the existing value without overwriting it.
  */
 export function mapAccountType(raw: string | null): "residential" | "commercial" | null {
   if (!raw) return null;
   const s = raw.toLowerCase().trim();
-  if (s === "residential") return "residential";
-  if (s === "commercial") return "commercial";
+  if (s === "residential" || s === "individual") return "residential";
+  if (s === "commercial" || s === "company") return "commercial";
   return null; // unknown value — keep default
+}
+
+/** Insert values: FieldPulse's own created date when it sent one. */
+export function fpCreatedAtValues(customer: MappedFpCustomer): { createdAt?: Date } {
+  return customer.createdAt ? { createdAt: customer.createdAt } : {};
+}
+
+/** Update set: move created_at back to FieldPulse's date, never forward. */
+export function fpCreatedAtSet(customer: MappedFpCustomer): { createdAt?: SQL } {
+  return customer.createdAt ? { createdAt: keepEarliest(customers.createdAt, customer.createdAt) } : {};
 }
 
 function composeBillingAddress(fp: FieldpulseCustomer): string | null {
@@ -350,6 +361,8 @@ export async function importOneFpCustomer(
           isTaxExempt: customer.isTaxExempt ?? null,
           billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
           fieldpulseData: fpSpillover,
+          ...(customer.customerType ? { customerType: customer.customerType } : {}),
+          ...fpCreatedAtValues(customer),
           archivedAt: new Date(),
         })
         .onConflictDoNothing({
@@ -392,6 +405,7 @@ export async function importOneFpCustomer(
           billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
           fieldpulseData: fpSpillover,
           ...(customer.customerType ? { customerType: customer.customerType } : {}),
+          ...fpCreatedAtSet(customer),
           updatedAt: new Date(),
         })
         .where(
@@ -456,6 +470,7 @@ export async function importOneFpCustomer(
         billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
         fieldpulseData: fpSpillover,
         ...(customer.customerType ? { customerType: customer.customerType } : {}),
+        ...fpCreatedAtValues(customer),
       })
       .onConflictDoNothing({
         target: [customers.organizationId, customers.fieldpulseCustomerId],
@@ -789,6 +804,7 @@ export async function updateCustomerFields(
       billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
       fieldpulseData: fpSpillover,
       ...(customer.customerType ? { customerType: customer.customerType } : {}),
+      ...fpCreatedAtSet(customer),
       updatedAt: new Date(),
     })
     .where(

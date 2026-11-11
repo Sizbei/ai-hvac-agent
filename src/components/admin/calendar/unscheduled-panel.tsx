@@ -7,7 +7,7 @@ import { UrgencyBadge } from '@/components/admin/urgency-badge';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
-import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel, issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface UnscheduledPanelProps {
   /** Jobs not yet placed: no technician and/or no arrival window. */
@@ -72,7 +72,7 @@ export function UnscheduledPanel({ jobs, isLoading, onSelect }: UnscheduledPanel
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-[13px] font-medium">
-                    {job.customerName ?? 'Unknown'}
+                    {customerNameLabel(job.customerName)}
                   </span>
                   {job.isAfterHours && (
                     <span
@@ -87,10 +87,10 @@ export function UnscheduledPanel({ jobs, isLoading, onSelect }: UnscheduledPanel
                   {issueTypeLabel(job.issueType)} ·{' '}
                   <span className="font-mono">{job.referenceNumber}</span>
                 </div>
-                <div className="mt-1 flex items-center gap-1.5">
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   <UrgencyBadge urgency={job.urgency} />
                   <StatusBadge status={job.status} />
-                  <span className="ml-auto text-[10px] font-medium text-warning-strong">
+                  <span className="ml-auto whitespace-nowrap text-[10px] font-medium text-warning-strong">
                     {reason(job)}
                   </span>
                 </div>

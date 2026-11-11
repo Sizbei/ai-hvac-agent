@@ -1,11 +1,14 @@
-import { Wind, Clock, ShieldCheck, Wrench } from 'lucide-react';
+import { Clock, ShieldCheck, Wrench } from 'lucide-react';
 import { EnvBadge } from '@/components/admin/env-badge';
+
+/** The Spears mark (public/brand), the same asset the admin shell shows. */
+const LOGO_SRC = '/brand/spears-logo.png';
 
 /** Trust markers on the brand rail. Sentence case on purpose — capitals are
  * reserved for the wordmark. */
 const MARKERS = [
   { icon: Clock, label: '24/7 answering' },
-  { icon: Wrench, label: 'Most jobs, one trip' },
+  { icon: Wrench, label: 'Most repairs, one trip' },
   { icon: ShieldCheck, label: 'Licensed engineer on staff' },
 ] as const;
 
@@ -47,9 +50,8 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
 
         {/* wordmark */}
         <div className="relative flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-[oklch(0.75_0.13_220)] to-[oklch(0.6_0.13_222)] shadow-lg">
-            <Wind className="size-5" strokeWidth={2.25} />
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a 40px static mark gains nothing from next/image */}
+          <img src={LOGO_SRC} alt="" width={40} height={40} className="size-10 rounded-xl shadow-lg" />
           <span className="flex flex-col leading-tight">
             <span className="font-heading text-lg font-bold tracking-tight">
               Spears Services
@@ -63,7 +65,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
           <h2 className="font-heading text-4xl font-extrabold leading-[1.05] tracking-tight text-balance xl:text-5xl">
             Where every service call becomes a{' '}
             <span className="bg-gradient-to-r from-[oklch(0.82_0.12_215)] to-[oklch(0.72_0.13_222)] bg-clip-text text-transparent">
-              dispatched job
+              scheduled visit
             </span>
             .
           </h2>
@@ -89,9 +91,8 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
         <div className="lp-rise w-full max-w-sm">
           {/* compact brand — mobile only */}
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand-cyan to-brand-navy text-primary-foreground">
-              <Wind className="size-4.5" strokeWidth={2.25} />
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element -- a 36px static mark gains nothing from next/image */}
+            <img src={LOGO_SRC} alt="" width={36} height={36} className="size-9 rounded-lg" />
             <span className="font-heading text-base font-bold tracking-tight">
               Spears Services
             </span>

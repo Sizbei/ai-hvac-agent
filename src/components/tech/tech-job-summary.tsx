@@ -8,6 +8,8 @@ import { READ_ONLY_PREVIEW } from '@/lib/admin/preview-view';
 import { useTechReadOnly } from '@/components/tech/tech-read-only-context';
 import { Skeleton } from '@/components/ui/skeleton';
 import { issueLabel, visitWindow } from '@/lib/tech/job-display';
+import { customerNameLabel } from '@/lib/admin/request-labels';
+import { readableDescription } from '@/lib/admin/long-text';
 import { CloseOutSheet, type SheetConfirmOptions } from '@/components/tech/close-out-sheet';
 import {
   actionButtonVariant,
@@ -232,7 +234,7 @@ export function TechJobSummary({
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-[17px]">
-            {job.customerName ?? 'Customer'}
+            {customerNameLabel(job.customerName)}
           </CardTitle>
           <span className="shrink-0 rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[13px] font-medium text-muted-foreground">
             {humanize(job.status)}
@@ -295,7 +297,7 @@ export function TechJobSummary({
         )}
 
         {job.description && (
-          <p className="whitespace-pre-wrap text-[15px]">{job.description}</p>
+          <p className="whitespace-pre-wrap break-words text-[15px]">{readableDescription(job.description)}</p>
         )}
 
         {job.accessNotes && (

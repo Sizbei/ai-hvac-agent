@@ -6,6 +6,9 @@
  * Apple MapKit map import from this module so the visual output stays in sync.
  */
 
+import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
+
 // ---------------------------------------------------------------------------
 // Shared data types used by the builders
 // ---------------------------------------------------------------------------
@@ -205,7 +208,7 @@ export function jobPopupHTML(job: Job): string {
   return `<div style="font:13px/1.45 system-ui,-apple-system;min-width:180px;max-width:240px">
   <div style="font-weight:700;font-size:14px;color:#0f172a">${esc(job.customerName ?? job.referenceNumber)}</div>
   <div style="font-family:ui-monospace,monospace;font-size:11px;color:#64748b;margin-top:1px">${esc(job.referenceNumber)}</div>
-  <div style="margin-top:6px;color:#334155">${esc(humanize(job.issueType))}</div>
+  <div style="margin-top:6px;color:#334155">${esc(issueTypeLabel(job.issueType))}</div>
   <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
     <span style="background:${jobColor(job.urgency)}1a;color:${jobColor(job.urgency)};border:1px solid ${jobColor(job.urgency)}40;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600">${esc(humanize(job.urgency))}</span>
     <span style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:4px;padding:1px 6px;font-size:11px">${esc(humanize(job.status))}</span>
@@ -220,7 +223,7 @@ export function arPopupHTML(ar: ArCustomer): string {
   const { ring } = arColor(ar.oldestDays);
   const ageLabel = ar.oldestDays < 30 ? `${ar.oldestDays}d` : ar.oldestDays < 90 ? `${ar.oldestDays}d` : `${ar.oldestDays}d — overdue`;
   return `<div style="font:13px/1.45 system-ui,-apple-system;min-width:160px;max-width:220px">
-  <div style="font-weight:700;font-size:14px;color:#0f172a">${esc(ar.name ?? 'Unknown customer')}</div>
+  <div style="font-weight:700;font-size:14px;color:#0f172a">${esc(customerNameLabel(ar.name))}</div>
   <div style="margin-top:6px;font-size:20px;font-weight:700;color:${ring}">${formatCents(ar.owingCents)}</div>
   <div style="color:#64748b;font-size:12px;margin-top:2px">${ar.invoiceCount} invoice${ar.invoiceCount !== 1 ? 's' : ''} · oldest ${ageLabel}</div>
 </div>`;

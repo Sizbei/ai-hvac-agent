@@ -8,6 +8,7 @@
  */
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
+import { displayCustomerName } from "@/lib/admin/customer-name-display";
 import { and, asc, count, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { OFFICE_SIGNATURE } from "@/lib/tech/estimate-input";
@@ -25,6 +26,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { SHOW_ALL, visibleRows, visibleRowsSql, type Visibility } from "./visibility";
 import { computeOptionTotals, lineTotalCents } from "./money";
 import { billingInvoiceIdSql, jobBilledSql } from "./estimate-billing-sql";
+import { EFFECTIVE_CREATED_AT_SQL } from "./estimate-effective-date";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -373,19 +375,6 @@ const BUCKET_CASE_SQL = sql`
   END
 `;
 
-// Effective created-at: prefer the FieldPulse created_at (stored in jsonb) over native.
-// NOTE: in practice the jsonb arm is inert — the FP import promotes created_at into the
-// native createdAt column and the spillover denylist keeps it out of fieldpulse_data,
-// so coalesce always falls through to createdAt (which holds FP's real creation time
-// for synced rows). The jsonb arm stays as spec-mandated defense should either of
-// those pipelines change.
-const EFFECTIVE_CREATED_AT_SQL = sql`
-  coalesce(
-    (${estimates.fieldpulseData}->>'created_at')::timestamp AT TIME ZONE 'UTC',
-    ${estimates.createdAt}
-  )
-`;
-
 // What an estimate is worth: the SOLD option's total once one is chosen
 // (customer e-sign or office Mark sold), else the headline total (the largest
 // option — the most an open estimate could become). Without this a sold
@@ -514,10 +503,10 @@ export async function listEstimates(
 
   const whereClause = withTenant(estimates, organizationId, ...extraConditions);
 
-  // Open bucket: show oldest first (pipeline triage order); all others newest first.
-  const orderByClause = opts.bucket === 'open'
-    ? asc(EFFECTIVE_CREATED_AT_SQL)
-    : desc(EFFECTIVE_CREATED_AT_SQL);
+  // Newest first in every bucket. Open used to lead with the oldest, which on
+  // years of imported FieldPulse history opened on proposals months dead; the
+  // Waiting column and the Needs follow-up tile still surface stale ones.
+  const orderByClause = desc(EFFECTIVE_CREATED_AT_SQL);
 
   const rowCols = {
     id: estimates.id,
@@ -574,7 +563,7 @@ export async function listEstimates(
       ...r,
       syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
       fieldpulseStatusName: fieldpulseStatusName ?? null,
-      customerName: safeDecryptName(nameEncrypted ?? null),
+      customerName: displayCustomerName(safeDecryptName(nameEncrypted ?? null)),
       effectiveCreatedAt: effectiveCreatedAt instanceof Date
         ? effectiveCreatedAt.toISOString()
         : String(effectiveCreatedAt ?? new Date(r.createdAt).toISOString()),
@@ -608,7 +597,7 @@ export async function listEstimates(
     ...r,
     syncedSource: fieldpulseEstimateId != null ? ("fieldpulse" as const) : null,
     fieldpulseStatusName: fieldpulseStatusName ?? null,
-    customerName: safeDecryptName(nameEncrypted ?? null),
+    customerName: displayCustomerName(safeDecryptName(nameEncrypted ?? null)),
     effectiveCreatedAt: effectiveCreatedAt instanceof Date
       ? effectiveCreatedAt.toISOString()
       : String(effectiveCreatedAt ?? new Date(r.createdAt).toISOString()),
@@ -824,7 +813,7 @@ export async function getEstimateDetailById(
   const options = await loadOptionsWithLineItems(organizationId, est.id, true);
   return {
     ...header,
-    customerName: safeDecryptName(nameEncrypted ?? null),
+    customerName: displayCustomerName(safeDecryptName(nameEncrypted ?? null)),
     markedSoldBy,
     soldVia: soldVia ?? null,
     soldByName: soldByName ?? null,

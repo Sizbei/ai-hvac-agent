@@ -12,6 +12,7 @@
  * review link is offered to EVERYONE on response, regardless of rating — see the
  * public page/handler. `feedback` is PRIVATE free text and is NEVER logged.
  */
+import { displayCustomerName } from "@/lib/admin/customer-name-display";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -333,7 +334,7 @@ export async function listReviews(
     serviceRequestId: r.serviceRequestId,
     referenceNumber: r.referenceNumber ?? null,
     customerId: r.customerId ?? null,
-    customerName: safeName(r.customerNameEncrypted),
+    customerName: displayCustomerName(safeName(r.customerNameEncrypted)),
     status: r.status,
     rating: r.rating,
     publicClicked: r.publicClicked,

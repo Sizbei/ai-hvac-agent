@@ -239,7 +239,8 @@ Example: `vercel rollback ai-hvac-agent-70g3fhs7e` (use the full URL from
 - Full: un-hide every row.
 
   ```bash
-  DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --unhide --prod
+  DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --unhide --prod          # dry run
+  DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --unhide --apply --prod
   ```
 
   After D4, `--unhide` also clears `historyCutoff`, so the full audit log comes
@@ -247,6 +248,104 @@ Example: `vercel rollback ai-hvac-agent-70g3fhs7e` (use the full URL from
 
 To switch modes (`history` ↔ `empty`): run `--unhide` first, then `--apply`
 with the new mode.
+
+**Show Chick his FieldPulse history (and nothing else).** Don't use `--unhide`
+or Show history for this: both also bring back the pre-go-live demo chats, the
+demo-era requests and customers, and the seeded rows. Follow the production
+run order below.
+
+### Production run order
+
+Five scripts, in this order. Run each one as a dry run first (no `--apply`),
+read the output, then run it again with `--apply`. Only the user passes
+`--prod`.
+
+Environment: with `--prod` the scripts never read `.env.local` (that is the
+DEV branch), so export every value they use. The two `.mts` scripts also need
+`ENCRYPTION_KEY` (to read the FieldPulse key stored on the prod connection
+row) and `NODE_OPTIONS=--conditions=react-server`.
+
+```bash
+export DATABASE_URL=<prod url> ENCRYPTION_KEY=<prod key>
+export NODE_OPTIONS=--conditions=react-server
+ORG=00000000-0000-0000-0000-000000000001
+```
+
+Undo records go to `~/.hvac-golive/` on the machine that runs the script
+(outside the repo, never in the OS temp dir). Keep that folder until the run
+is signed off. An undo record that has been used is renamed
+`*.undone-<time>.json`.
+
+| # | Script | What it changes | Undo record |
+|---|---|---|---|
+| 1 | `golive-hide-history.mjs --unhide-fieldpulse` | Shows imported FieldPulse history | None. Reverse with `--mode history --apply --reapply --hide-fieldpulse` |
+| 2 | `golive-hide-junk.mjs` | Hides test, demo and placeholder rows again | `~/.hvac-golive/golive-junk-<host>-<org>-<time>.json` |
+| 3 | `fp-truth-backfill.mts` | Estimate status, customer type, created dates, after-hours | None. It only moves dates earlier and is idempotent. Back up first if you want a way back. |
+| 4 | `fp-hide-deleted-jobs.mts` | Hides imported requests whose FieldPulse job was deleted | `~/.hvac-golive/fp-deleted-jobs-hidden-<org8>-<time>.json` |
+| 5 | `golive-polish-defaults.mjs` | Demo pricebook and plan off, template names, brand color | `~/.hvac-golive/golive-polish-defaults-<host>-<org>.json` |
+
+```bash
+# 1. Show imported FieldPulse history. Restores only rows the importer created
+#    (requests with the synthetic fp-import- session), FieldPulse invoices and
+#    estimates, and customers with imported work or with a FieldPulse id and no
+#    native request. Native requests pushed to FieldPulse, and customers whose
+#    only work is native, are listed and left hidden. Rows in a
+#    fp-hide-deleted-jobs undo file in ~/.hvac-golive/ stay hidden.
+npx tsx scripts/agent/golive-hide-history.mjs --org $ORG --unhide-fieldpulse --prod
+npx tsx scripts/agent/golive-hide-history.mjs --org $ORG --unhide-fieldpulse --apply --prod
+
+# 2. Re-hide the FieldPulse test rows that step 1 brings back.
+npx tsx scripts/agent/golive-hide-junk.mjs --org $ORG --prod
+npx tsx scripts/agent/golive-hide-junk.mjs --org $ORG --apply --prod
+#    Undo (exactly the rows that --apply changed):
+npx tsx scripts/agent/golive-hide-junk.mjs --org $ORG --undo ~/.hvac-golive/golive-junk-<...>.json --prod
+npx tsx scripts/agent/golive-hide-junk.mjs --org $ORG --undo ~/.hvac-golive/golive-junk-<...>.json --apply --prod
+
+# 3. Correct imported data from FieldPulse (GET only). Parts: estimates,
+#    customers, dates, after-hours (all four by default; --part to pick).
+npx tsx scripts/agent/fp-truth-backfill.mts --org $ORG --prod
+npx tsx scripts/agent/fp-truth-backfill.mts --org $ORG --apply --prod
+
+# 4. Hide imported requests whose FieldPulse job was deleted (GET /jobs/{id} = 404).
+#    Native requests whose FieldPulse copy was deleted are listed, never hidden.
+npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org $ORG --prod
+npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org $ORG --apply --prod
+#    Undo:
+npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org $ORG --undo ~/.hvac-golive/fp-deleted-jobs-hidden-<...>.json --prod
+npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org $ORG --undo ~/.hvac-golive/fp-deleted-jobs-hidden-<...>.json --apply --prod
+
+# 5. Polish the shipped defaults.
+npx tsx scripts/agent/golive-polish-defaults.mjs --org $ORG --prod
+npx tsx scripts/agent/golive-polish-defaults.mjs --org $ORG --apply --prod
+#    Undo (fields edited since --apply are skipped):
+npx tsx scripts/agent/golive-polish-defaults.mjs --org $ORG --undo --prod
+npx tsx scripts/agent/golive-polish-defaults.mjs --org $ORG --undo --apply --prod
+
+# Then: onboarding reset (section 3) and smoke.
+```
+
+Things to know:
+
+- **Every reversal is a dry run without `--apply`**: history `--unhide`, junk
+  `--undo`, polish `--undo` and deleted-jobs `--undo`.
+- **Marking now protects FieldPulse history.** Any marking `--apply` (with or
+  without `--reapply`) refuses if it would hide visible imported FieldPulse
+  rows. This includes rows the sync or step 3 moved to before the cutoff. Pass
+  `--hide-fieldpulse` only when that is what you want.
+- **A later `--unhide-fieldpulse` keeps step 4's rows hidden** if their undo
+  file is still in `~/.hvac-golive/` on the machine that runs it. It does
+  bring back the step 2 rows, so re-run step 2 after it.
+- **A later `--unhide` brings back everything**, steps 2 and 4 included. Re-run
+  steps 1 to 5 after it (step 1 first re-marks with
+  `--mode history --apply --reapply --hide-fieldpulse` if needed).
+- **Customer type:** step 3 maps FieldPulse `account_type` "company" to
+  commercial and "individual" to residential. "company" is not a FieldPulse
+  default: it is set exactly when the customer has a company name (checked on
+  all 2,709 live FieldPulse customers, 2026-11-11). In a random 100 "company"
+  accounts, 12 looked like homeowners whose own name was typed into the
+  company name field. No field tells those apart, so they stay commercial.
+
+---
 
 ---
 
@@ -605,13 +704,27 @@ DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 0000
 # Apply (refused if rows are already hidden).
 DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --mode history --apply --prod
 # Re-apply on top. It only hides more, and never touches rows created after the cutoff (D4).
+# Refused if it would hide visible imported FieldPulse rows, unless --hide-fieldpulse.
 DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --mode history --apply --reapply --prod
-# Un-hide everything. After D4 it also clears historyCutoff.
-DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --unhide --prod
+# Un-hide everything. After D4 it also clears historyCutoff. Dry run without --apply.
+DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --unhide --apply --prod
 # Optional on a dry run or a history --apply: --stale-days <n> (default 60).
+# Seeded mode: hide ONLY the fictional HVAC-DEMO / HVAC-CAP / demo-seed- / demo-cap- rows
+# (plus customers whose only links are those rows); all imported history stays visible.
+# Works straight after --unhide, no --reapply needed.
+DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-history.mjs --org 00000000-0000-0000-0000-000000000001 --mode seeded --apply --prod
 ```
 
 After any marking run, do the onboarding reset (section 3) before anyone opens the admin.
+
+```bash
+# Hide test, demo and placeholder rows (scripts/agent/golive-junk-list.json) from the org.
+# Run AFTER any golive-hide-history.mjs run: its --unhide brings these back too.
+# The dry run doubles as a drift check: a non-zero "visible" column means rows came back.
+DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-junk.mjs --org 00000000-0000-0000-0000-000000000001 --prod           # dry run
+DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-junk.mjs --org 00000000-0000-0000-0000-000000000001 --apply --prod
+DATABASE_URL=<prod url> npx tsx scripts/agent/golive-hide-junk.mjs --org 00000000-0000-0000-0000-000000000001 --undo <record> --apply --prod    # show them again (record path printed by --apply)
+```
 
 ```bash
 # Audit-log cutoff. Org viewers see audit entries from this moment on.

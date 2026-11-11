@@ -103,6 +103,7 @@ const WHOLE_FILE_READERS: Readonly<Record<string, readonly string[]>> = {
     "keptInvoiceIdsSql",
     "keptRequestIdsSql",
     "keptSessionIdsSql",
+    "unhideFieldpulseDryRunSql",
     "visitFromTodaySql",
   ],
   "src/lib/admin/invoice-field-writes.ts": [

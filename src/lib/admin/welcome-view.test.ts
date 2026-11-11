@@ -12,8 +12,6 @@ function guide(extra: Partial<AdminGuidePayload> = {}): AdminGuidePayload {
     readOnly: false,
     payLinks: false,
     hasFieldPulse: false,
-    historyHidden: false,
-    historyContact: "Raymond Chen",
     ...extra,
   };
 }
@@ -67,29 +65,23 @@ describe("welcomeRowView", () => {
     expect(row.meta).toBe("Stop 1 of 5");
   });
 
-  it("historyHidden with FieldPulse says older records are hidden and names historyContact", () => {
-    const row = welcomeRowView({
-      guide: guide({ historyHidden: true, hasFieldPulse: true }),
-      orgName: "Spears Services",
-      cardState: FULL,
-    });
-    expect(row.line).toBe(
-      "Your upcoming work, customers and team carried over from FieldPulse. Older records are hidden for a clean start; ask Raymond Chen if you need them back. Here’s a quick tour of where things live.",
-    );
-  });
-
-  it("FieldPulse without hidden history", () => {
+  it("FieldPulse line names FieldPulse and never mentions hidden records", () => {
     const row = welcomeRowView({ guide: guide({ hasFieldPulse: true }), orgName: "Spears Services", cardState: FULL });
     expect(row.line).toBe(
       "Your FieldPulse jobs, customers and team, in one place. Here’s a quick tour of where things live.",
     );
+    expect(row.line).not.toMatch(/hidden/i);
   });
 
-  it("no-FieldPulse line drops the FieldPulse and hidden-history sentences", () => {
-    const plain = "Your jobs, customers and team, in one place. Here’s a quick tour of where things live.";
-    for (const historyHidden of [false, true]) {
-      const row = welcomeRowView({ guide: guide({ historyHidden }), orgName: "Spears Services", cardState: FULL });
-      expect(row.line).toBe(plain);
+  it("no-FieldPulse line drops the FieldPulse sentence", () => {
+    const row = welcomeRowView({ guide: guide(), orgName: "Spears Services", cardState: FULL });
+    expect(row.line).toBe("Your jobs, customers and team, in one place. Here’s a quick tour of where things live.");
+  });
+
+  it("never claims older records are hidden, whatever the guide says", () => {
+    for (const hasFieldPulse of [false, true]) {
+      const row = welcomeRowView({ guide: guide({ hasFieldPulse }), orgName: "Spears Services", cardState: FULL });
+      expect(row.line).not.toMatch(/hidden|clean start|need them back/i);
     }
   });
 

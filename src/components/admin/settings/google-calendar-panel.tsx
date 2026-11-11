@@ -114,15 +114,17 @@ export function GoogleCalendarPanel() {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <Badge variant="secondary">Not connected</Badge>
+            <Badge variant="secondary">{status.configured ? 'Not connected' : 'Not available yet'}</Badge>
             {!status.configured && (
               <span className="text-sm text-muted-foreground">
-                Google Calendar isn&apos;t available on this account yet.
+                Calendar sync isn&apos;t turned on for this account yet.
               </span>
             )}
           </div>
         )}
       </CardContent>
+      {/* No dead Connect button when the account can't connect yet. */}
+      {(!status || status.connected || status.configured) && (
       <CardFooter>
         {status?.connected ? (
           <Button
@@ -147,6 +149,7 @@ export function GoogleCalendarPanel() {
           </Button>
         )}
       </CardFooter>
+      )}
     </Card>
   );
 }

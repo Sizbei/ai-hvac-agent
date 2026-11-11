@@ -4,8 +4,10 @@ import type { SQL } from "drizzle-orm";
 import { BUSINESS_TIME_ZONE } from "./calendar-time";
 import {
   DEFAULT_STALE_DAYS,
+  FIELDPULSE_TABLES,
   MARKED_TABLES,
   dryRunSql,
+  fieldpulseRehideSql,
   keptCustomerIdsSql,
   keptEstimateIdsSql,
   keptInvoiceIdsSql,
@@ -13,6 +15,8 @@ import {
   keptSessionIdsSql,
   markStatements,
   todayStartSql,
+  unhideFieldpulseDryRunSql,
+  unhideFieldpulseStatements,
   unhideStatements,
   visitFromTodaySql,
   type MarkingMode,
@@ -20,6 +24,7 @@ import {
 
 const ORG = "11111111-1111-1111-1111-111111111111";
 const MODES: MarkingMode[] = ["history", "empty"];
+const ALL_MODES: MarkingMode[] = [...MODES, "seeded"];
 const TABLES = /\b(?:FROM|JOIN|UPDATE)\s+(customers|customer_sessions|service_requests|invoices|estimates|appointments|organization_settings)\b/g;
 
 const render = (q: SQL) => {
@@ -31,7 +36,11 @@ function allStatements(): SQL[] {
   return [
     ...markStatements(ORG, "history"),
     ...markStatements(ORG, "empty"),
+    ...markStatements(ORG, "seeded"),
     ...unhideStatements(ORG),
+    ...unhideFieldpulseStatements(ORG),
+    unhideFieldpulseDryRunSql(ORG),
+    fieldpulseRehideSql(ORG, "history"),
     dryRunSql(ORG),
   ];
 }
@@ -155,7 +164,7 @@ describe("golive marking SQL", () => {
   it("the dry run's would-hide counts carry the same cutoff bound as the apply", () => {
     const { flat } = render(dryRunSql(ORG));
     for (const t of MARKED_TABLES) {
-      for (const mode of MODES) {
+      for (const mode of ALL_MODES) {
         const col = ` AS ${t}_hide_${mode}`;
         const end = flat.indexOf(col);
         expect(end).toBeGreaterThan(0);
@@ -289,5 +298,102 @@ describe("golive marking SQL", () => {
       expect(flat).toContain("NOT EXISTS (SELECT 1 FROM service_requests sd WHERE sd.organization_id = $");
       expect(flat).toContain(`sd.id = ${a}.service_request_id AND (sd.reference_number LIKE 'HVAC-DEMO%' OR sd.reference_number LIKE 'HVAC-CAP%'))`);
     }
+  });
+
+  describe("seeded mode", () => {
+    it("keeps every non-seeded row and nothing time-based", () => {
+      const reqs = render(keptRequestIdsSql(ORG, "seeded")).flat;
+      expect(reqs).toContain("NOT (sr.reference_number LIKE 'HVAC-DEMO%' OR sr.reference_number LIKE 'HVAC-CAP%')");
+      for (const q of [keptRequestIdsSql(ORG, "seeded"), keptInvoiceIdsSql(ORG, "seeded"), keptEstimateIdsSql(ORG, "seeded"), keptSessionIdsSql(ORG, "seeded")]) {
+        const { flat } = render(q);
+        expect(flat).not.toContain("interval");
+        expect(flat).not.toContain("status");
+      }
+      expect(render(keptInvoiceIdsSql(ORG, "seeded")).flat).toContain("NOT EXISTS");
+      expect(render(keptSessionIdsSql(ORG, "seeded")).flat).toContain("demo-seed-");
+    });
+
+    it("hides a customer only when it has a seeded link and no kept link", () => {
+      const { flat } = render(keptCustomerIdsSql(ORG, "seeded"));
+      expect(flat).toContain("(NOT (EXISTS");
+      for (const link of ["kr.customer_id", "ki.customer_id", "ke.customer_id", "ks.customer_id"]) {
+        expect(flat).toContain(link);
+      }
+    });
+
+    it("applies via the same five cutoff-bounded UPDATEs, and the dry run counts it", () => {
+      const stmts = markStatements(ORG, "seeded");
+      expect(stmts).toHaveLength(MARKED_TABLES.length);
+      for (const st of stmts) {
+        const { flat } = render(st);
+        expect(flat).toContain("AND NOT hidden_from_org AND id NOT IN (");
+        expect(flat).toContain("historyCutoff");
+      }
+      expect(render(dryRunSql(ORG)).flat).toContain(" AS customers_hide_seeded");
+    });
+  });
+
+  describe("unhide-fieldpulse", () => {
+    const statements = () => unhideFieldpulseStatements(ORG).map((s) => render(s).flat);
+
+    it("updates only invoices, estimates, requests and customers, never conversations", () => {
+      const tables = statements().map((s) => s.match(/^UPDATE (\w+) SET hidden_from_org = false WHERE organization_id = \$1::uuid AND hidden_from_org AND /)?.[1]);
+      expect(tables).toEqual([...FIELDPULSE_TABLES]);
+      // customer_sessions is only read (the fp-import- token check), never updated.
+      for (const s of statements()) expect(s).not.toMatch(/UPDATE customer_sessions|messages/);
+    });
+
+    it("restores only imported rows: requests need the synthetic fp-import- session", () => {
+      const [inv, est, req] = statements();
+      expect(inv).toMatch(/AND invoices\.fieldpulse_invoice_id IS NOT NULL AND true$/);
+      expect(est).toMatch(/AND estimates\.fieldpulse_estimate_id IS NOT NULL AND true$/);
+      expect(req).toContain("service_requests.fieldpulse_job_id IS NOT NULL AND EXISTS (SELECT 1 FROM customer_sessions fs WHERE fs.organization_id = $");
+      expect(req).toContain("fs.id = service_requests.session_id AND fs.token LIKE 'fp-import-%'");
+    });
+
+    it("restores a customer with imported work, or a FieldPulse id and no native request", () => {
+      const cust = statements()[3]!;
+      expect(cust).toContain("fr.customer_id = customers.id AND (fr.fieldpulse_job_id IS NOT NULL AND EXISTS");
+      expect(cust).toContain("fi.customer_id = customers.id AND fi.fieldpulse_invoice_id IS NOT NULL");
+      expect(cust).toContain("fe.customer_id = customers.id AND fe.fieldpulse_estimate_id IS NOT NULL");
+      expect(cust).toContain("customers.fieldpulse_customer_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM service_requests nr");
+      expect(cust).toContain("nr.customer_id = customers.id AND NOT (nr.fieldpulse_job_id IS NOT NULL AND EXISTS");
+    });
+
+    it("leaves the rows of deleted-jobs undo files hidden", () => {
+      const keep = { invoices: ["aaaaaaaa-0000-0000-0000-000000000001"], estimates: [], service_requests: ["bbbbbbbb-0000-0000-0000-000000000002"] };
+      const rendered = unhideFieldpulseStatements(ORG, keep).map(render);
+      expect(rendered[0]!.flat).toMatch(/AND NOT \(id = ANY\(\$\d+::uuid\[\]\)\)$/);
+      expect(rendered[0]!.params).toContain("{aaaaaaaa-0000-0000-0000-000000000001}");
+      expect(rendered[1]!.flat).toMatch(/ AND true$/);
+      expect(rendered[2]!.params).toContain("{bbbbbbbb-0000-0000-0000-000000000002}");
+      expect(rendered[3]!.flat).toMatch(/ AND true$/);
+    });
+
+    it("never reads the hidden flag of a linked row, never touches the cutoff, never hides", () => {
+      for (const s of statements()) {
+        expect(s.match(/hidden_from_org/g)).toHaveLength(2); // the SET and the target's own WHERE
+        expect(s).not.toContain("historyCutoff");
+        expect(s).not.toContain("hidden_from_org = true");
+      }
+    });
+
+    it("dry run counts hidden imported rows per table and lists native FieldPulse-linked rows", () => {
+      const { flat } = render(unhideFieldpulseDryRunSql(ORG));
+      for (const t of FIELDPULSE_TABLES) {
+        expect(flat).toContain(` AS ${t}_fp_hidden`);
+        expect(flat).toContain(` AS ${t}_fp_kept`);
+      }
+      expect(flat).toContain("::text[] AS native_requests");
+      expect(flat).toContain("::text[] AS native_customers");
+      expect(flat).not.toContain("UPDATE");
+    });
+
+    it("the re-hide guard counts visible imported rows a mark would hide, per table", () => {
+      const { flat } = render(fieldpulseRehideSql(ORG, "history"));
+      for (const t of FIELDPULSE_TABLES) expect(flat).toContain(` AS ${t}_fp_rehide`);
+      expect(flat).toContain("AND NOT hidden_from_org AND id NOT IN (");
+      expect(flat).toContain("historyCutoff");
+    });
   });
 });

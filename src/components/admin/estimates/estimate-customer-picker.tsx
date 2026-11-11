@@ -5,6 +5,7 @@ import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
 
 const SEARCH_LIMIT = 5;
 
@@ -75,7 +76,7 @@ export function EstimateCustomerPicker({
       {value ? (
         <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{value.name ?? 'Unnamed customer'}</p>
+            <p className="truncate text-sm font-medium">{customerNameLabel(value.name)}</p>
             <p className="truncate text-xs text-muted-foreground">
               {value.contact ?? 'No contact on file'}
             </p>
@@ -129,7 +130,7 @@ export function EstimateCustomerPicker({
                         }
                         className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                       >
-                        <span className="truncate font-medium">{c.name ?? 'Unnamed customer'}</span>
+                        <span className="truncate font-medium">{customerNameLabel(c.name)}</span>
                         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                           {c.phone ?? c.email ?? ''}
                         </span>

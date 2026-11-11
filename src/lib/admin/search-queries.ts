@@ -14,7 +14,12 @@ import { withTenant } from "@/lib/db/tenant";
 import { visibleRows, visibleRowsSql, type Visibility } from "@/lib/admin/visibility";
 import { decrypt } from "@/lib/crypto";
 import { invoiceRef } from "@/lib/admin/invoice-collectible";
-import { issueTypeLabel, humanizeCode } from "@/lib/admin/request-labels";
+import { humanizeSnake } from "@/lib/admin/request-labels";
+// display-labels' issue label keeps a FieldPulse job title as typed instead of
+// lower-casing it ("Job for Hollow Creek Community Chapel").
+import { issueTypeLabel } from "@/lib/admin/display-labels";
+import { customerMatchesSearch } from "@/lib/admin/customer-search";
+import { formatPhoneDisplay } from "@/lib/admin/contact-format";
 import { notStandInSession } from "@/lib/admin/stand-in-session";
 import { sessionContactMatches } from "@/lib/admin/session-contact-search";
 import {
@@ -25,6 +30,7 @@ import {
   shortConversationId,
 } from "@/lib/admin/conversation-display";
 import { ERASED_PLACEHOLDER } from "@/lib/admin/report-format";
+import { customerNameLabel, isDeletedFieldpulsePlaceholder } from "@/lib/admin/customer-name-display";
 
 export type SearchResult = {
   readonly type:
@@ -52,8 +58,13 @@ const RESULTS_PER_TYPE = 8;
  * already gate frequency. Scans are ordered newest-first, so the most-recent
  * 1500 records are always searched (tradeoff: very old records in large orgs
  * may be missed; acceptable given the debounce/min-char guards).
+ *
+ * Customers read up to 5000, the same bound as the customers-list search: at
+ * 1500 an org with its FieldPulse history (2.7k customers) could not find its
+ * busiest account ("Hollow Creek Community Chapel") from ⌘K. The scan reads
+ * three short ciphertext columns, so the larger bound costs little.
  */
-const SCAN_LIMIT_CUSTOMERS = 1500;
+const SCAN_LIMIT_CUSTOMERS = 5000;
 const SCAN_LIMIT_INVOICES = 1500;
 const SCAN_LIMIT_ESTIMATES = 1500;
 
@@ -82,7 +93,7 @@ function containsPattern(q: string): string {
 function displayableName(...encrypted: (string | null)[]): string | null {
   for (const value of encrypted) {
     const name = safeDecrypt(value)?.trim();
-    if (name && name !== ERASED_PLACEHOLDER) return name;
+    if (name && name !== ERASED_PLACEHOLDER && !isDeletedFieldpulsePlaceholder(name)) return name;
   }
   return null;
 }
@@ -92,7 +103,6 @@ export async function searchCustomers(
   q: string,
   vis: Visibility,
 ): Promise<SearchResult[]> {
-  const term = q.toLowerCase();
   const rows = await db
     .select({
       id: customers.id,
@@ -111,16 +121,15 @@ export async function searchCustomers(
     const name = safeDecrypt(row.nameEncrypted);
     const phone = safeDecrypt(row.phoneEncrypted);
     const email = safeDecrypt(row.emailEncrypted);
-    const matches =
-      (name?.toLowerCase().includes(term) ?? false) ||
-      (phone?.toLowerCase().includes(term) ?? false) ||
-      (email?.toLowerCase().includes(term) ?? false);
-    if (!matches) continue;
+    // Same matcher as the customers list: phone-shaped queries compare digits,
+    // so "423-555-0142" finds "+1 (423) 555-0142".
+    if (!customerMatchesSearch({ name, phone, email, address: null }, q)) continue;
+    if (name === ERASED_PLACEHOLDER) continue;
     results.push({
       type: "customer",
       id: row.id,
-      title: name ?? "Unknown",
-      subtitle: phone ?? email ?? "",
+      title: customerNameLabel(name),
+      subtitle: formatPhoneDisplay(phone) ?? email ?? "",
       href: `/admin/customers/${row.id}`,
       syncedSource: row.fieldpulseCustomerId ? "fieldpulse" : null,
     });
@@ -159,7 +168,7 @@ export async function searchInvoices(
       type: "invoice",
       id: row.id,
       title: ref,
-      subtitle: `${humanizeCode(row.state)} · ${formatCents(row.totalCents)}`,
+      subtitle: `${humanizeSnake(row.state)} · ${formatCents(row.totalCents)}`,
       href: `/admin/invoices/${row.id}`,
       syncedSource: row.fieldpulseInvoiceId
         ? "fieldpulse"
@@ -382,7 +391,7 @@ export async function searchConversations(
     const subtitle = [
       named ? channelTitle(row.channel) : null,
       // The inbox's wording for an escalation nobody has handled.
-      flagged ? "Needs action" : humanizeCode(row.status),
+      flagged ? "Needs action" : humanizeSnake(row.status),
       shortConversationId(row.id),
     ]
       .filter((part): part is string => part !== null)
@@ -512,7 +521,7 @@ export async function searchPricebook(
     type: "pricebook" as const,
     id: row.id,
     title: row.name,
-    subtitle: `${humanizeCode(row.type)} · ${formatCents(row.priceCents)}${row.sku ? ` · ${row.sku}` : ""}`,
+    subtitle: `${humanizeSnake(row.type)} · ${formatCents(row.priceCents)}${row.sku ? ` · ${row.sku}` : ""}`,
     href: `/admin/pricebook?q=${encodeURIComponent(row.name)}`,
     syncedSource: row.fieldpulseItemId ? "fieldpulse" : null,
   }));

@@ -4,6 +4,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { CalendarJobCard } from '@/components/admin/calendar/calendar-job-card';
 import type { DashboardRequest } from '@/lib/admin/types';
 import { dragJobId, type DragJobData } from '@/lib/admin/calendar-dnd';
+import { customerNameLabel } from '@/lib/admin/request-labels';
 
 interface DraggableJobCardProps {
   readonly job: DashboardRequest;
@@ -33,7 +34,7 @@ export function DraggableJobCard({
     kind: 'job',
     requestId: job.id,
     currentStartIso: job.arrivalWindowStart,
-    label: `${job.customerName ?? 'Unknown customer'}, ${job.referenceNumber}`,
+    label: `${customerNameLabel(job.customerName)}, ${job.referenceNumber}`,
   };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragJobId(job.id),

@@ -77,6 +77,11 @@ audit. PATCH applies the body in memory; the card's dismiss lives in
 stripped in `getOnboarding`, and `loadSetupPlacement` always returns
 `operations` for the demo org (`placementFor(state, isDemo)`).
 
+**No hidden-history copy:** imported history is shown, so the welcome and
+tour never say older records are hidden (junk and FieldPulse-deleted rows stay
+`hidden_from_org` on purpose, so a "some row is hidden" check would fire
+forever). The guide payload carries no history flag or contact.
+
 **Visible-only signals:** step signals count visible rows only (plan ruling 2),
 whoever is looking; stamps are per org and written once. The welcome row and
 quick tour are per user and never write in View as (`readOnly`).
@@ -105,6 +110,17 @@ of 5", the hidden X and outline Up next live in `src/lib/admin/welcome-view.ts`
 the next focusable in the card or the page `h1`. The sidebar footer (drawer and
 rail) has a "Quick tour" link to `/admin/setup#learn` for admin-tier users.
 Client code takes the lesson list from `src/lib/admin/lesson-ids.ts` (no zod).
+
+**Walkthrough video:** `src/components/admin/setup/tutorial-video.tsx` sits
+under the header (after the tour when the tour is in the "above" slot). Native
+`<video preload="none">` with `src` on the element (a `<source>` that 404s fires
+no React error and leaves `play()` pending, so the fallback never shows); the
+poster overlay is the play button, controls appear after play, captions are on
+by default. Paths, length and fallback topics live in `src/lib/admin/tutorial-video.ts`
+(update `durationSeconds` when re-recording). Files in `public/tutorial/` are
+public: record only against the fictional Ridgeline org, never Spears. Recipe:
+the `demo-video` skill; playbook and reset script were kept untracked under
+`demo/setup-walkthrough/` (demo/ is git-excluded).
 
 **Quick tour (onboarding spec D3):** `src/components/admin/setup/quick-tour-section.tsx`
 (`id="learn"`), state in `src/hooks/use-quick-tour.ts`, pure logic in

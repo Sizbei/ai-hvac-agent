@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel } from "./report-format";
+import { formatRatio, formatRate, visibleLeadSources, firstAddressLine, locationDisplayLabel, netRevenueTile, closeRateSublabel, leadSourceLabel } from "./report-format";
 
 describe("formatRate", () => {
   it("renders a dash when nothing was decided", () => {
@@ -55,5 +55,35 @@ describe("formatRatio", () => {
     expect(formatRatio(0, 0)).toBe("—");
     expect(formatRatio(0.456, 10)).toBe("46%");
     expect(formatRatio(0, 10)).toBe("0%");
+  });
+});
+
+describe("netRevenueTile", () => {
+  it("adds FieldPulse/HCP paid-to-date to money collected here and names both", () => {
+    const t = netRevenueTile({ grossCollectedCents: 338785, refundedCents: 5000, netCollectedCents: 333785, syncedCollectedCents: 246107797 });
+    expect(t.valueCents).toBe(246441582);
+    expect(t.sublabel).toBe("$2,461,077.97 paid to date on FieldPulse/HCP invoices issued in the period · $3,337.85 received here in the period, less refunds");
+  });
+
+  it("without synced money reads as before", () => {
+    const t = netRevenueTile({ grossCollectedCents: 10000, refundedCents: 2500, netCollectedCents: 7500, syncedCollectedCents: 0 });
+    expect(t).toEqual({ valueCents: 7500, sublabel: "$100.00 collected − $25.00 refunded" });
+  });
+});
+
+describe("closeRateSublabel", () => {
+  it("counts every estimate, not only decided ones", () => {
+    expect(closeRateSublabel(7, 115)).toBe("7 sold of 115 estimates");
+    expect(closeRateSublabel(0, 1)).toBe("0 sold of 1 estimate");
+  });
+});
+
+describe("leadSourceLabel", () => {
+  it("never shows Unknown for a missing lead source", () => {
+    expect(leadSourceLabel("unknown")).toBe("Not recorded");
+  });
+  it("maps known codes and humanizes unmapped ones", () => {
+    expect(leadSourceLabel("repeat_customer")).toBe("Repeat customer");
+    expect(leadSourceLabel("trade_show")).toBe("Trade show");
   });
 });

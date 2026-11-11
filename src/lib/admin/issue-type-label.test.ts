@@ -28,7 +28,7 @@ describe("groupIssueTypes", () => {
       { key: "cooling_not_working", count: 40 },
       { key: "maintenance", count: 5 },
       { key: "other", count: 2 },
-      { key: "Job for Arby's Elizabethton", count: 1 },
+      { key: "Job for Marlow's Deli Ashgrove", count: 1 },
       { key: "ESTIMATE for roof unit", count: 1 },
     ];
     const { bars, importedTitles } = groupIssueTypes(rows, 2);
@@ -42,7 +42,7 @@ describe("groupIssueTypes", () => {
   it("never lets imported titles make an Other bar on their own", () => {
     const { bars, importedTitles } = groupIssueTypes([
       { key: "water_leak", count: 3 },
-      { key: "Job for Arby's Elizabethton", count: 209 },
+      { key: "Job for Marlow's Deli Ashgrove", count: 209 },
     ]);
     expect(bars).toEqual([{ key: "water_leak", label: "Water leak", count: 3 }]);
     expect(importedTitles).toBe(209);
@@ -51,5 +51,16 @@ describe("groupIssueTypes", () => {
     expect(groupIssueTypes([{ key: "water_leak", count: 3 }]).bars).toEqual([
       { key: "water_leak", label: "Water leak", count: 3 },
     ]);
+  });
+});
+
+describe("free-text job titles", () => {
+  it("shows an imported FieldPulse title exactly as typed", () => {
+    expect(issueTypeLabel("Job for Hollow Creek Community Chapel")).toBe(
+      "Job for Hollow Creek Community Chapel",
+    );
+    expect(issueTypeLabel("Pine Street Diner: walk-in cooler")).toBe("Pine Street Diner: walk-in cooler");
+    expect(issueTypeLabel("ON CALL: TROY 8/10-8/16")).toBe("ON CALL: TROY 8/10-8/16");
+    expect(humanizeCode("JTC CPA")).toBe("JTC CPA");
   });
 });

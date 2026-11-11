@@ -24,6 +24,7 @@ import { EnvBadge } from '@/components/admin/env-badge';
 // NAV_GROUPS lives in a shared module so the ⌘K search can offer page-navigation
 // from the same source of truth (no drift with the sidebar).
 import { navGroupsFor, navItemMatches, type NavItem, type SetupPlacement } from './nav-items';
+import { usePlatformUi } from './platform-ui-context';
 import { useUnscheduledCount } from '@/hooks/use-unscheduled-count';
 import { unscheduledBadge, type UnscheduledBadge } from '@/lib/admin/unscheduled-badge';
 import { needsActionBadge } from '@/lib/admin/needs-action-badge';
@@ -38,6 +39,7 @@ import { cn } from '@/lib/utils';
 
 interface SidebarProps {
   readonly orgName?: string;
+  readonly logoUrl?: string | null;
   readonly adminName: string;
   readonly adminEmail: string;
   readonly role: AdminRole | 'technician';
@@ -80,6 +82,7 @@ const GROUP_LABEL = 'u-label px-2.5 pb-1 [color:var(--sidebar-foreground-dim)]';
 
 export function Sidebar({
   orgName,
+  logoUrl,
   adminName,
   adminEmail,
   role,
@@ -94,7 +97,8 @@ export function Sidebar({
   const { count: unscheduledCount } = useUnscheduledCount();
   const { data: onboarding } = useOnboarding();
   const needsActionCount = useNeedsActionCount();
-  const navGroups = navGroupsFor(setupPlacement, { map: mapEnabled });
+  const platformUi = usePlatformUi();
+  const navGroups = navGroupsFor(setupPlacement, { map: mapEnabled, platformUi });
   // One entry per NavItem.badge kind; every kind shares the visible/label/srLabel shape.
   const badges: Record<NonNullable<NavItem['badge']>, UnscheduledBadge> = useMemo(
     () => ({
@@ -252,7 +256,7 @@ export function Sidebar({
           <div className="flex h-full flex-col">
             <div className="flex h-16 items-center border-b border-sidebar-border px-4">
               <div className="flex flex-col gap-0.5">
-                <BrandMark name={orgName} onDark />
+                <BrandMark name={orgName} logoUrl={logoUrl} onDark />
                 <EnvBadge />
               </div>
               <Button
@@ -355,10 +359,10 @@ export function Sidebar({
             )}
           >
             {isCollapsed ? (
-              <BrandMark compact onDark />
+              <BrandMark compact logoUrl={logoUrl} onDark />
             ) : (
               <div className="flex flex-col gap-0.5">
-                <BrandMark name={orgName} onDark />
+                <BrandMark name={orgName} logoUrl={logoUrl} onDark />
                 <EnvBadge />
               </div>
             )}

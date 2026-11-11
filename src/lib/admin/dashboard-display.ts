@@ -3,14 +3,10 @@
  */
 import type { ConversationSummary } from "./conversation-types";
 import { ERASED_PLACEHOLDER } from "./report-format";
+import { customerNameLabel } from "./customer-name-display";
 
-/** A request's customer as the office should read it. */
-export function customerDisplayName(name: string | null | undefined): string {
-  const trimmed = name?.trim();
-  if (!trimmed) return "No name on file";
-  if (trimmed === ERASED_PLACEHOLDER) return "Erased customer";
-  return trimmed;
-}
+/** A request's customer as the office should read it (the shared label). */
+export const customerDisplayName = customerNameLabel;
 
 /**
  * The dashboard's recent conversations: real ones only. A chat widget that was

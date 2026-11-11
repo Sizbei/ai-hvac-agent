@@ -1,0 +1,317 @@
+{
+  "$comment": "Test, demo and placeholder rows to hide from Spears (golive-hide-junk.mjs). Keys: FieldPulse ids for imported rows; reference numbers for native requests; row ids for native customers (rows from before the 2026-07-09 dev branch split share ids and reference numbers with prod). Reasons only, never customer names. Curated 2026-11-11; evidence in .superpowers/sdd/2026-11-11-fp-display/junk-report.md. The dev smoke tests pushed three customers to FieldPulse but no jobs (their dev requests never got a FieldPulse job id, and on 2026-11-11 FieldPulse listed no job on those customers), so the customers are listed by FieldPulse id and the dev-only reference numbers match nothing on prod; evidence in fix-data-report.md.",
+  "requests": [
+    {
+      "key": "18854372",
+      "reason": "title and notes 'Test for status'; deleted FieldPulse customer"
+    },
+    {
+      "key": "18677438",
+      "reason": "title 'Test 2'; deleted FieldPulse customer, no invoice"
+    },
+    {
+      "key": "18848773",
+      "reason": "title 'Training', notes 'This is a test'; deleted FieldPulse customer"
+    },
+    {
+      "key": "19595339",
+      "reason": "notes start 'Test job'; placeholder customer named after a date, no address"
+    },
+    {
+      "key": "19556623",
+      "reason": "'Job for Test': customer is the test customer"
+    },
+    {
+      "key": "19239524",
+      "reason": "title and notes 'Test'"
+    },
+    {
+      "key": "20923678",
+      "reason": "title and notes 'test'"
+    },
+    {
+      "key": "20923730",
+      "reason": "title and notes 'test'"
+    },
+    {
+      "key": "20025246",
+      "reason": "title and notes 'TEST'"
+    },
+    {
+      "key": "19450316",
+      "reason": "'Testing for FP - Please Ignore'; test customer"
+    },
+    {
+      "key": "20324828",
+      "reason": "'Job for This is a test company'"
+    },
+    {
+      "key": "19556737",
+      "reason": "'Buy a paint bucket', notes 'from FP testing'; placeholder sub-location customer"
+    },
+    {
+      "key": "19244967",
+      "reason": "'Office Mgr', notes 'This is a test Owner'; time-off placeholder customer"
+    },
+    {
+      "key": "18551756",
+      "reason": "notes 'This is a test'; no visit, no invoice (its estimate is listed too)"
+    },
+    {
+      "key": "19159412",
+      "reason": "'Mobile App Training Video' job on the FieldPulse sample customer; $0 draft"
+    },
+    {
+      "key": "18744043",
+      "reason": "job on the FieldPulse sample customer (out-of-state placeholder address)"
+    },
+    {
+      "key": "HVAC-A7452C89",
+      "reason": "dev only: office booking smoke test"
+    },
+    {
+      "key": "HVAC-EC75FC38",
+      "reason": "dev only: override smoke test"
+    },
+    {
+      "key": "HVAC-CFB82D5C",
+      "reason": "dev only: window-only smoke test"
+    },
+    {
+      "key": "HVAC-8FED6CBB",
+      "reason": "dev only: UI smoke test"
+    },
+    {
+      "key": "HVAC-C5AC7FEF",
+      "reason": "dev only: UI smoke test"
+    },
+    {
+      "key": "HVAC-705BFAB9",
+      "reason": "dev only: 'Review fix check' on an erased test customer"
+    },
+    {
+      "key": "HVAC-CE264EEB",
+      "reason": "pre-go-live chat probe 'I need help with a math problem', out-of-state address"
+    },
+    {
+      "key": "HVAC-94AB090D",
+      "reason": "pre-go-live chatbot test: fictional TV-show address, no customer"
+    },
+    {
+      "key": "HVAC-B19FA727",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address, mock payment"
+    },
+    {
+      "key": "HVAC-977F3A14",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address"
+    },
+    {
+      "key": "HVAC-C3EFC806",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address"
+    },
+    {
+      "key": "HVAC-78D9EDCC",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address, mock payment"
+    },
+    {
+      "key": "HVAC-54821679",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address, mock payment"
+    },
+    {
+      "key": "HVAC-2E088E05",
+      "reason": "pre-go-live demo membership visit on a demo customer"
+    },
+    {
+      "key": "HVAC-23B6ECCE",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address"
+    },
+    {
+      "key": "HVAC-FEBD9D7B",
+      "reason": "pre-go-live chatbot demo: out-of-state demo address"
+    },
+    {
+      "key": "HVAC-B7F97B44",
+      "reason": "pre-go-live chatbot demo: shared out-of-state demo address"
+    },
+    {
+      "key": "HVAC-70BD7A87",
+      "reason": "pre-go-live chatbot demo (same day as the demo-address runs): placeholder-style email, mistyped address, unsynced open invoice, no payment"
+    }
+  ],
+  "customers": [
+    {
+      "key": "17430279",
+      "reason": "named 'Test'; only test work"
+    },
+    {
+      "key": "17729959",
+      "reason": "named 'Test Material List'; only a $0 test estimate"
+    },
+    {
+      "key": "17430163",
+      "reason": "named 'This Is A Test Company'; only test work"
+    },
+    {
+      "key": "17734650",
+      "reason": "named after a date; only a 'Test job', no address"
+    },
+    {
+      "key": "17430164",
+      "reason": "placeholder sub-location with a mistyped test email; only test work and a $0 draft"
+    },
+    {
+      "key": "16875761",
+      "reason": "FieldPulse sample-data customer (out-of-state placeholder); only $0 drafts"
+    },
+    {
+      "key": "17430712",
+      "reason": "named 'Training'; one $0 draft, no contact details"
+    },
+    {
+      "key": "17428634",
+      "reason": "surname 'Test'; no contact details, no work"
+    },
+    {
+      "key": "17436453",
+      "reason": "a first name plus '1'; no contact details, no work"
+    },
+    {
+      "key": "17148788",
+      "reason": "deleted FieldPulse customer whose only jobs are tests"
+    },
+    {
+      "key": "19166696",
+      "reason": "smoke-test customer pushed to FieldPulse from dev on 2026-10-31; prod imports it under this id"
+    },
+    {
+      "key": "19166705",
+      "reason": "'Review fix check' smoke-test customer pushed to FieldPulse from dev on 2026-10-31; prod imports it under this id"
+    },
+    {
+      "key": "19167466",
+      "reason": "copy of a pre-go-live demo customer (listed below by row id) pushed to FieldPulse from dev on 2026-11-01; prod imports it under this id"
+    },
+    {
+      "key": "e568d491-579f-4cb5-864a-dc2f4d6f1baa",
+      "reason": "pre-go-live demo customer: out-of-state demo address, demo chats only"
+    },
+    {
+      "key": "48446307-de81-4bc5-8a2d-232fb0586161",
+      "reason": "pre-go-live demo customer: out-of-state demo address, mock payment only"
+    },
+    {
+      "key": "5d666e52-b5bf-4392-ac72-f96ee499415e",
+      "reason": "pre-go-live demo customer: out-of-state demo address, demo membership"
+    },
+    {
+      "key": "8c6d0e01-f694-4919-93f3-b820523c849d",
+      "reason": "pre-go-live demo customer: out-of-state demo address, mock payment only"
+    },
+    {
+      "key": "f9ffd6f2-6e88-4600-a304-986523910d19",
+      "reason": "pre-go-live chat probe customer: out-of-state address, keyboard-mash email"
+    },
+    {
+      "key": "0819d21d-85fc-4d26-a387-15ac8196e004",
+      "reason": "pre-go-live fictional seed customer, no work"
+    },
+    {
+      "key": "41174a2d-03ba-4f18-9bb7-a313e422f909",
+      "reason": "pre-go-live fictional seed customer, no work"
+    },
+    {
+      "key": "5cda3ef9-d3bf-4809-adff-f6138f8f59e8",
+      "reason": "dev only: duplicate-check test customer"
+    },
+    {
+      "key": "92fb409d-100e-4183-8d1d-c44ddaf20ecf",
+      "reason": "dev only: fictional seed customer (out-of-state)"
+    },
+    {
+      "key": "de46fca3-50e6-4614-9aef-8638db8bd95e",
+      "reason": "dev only: fictional seed customer (out-of-state)"
+    },
+    {
+      "key": "ae299495-1360-4d98-8c6e-c303802d3abf",
+      "reason": "dev only: fictional seed customer (.example email), mock payment"
+    },
+    {
+      "key": "1a36d41a-0eb2-4a46-8855-5c50d587f14e",
+      "reason": "dev only: erased test customer, no work"
+    },
+    {
+      "key": "4ea06348-583b-401d-9d45-ad3561bce244",
+      "reason": "dev only: erased test customer, no work"
+    },
+    {
+      "key": "1d83e73c-084a-40c9-87d0-279e9d3656bc",
+      "reason": "pre-go-live chatbot demo customer: placeholder-style email, demo chat only"
+    }
+  ],
+  "invoices": [
+    {
+      "key": "20807625",
+      "reason": "$0 draft on the FieldPulse sample customer"
+    },
+    {
+      "key": "21144609",
+      "reason": "$0 draft on the FieldPulse sample customer"
+    },
+    {
+      "key": "21185274",
+      "reason": "$0 draft on the FieldPulse sample customer"
+    },
+    {
+      "key": "20813337",
+      "reason": "$0 draft on the placeholder sub-location customer"
+    },
+    {
+      "key": "20822547",
+      "reason": "$0 draft on the 'Training' customer"
+    }
+  ],
+  "estimates": [
+    {
+      "key": "21369902",
+      "reason": "title 'Test - Estimate - Material list - Please Ignore'"
+    },
+    {
+      "key": "21369624",
+      "reason": "title 'Test - Estimate - Testing for FP - Please Ignore'"
+    },
+    {
+      "key": "20923499",
+      "reason": "title 'Test - Estimate', $0"
+    },
+    {
+      "key": "21369997",
+      "reason": "title 'Test Material List - Estimate', $0"
+    },
+    {
+      "key": "21736883",
+      "reason": "title 'Test - Estimate' (prod only)"
+    },
+    {
+      "key": "20035901",
+      "reason": "estimate on the 'This is a test' request, hidden with it so no visible row links to a hidden request"
+    }
+  ],
+  "pricebookItems": [
+    {
+      "key": "9959284",
+      "reason": "'Test Plan', description is keyboard mash"
+    },
+    {
+      "key": "9959289",
+      "reason": "'Lennox | test'"
+    },
+    {
+      "key": "9947754",
+      "reason": "'training', no description"
+    },
+    {
+      "key": "9943356",
+      "reason": "'Yearly Preventive Maintance | Wed TRaining', description '123 testing1'"
+    }
+  ]
+}

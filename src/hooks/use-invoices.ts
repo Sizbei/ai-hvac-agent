@@ -59,6 +59,7 @@ interface InvoicesPayload {
   readonly sourceCounts: Record<string, number>;
   readonly stats: InvoiceStats;
   readonly collectedThisMonthCents: number;
+  readonly hasSyncedInvoices: boolean;
   readonly cardPaymentsEnabled: boolean;
 }
 
@@ -68,6 +69,8 @@ interface UseInvoicesResult {
   readonly sourceCounts: Record<string, number>;
   readonly stats: InvoiceStats | null;
   readonly collectedThisMonthCents: number;
+  /** Org-level: any visible FieldPulse/HCP invoice, independent of filters. */
+  readonly hasSyncedInvoices: boolean;
   readonly cardPaymentsEnabled: boolean;
   readonly isLoading: boolean;
   readonly error: string | null;
@@ -132,6 +135,9 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
   const [collectedThisMonthCents, setCollectedThisMonthCents] = useState(
     () => invoicesCache.get(key)?.data.collectedThisMonthCents ?? 0,
   );
+  const [hasSyncedInvoices, setHasSyncedInvoices] = useState(
+    () => invoicesCache.get(key)?.data.hasSyncedInvoices ?? false,
+  );
   const [cardPaymentsEnabled, setCardPaymentsEnabled] = useState(
     () => invoicesCache.get(key)?.data.cardPaymentsEnabled ?? false,
   );
@@ -151,6 +157,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
         setSourceCounts(cached.data.sourceCounts);
         setStats(cached.data.stats);
         setCollectedThisMonthCents(cached.data.collectedThisMonthCents);
+        setHasSyncedInvoices(cached.data.hasSyncedInvoices);
         setCardPaymentsEnabled(cached.data.cardPaymentsEnabled);
         setIsLoading(false);
       } else {
@@ -171,6 +178,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
             sourceCounts: Record<string, number>;
             stats: InvoiceStats;
             collectedThisMonthCents: number;
+            hasSyncedInvoices?: boolean;
             cardPaymentsEnabled?: boolean;
           };
         };
@@ -181,6 +189,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
             sourceCounts: body.data.sourceCounts ?? {},
             stats: body.data.stats,
             collectedThisMonthCents: body.data.collectedThisMonthCents ?? 0,
+            hasSyncedInvoices: body.data.hasSyncedInvoices === true,
             cardPaymentsEnabled: body.data.cardPaymentsEnabled === true,
           };
           setInvoices(fresh.invoices);
@@ -188,6 +197,7 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
           setSourceCounts(fresh.sourceCounts);
           setStats(fresh.stats);
           setCollectedThisMonthCents(fresh.collectedThisMonthCents);
+          setHasSyncedInvoices(fresh.hasSyncedInvoices);
           setCardPaymentsEnabled(fresh.cardPaymentsEnabled);
           invoicesCache.set(key, fresh);
           setError(null);
@@ -238,5 +248,5 @@ export function useInvoices(params: UseInvoicesParams = {}): UseInvoicesResult {
 
   const refetch = useCallback(() => fetchAll({ bust: true }), [fetchAll]);
 
-  return { invoices, total, sourceCounts, stats, collectedThisMonthCents, cardPaymentsEnabled, isLoading, error, refetch, sendReminder, voidInvoice };
+  return { invoices, total, sourceCounts, stats, collectedThisMonthCents, hasSyncedInvoices, cardPaymentsEnabled, isLoading, error, refetch, sendReminder, voidInvoice };
 }

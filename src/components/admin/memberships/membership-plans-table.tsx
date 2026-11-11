@@ -86,7 +86,7 @@ export function MembershipPlansTable({
       <EmptyState
         icon={CreditCard}
         title="No membership plans yet"
-        description="Create your first plan to offer recurring maintenance agreements and member pricing to customers."
+        description="Set up your maintenance agreements, like an ice machine or boiler service contract. Members get their own pricing on estimates and invoices."
         action={
           <Button onClick={onAdd}>
             <Plus className="mr-2 h-4 w-4" />

@@ -127,6 +127,20 @@ function withSetup(placement: SetupPlacement): readonly NavGroup[] {
 export interface NavOptions {
   /** The org's Map switch; off drops the Map item everywhere. */
   readonly map: boolean;
+  /**
+   * The platform owner, not previewing (`usePlatformUi`). False drops the
+   * operator-only items (the FieldPulse import progress board) from the nav
+   * and search (the board's page and API also refuse non-platform users
+   * server-side). Omitted = shown.
+   */
+  readonly platformUi?: boolean;
+}
+
+/** Operator tools an org's own staff never need in their nav. */
+const PLATFORM_ONLY_HREFS: ReadonlySet<string> = new Set(['/admin/fieldpulse-import']);
+
+function withoutPlatformOnly(groups: readonly NavGroup[]): readonly NavGroup[] {
+  return groups.map((g) => ({ ...g, items: g.items.filter((i) => !PLATFORM_ONLY_HREFS.has(i.href)) }));
 }
 
 const MAP_HREF = '/admin/map';
@@ -140,6 +154,17 @@ const GROUPS: Record<SetupPlacement, Record<'on' | 'off', readonly NavGroup[]>> 
   integrations: { on: withSetup('integrations'), off: withoutMap(withSetup('integrations')) },
 };
 
+const ORG_GROUPS: Record<SetupPlacement, Record<'on' | 'off', readonly NavGroup[]>> = {
+  operations: {
+    on: withoutPlatformOnly(GROUPS.operations.on),
+    off: withoutPlatformOnly(GROUPS.operations.off),
+  },
+  integrations: {
+    on: withoutPlatformOnly(GROUPS.integrations.on),
+    off: withoutPlatformOnly(GROUPS.integrations.off),
+  },
+};
+
 /**
  * The nav groups for the sidebar, the mobile title and ⌘K search: Setup second
  * in Operations (after Dashboard) or last in Integrations; Map only when the
@@ -147,7 +172,8 @@ const GROUPS: Record<SetupPlacement, Record<'on' | 'off', readonly NavGroup[]>> 
  * memoise on it.
  */
 export function navGroupsFor(placement: SetupPlacement, opts: NavOptions): readonly NavGroup[] {
-  return GROUPS[placement][opts.map ? 'on' : 'off'];
+  const table = opts.platformUi === false ? ORG_GROUPS : GROUPS;
+  return table[placement][opts.map ? 'on' : 'off'];
 }
 
 /** Drop trailing slashes so "/admin/" and "/admin" compare equal. */
@@ -181,7 +207,8 @@ export function navLabelFor(
   placement: SetupPlacement,
   opts: NavOptions,
 ): string {
-  for (const group of navGroupsFor(placement, opts)) {
+  // Every item names its page, platform-only ones included (opened by URL).
+  for (const group of navGroupsFor(placement, { map: opts.map })) {
     for (const item of group.items) {
       if (navItemMatches(pathname, item)) return item.label;
     }

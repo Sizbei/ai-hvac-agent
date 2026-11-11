@@ -63,3 +63,6 @@ promptfoo/redteam.generated.yaml
 
 # ndemo demo-recorder state (contains a UNIX socket that panics Turbopack)
 .ndemo/
+
+# go-live operator undo files (scripts/agent/fp-hide-deleted-jobs.mts); they now default to ~/.hvac-golive/
+fp-deleted-jobs-hidden-*.json

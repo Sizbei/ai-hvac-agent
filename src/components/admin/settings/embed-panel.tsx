@@ -307,8 +307,8 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
           <CardDescription>
             Only these domains can run your widget. Leave empty to allow any
             domain (the publishable key alone gates access). Use{' '}
-            <code className="rounded bg-muted px-1">acme.com</code> or{' '}
-            <code className="rounded bg-muted px-1">*.acme.com</code>.
+            <code className="rounded bg-muted px-1">yourcompany.com</code> or{' '}
+            <code className="rounded bg-muted px-1">*.yourcompany.com</code>.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -322,7 +322,7 @@ export function EmbedPanel({ config, onSave }: EmbedPanelProps) {
                   addOrigin();
                 }
               }}
-              placeholder="acme.com"
+              placeholder="yourcompany.com"
             />
             <Button variant="outline" onClick={addOrigin}>
               Add

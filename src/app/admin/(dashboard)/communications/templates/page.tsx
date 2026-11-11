@@ -310,10 +310,9 @@ function TemplateCard({
         </Badge>
       </div>
 
-      <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
-        <span className="text-xs text-muted-foreground tabular-nums">
-          Priority {template.priority}
-        </span>
+      {/* Priority is a tie-break between templates on one trigger; it lives in
+          the editor, not on the card, where a bare number meant nothing. */}
+      <div className="mt-auto flex items-center justify-end border-t border-border pt-3">
         <div className="flex items-center gap-1">
           <Button size="sm" variant="ghost" onClick={onEdit}>
             <Pencil className="mr-1 size-3.5" />

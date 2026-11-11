@@ -4,6 +4,7 @@
  * No React, no fetch — safe for client code and plain vitest.
  */
 import { BUSINESS_BASE_LOCATION } from "@/lib/config/business-location";
+import { codeOrTextLabel } from "@/lib/admin/request-labels";
 
 const BUSINESS_TZ = BUSINESS_BASE_LOCATION.timezone;
 
@@ -16,13 +17,13 @@ const ISSUE_WORDS: Record<string, string> = {
   other: "Other issue",
 };
 
-/** "cooling_not_working" -> "Cooling not working"; known codes map to nicer words. */
+/** "cooling_not_working" -> "Cooling not working"; known codes map to nicer words.
+ * An imported free-text title (a FieldPulse job name) is shown as typed. */
 export function issueLabel(code: string | null | undefined): string {
   if (!code) return "Service request";
-  const known = ISSUE_WORDS[code];
+  const known = Object.hasOwn(ISSUE_WORDS, code) ? ISSUE_WORDS[code] : undefined;
   if (known) return known;
-  const spaced = code.replace(/_/g, " ").trim().toLowerCase();
-  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "Service request";
+  return codeOrTextLabel(code) || "Service request";
 }
 
 /** Snake-case status -> sentence case: "in_progress" -> "In progress". */

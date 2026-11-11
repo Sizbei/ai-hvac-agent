@@ -18,6 +18,10 @@ export interface CustomerListRecord {
   readonly equipmentCount: number;
   readonly requestCount: number;
   readonly lastServiceDate: string | null;
+  /** Invoices on file (any state). Imported customers' history is mostly invoices. */
+  readonly invoiceCount: number;
+  /** Newest non-draft, non-void invoice's issue date (ISO), or null. */
+  readonly lastInvoiceDate: string | null;
   readonly createdAt: string;
   readonly customerType: string;
   readonly membershipStatus: string;
@@ -48,6 +52,11 @@ export interface CustomerDetail extends CustomerRecord {
   /** Whether a self-service portal link is currently active for this customer.
    * Boolean only — the portal token/hash is never exposed to the client. */
   readonly portalActive: boolean;
+  /** Earliest of when the row was added, its first invoice and its first
+   * request — imported rows were "added" on the import day. */
+  readonly customerSince: string;
+  /** Newest non-draft, non-void invoice's issue date (ISO), or null. */
+  readonly lastInvoiceDate: string | null;
   readonly fieldpulseCustomFields: readonly { readonly name: string; readonly value: string }[] | null;
   readonly equipment: readonly EquipmentRecord[];
   readonly serviceHistory: readonly ServiceHistoryRecord[];

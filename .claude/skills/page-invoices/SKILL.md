@@ -37,7 +37,11 @@ overdue, source, sort, search, unreminded, minCents, maxCents params. Stats
 (outstandingCents, overdueCount, oldestOverdueDays, collectedThisMonthCents)
 come from the server — SummaryBand never reduces over the client list. 60s SWR
 cache (client-side only: the list route sends `Cache-Control: no-store`, so
-the browser never replays a pre-payment body). PER_PAGE=50. Default filter=overdue, sort=age-oldest. The ReconcileBanner
+the browser never replays a pre-payment body). PER_PAGE=50. Default filter=overdue. The sort follows the tab until the user
+picks one (`effectiveInvoiceSort`, `src/lib/admin/invoice-list-sort.ts`):
+Overdue/Unpaid → "Most overdue first" (`age-oldest` = unpaid by
+`coalesce(dueDate, issuedAt, createdAt)` ascending, so the age chips read in
+order; paid last), All/Paid → Newest first. The ReconcileBanner
 polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 
 **Invariants (violate = bug):**
@@ -201,6 +205,21 @@ polls `/api/admin/payments/reconcile` on mount (best-effort, never throws).
 - Phones: the document drops the unit-price column below `sm`.
 
 **Estimate-linked lines (M3c):** `invoice_line_items.estimate_line_item_id` marks lines copied from a sold estimate (field bill and office Generate); the field can't remove them (409 `FROM_ESTIMATE` 'This item came from the approved estimate. Ask the office to change it.'); the tech view marks them `fromEstimate` ('From the estimate').
+
+**Imported history display (2026-11-11):**
+- `ageChipView` (`age-chip.tsx`, tested): open → overdue/age, paid → green
+  Paid, draft/void/refunded → their state in grey (a $0 FieldPulse draft from
+  2023 no longer reads "1098 days" in red). The detail header shows the chip
+  only while open (the state badge already names the rest).
+- Activity on a mirrored invoice: "Invoice created in FieldPulse" on its issue
+  date (not the import run); FP payments read "Payment recorded in FieldPulse".
+  Payment chips via `paymentChipLabel` ("In FieldPulse", not "Other") and
+  dates via `paymentWhenLabel` (FP: day only, UTC; ours: business time zone).
+- Line quantities via `lineQuantityLabel` (`src/lib/admin/line-quantity.ts`):
+  the integer column rounds FieldPulse's 4.55 hrs to 5; the exact quantity is
+  recovered from total / unit price when rounding explains the gap.
+- Collected this month stays native-only; with synced invoices its sublabel
+  says FieldPulse/HCP is not included (`collectedThisMonthSublabel`).
 
 **Gotchas:**
 - The SummaryBand is suppressed during initial load (`!isLoading`) to avoid the

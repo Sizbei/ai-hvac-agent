@@ -3,6 +3,7 @@ import {
   LESSON_IDS,
   HISTORY_CONTACT_FALLBACK,
   buildGuidePayload,
+  contactOrFallback,
   guidePatchSchema,
   guidePatchWrites,
   parseAdminGuideState,
@@ -133,8 +134,6 @@ describe("buildGuidePayload", () => {
     readOnly: false,
     payLinks: true,
     hasFieldPulse: true,
-    historyHidden: true,
-    contactName: "Raymond Chen",
   };
 
   it("maps a fresh admin's state", () => {
@@ -146,8 +145,6 @@ describe("buildGuidePayload", () => {
       readOnly: false,
       payLinks: true,
       hasFieldPulse: true,
-      historyHidden: true,
-      historyContact: "Raymond Chen",
     });
   });
 
@@ -173,11 +170,14 @@ describe("buildGuidePayload", () => {
     });
   });
 
+});
+
+describe("contactOrFallback", () => {
   it.each([
     ["no platform admin in the org", null],
     ["a blank name", "   "],
   ])("falls back to the generic contact with %s", (_n, contactName) => {
-    expect(buildGuidePayload({ ...base, state: {}, contactName }).historyContact).toBe(HISTORY_CONTACT_FALLBACK);
+    expect(contactOrFallback(contactName)).toBe(HISTORY_CONTACT_FALLBACK);
     expect(HISTORY_CONTACT_FALLBACK).toBe("your account administrator");
   });
 
@@ -185,10 +185,10 @@ describe("buildGuidePayload", () => {
     ["a name equal to an email", "owner@spears.example"],
     ["a name containing @", "Ray @ Spears"],
   ])("never returns an email: %s falls back", (_n, contactName) => {
-    expect(buildGuidePayload({ ...base, state: {}, contactName }).historyContact).toBe(HISTORY_CONTACT_FALLBACK);
+    expect(contactOrFallback(contactName)).toBe(HISTORY_CONTACT_FALLBACK);
   });
 
   it("trims the contact name", () => {
-    expect(buildGuidePayload({ ...base, state: {}, contactName: "  Ray  " }).historyContact).toBe("Ray");
+    expect(contactOrFallback("  Ray  ")).toBe("Ray");
   });
 });

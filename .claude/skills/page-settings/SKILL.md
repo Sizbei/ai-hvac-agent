@@ -46,7 +46,8 @@ and `.../tags-panel.tsx`; types/schemas `src/lib/admin/job-type-types.ts`,
 - `GET/POST /api/admin/settings/tags` (`?entity=customer|location|job&active=1`)
   and `PATCH .../tags/[id]`. A tag type = entity, name (≤40), `color` token
   (graphite/marker/danger/success/warning/info), `visibleOnBoard` (job tags
-  only meaningfully: shows on dispatch cards), `active`. `entity` is immutable
+  only; the board doesn't render tags yet, so the tags panel hides its switch
+  behind `BOARD_SHOWS_TAGS = false`), `active`. `entity` is immutable
   after create (not in the patch schema). Tag types are deactivated, not deleted.
 - `GET/PUT /api/admin/tags/[entity]/[id]` reads/replaces the tags on one
   customer/location/job; unknown entity or tag id -> 400 `UNKNOWN_TAG`, missing

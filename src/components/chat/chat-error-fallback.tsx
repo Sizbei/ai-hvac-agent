@@ -42,10 +42,10 @@ export function ChatErrorFallback({
       )}
       <div className="flex items-center gap-3">
         <Button variant="default" onClick={onRetry} className="h-11 text-sm">
-          Try Again
+          Try again
         </Button>
         <Button variant="outline" render={<Link href="/" />} className="h-11 text-sm">
-          Go Home
+          Go home
         </Button>
       </div>
     </div>

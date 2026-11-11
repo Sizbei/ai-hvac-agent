@@ -33,7 +33,7 @@ const GENERIC_COPY = "Couldn't save the tag. Please try again.";
 const GROUPS: readonly { entity: TagEntity; title: string; description: string }[] = [
   { entity: 'customer', title: 'Customers', description: 'Labels on customer profiles, such as VIP or Commercial.' },
   { entity: 'location', title: 'Locations', description: 'Labels on service locations, such as Gate code or Dog.' },
-  { entity: 'job', title: 'Requests', description: 'Labels on requests. Dispatch cards don\'t show tags yet; "Show on board" picks the ones they will show.' },
+  { entity: 'job', title: 'Requests', description: 'Labels on requests, such as Callback or Warranty.' },
 ];
 
 // Plain colour names for the design tokens (owners don't know "marker").
@@ -111,6 +111,12 @@ interface RowProps {
   readonly onError: (message: string | null) => void;
 }
 
+/**
+ * Dispatch cards don't render tags yet, so the "Show on board" switch would do
+ * nothing visible. Flip this when the board reads `visibleOnBoard`.
+ */
+const BOARD_SHOWS_TAGS = false;
+
 function TagRow({ tag, showBoard, onSaved, onError }: RowProps) {
   const [name, setName] = useState(tag.name);
   const [saving, setSaving] = useState(false);
@@ -146,7 +152,7 @@ function TagRow({ tag, showBoard, onSaved, onError }: RowProps) {
         onBlur={commitName}
       />
       <ColorSelect
-        label="Colour"
+        label="Color"
         value={tag.color}
         onChange={(c) => c !== tag.color && void save({ color: c })}
       />
@@ -221,7 +227,7 @@ function TagGroup({ entity, title, description, tags, onSaved, onCreated, onErro
         ) : (
           <div>
             {tags.map((t) => (
-              <TagRow key={t.id} tag={t} showBoard={entity === 'job'} onSaved={onSaved} onError={onError} />
+              <TagRow key={t.id} tag={t} showBoard={BOARD_SHOWS_TAGS && entity === 'job'} onSaved={onSaved} onError={onError} />
             ))}
           </div>
         )}
@@ -234,7 +240,7 @@ function TagGroup({ entity, title, description, tags, onSaved, onCreated, onErro
             maxLength={40}
             onChange={(e) => setNewName(e.target.value)}
           />
-          <ColorSelect label={`New ${title.toLowerCase()} tag colour`} value={newColor} onChange={setNewColor} />
+          <ColorSelect label={`New ${title.toLowerCase()} tag color`} value={newColor} onChange={setNewColor} />
           <Button onClick={() => void handleAdd()} disabled={newName.trim().length === 0 || adding}>
             {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
             Add

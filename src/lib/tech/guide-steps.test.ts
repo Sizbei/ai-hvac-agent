@@ -34,7 +34,7 @@ describe("STEP_DEFS", () => {
   });
   it("pins titles and why lines", () => {
     const t = Object.fromEntries(STEP_DEFS.map((s) => [s.id, [s.title, s.why]]));
-    expect(t.start_job).toEqual(["Start your first job", "The office sees where you are without calling you."]);
+    expect(t.start_job).toEqual(["Start your first job", "Each tap tells the office you're on the way, on site and working, so nobody has to call you."]);
     expect(t.finish_job).toEqual(["Finish a job", "Done tells the office your part is finished. Close out finishes the whole request."]);
     expect(t.clock_in).toEqual(["Clock in for the day", "Your hours land on the office timesheet without a paper form."]);
     expect(t.share_location).toEqual(["Share your location while working", "Dispatch sends the nearest technician to the next job."]);

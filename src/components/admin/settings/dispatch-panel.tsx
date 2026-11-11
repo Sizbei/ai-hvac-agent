@@ -38,10 +38,10 @@ export function DispatchPanel({ config, onSave }: DispatchPanelProps) {
       <CardHeader>
         <CardTitle>Auto-dispatch</CardTitle>
         <CardDescription>
-          When on, a newly booked job is automatically assigned to the best
-          qualified technician — ranked by their experience with the job type,
-          their ratings, and how busy their day already is. When off, jobs are
-          assigned to the first available technician.
+          When on, each new request goes to the best-qualified technician,
+          ranked by their experience with that kind of work, their ratings, and
+          how busy their day already is. When off, requests go to the first
+          available technician.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -49,7 +49,7 @@ export function DispatchPanel({ config, onSave }: DispatchPanelProps) {
           <div className="space-y-0.5">
             <Label htmlFor="auto-dispatch-switch">Smart auto-dispatch</Label>
             <p className="text-sm text-muted-foreground">
-              Assign by skill, quality, and load instead of first-available.
+              Assign by skill, ratings, and workload instead of whoever is free first.
             </p>
           </div>
           <div className="flex items-center gap-2">

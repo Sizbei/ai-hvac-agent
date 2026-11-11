@@ -5,6 +5,7 @@
  */
 
 import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
+import { addressCity } from '@/lib/admin/contact-format';
 
 /** Up to two initials from a customer name, ignoring parenthetical suffixes like
  * "(TCG)" so "Belk Morristown (TCG)" → "BM", not "B(". Falls back to the first
@@ -21,13 +22,11 @@ export function customerInitials(name: string | null): string {
   return initials.toUpperCase() || '?';
 }
 
-/** The city from a "street, city, ST zip" address, or null. Takes the
- * second-to-last comma segment (the city sits before the state/zip). */
+/** The city from a "street, city, ST zip" address, or null when the address
+ * has no recognisable city (see `addressCity`: "Larkin Health Care, 1633
+ * Fernhill Dr" used to show "Larkin Health Care" as the city). */
 export function customerCity(address: string | null): string | null {
-  if (!address) return null;
-  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
-  if (parts.length >= 2) return parts[parts.length - 2] ?? null;
-  return null;
+  return addressCity(address);
 }
 
 /** A short "last seen" label from an ISO date, relative to `now` (defaults to
@@ -75,4 +74,27 @@ export function bookingDateParts(iso: string): {
   const get = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((p) => p.type === type)?.value ?? '';
   return { month: get('month'), day: get('day'), year: get('year') };
+}
+
+/**
+ * The directory's one-line activity summary. A completed request is the best
+ * signal ("Last service 3mo ago"); imported customers mostly have invoices
+ * instead ("Last invoiced 1y ago"). `date` drives the freshness dot.
+ */
+export function customerActivity(
+  c: { readonly lastServiceDate: string | null; readonly lastInvoiceDate?: string | null },
+  now: Date = new Date(),
+): { readonly label: string; readonly date: string | null } {
+  if (c.lastServiceDate) {
+    return { label: `Last service ${lastSeenLabel(c.lastServiceDate, now)}`, date: c.lastServiceDate };
+  }
+  if (c.lastInvoiceDate) {
+    return { label: `Last invoiced ${lastSeenLabel(c.lastInvoiceDate, now)}`, date: c.lastInvoiceDate };
+  }
+  return { label: 'No service on record', date: null };
+}
+
+/** "1 invoice" / "2,660 customers" — a count with its noun, thousands separated. */
+export function countLabel(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n.toLocaleString('en-US')} ${n === 1 ? singular : plural}`;
 }

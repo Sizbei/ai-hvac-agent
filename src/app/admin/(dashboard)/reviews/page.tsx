@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/admin/ui/empty-state';
 import { Pager } from '@/components/admin/ui/pager';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
 import { reviewsEmptyDescription, reviewsSubtitle } from '@/lib/admin/review-switch-copy';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
 
 const PER_PAGE = 50;
 
@@ -68,10 +69,10 @@ function Stars({ rating }: { readonly rating: number | null }) {
 function ReviewCustomer({ review }: { readonly review: ReviewRow }) {
   return review.customerId && review.customerName ? (
     <Link href={`/admin/customers/${review.customerId}`} className="block text-link hover:underline">
-      {review.customerName}
+      {customerNameLabel(review.customerName)}
     </Link>
   ) : (
-    <span className="block text-muted-foreground">Unknown customer</span>
+    <span className="block text-muted-foreground">{customerNameLabel(review.customerName)}</span>
   );
 }
 

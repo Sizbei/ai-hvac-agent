@@ -41,6 +41,7 @@ import { deriveInvoicePresentation } from '@/lib/admin/invoice-presentation';
 import { isCollectible, invoiceRef } from '@/lib/admin/invoice-collectible';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { BUSINESS_BASE_LOCATION } from '@/lib/config/business-location';
 import { mintKey } from '@/lib/http/idempotency-codes';
 import {
   canRecordPayment,
@@ -48,7 +49,8 @@ import {
   canSendReminder,
   centsToInputDollars,
   invoiceLinkAction,
-  paymentMethodSummary,
+  paymentChipLabel,
+  paymentWhenLabel,
   paymentStatusLabel,
   receiptNoticeCopy,
   REFUND_REASONS,
@@ -115,17 +117,6 @@ interface ApiInvoice {
 
 function hydrateSignature(s: ApiSignature): DocumentSignature {
   return { ...s, signedAt: s.signedAt ? new Date(s.signedAt) : null };
-}
-
-/** "Nov 5, 2026, 9:01 PM" — the invoice document's day format plus a time. */
-function formatDateTime(d: Date): string {
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 /** Convert the API JSON response (string dates) into the client view (Date objects). */
@@ -461,7 +452,11 @@ export function InvoiceDetailClient({
         actions={
           <>
             <InvoiceStateBadge state={invoice.state} />
-            <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} dueDate={invoice.dueDate?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
+            {/* The state badge already names a paid/draft/void invoice; the
+                age chip adds information only while it is open. */}
+            {invoice.state === 'open' && (
+              <AgeChip issuedAt={invoice.issuedAt?.toISOString() ?? null} dueDate={invoice.dueDate?.toISOString() ?? null} createdAt={invoice.createdAt.toISOString()} state={invoice.state} />
+            )}
             {invoice.syncedSource && (
               <SyncPill source={invoice.syncedSource} size="md" />
             )}
@@ -683,15 +678,15 @@ export function InvoiceDetailClient({
                               {paymentStatusLabel(p.status, refunded)}
                             </span>
                             <span className="inline-flex h-5 items-center whitespace-nowrap rounded-[3px] border border-border bg-surface-sunken px-1.5 text-[11px] font-medium tabular-nums">
-                              {paymentMethodSummary(p.method, p.checkNumber)}
+                              {paymentChipLabel(p)}
                             </span>
                             {p.isDeposit && (
                               <span className="inline-flex h-5 items-center rounded-[3px] border border-info-border bg-info-light px-1.5 text-[11px] font-medium text-info-strong">
-                                deposit
+                                Deposit
                               </span>
                             )}
                             <span className="text-xs text-muted-foreground">
-                              {formatDateTime(p.createdAt)}
+                              {paymentWhenLabel(p.createdAt, p.provider, BUSINESS_BASE_LOCATION.timezone)}
                             </span>
                           </div>
                           {canRefund && !invoice.syncedSource && refundable && refundFor !== p.id && (
@@ -725,7 +720,7 @@ export function InvoiceDetailClient({
                                   Refunded
                                   {refundReasonLabel(r.reason) ? ` · ${refundReasonLabel(r.reason)}` : ''}
                                   {' · '}
-                                  {formatDateTime(r.createdAt)}
+                                  {paymentWhenLabel(r.createdAt, 'refund', BUSINESS_BASE_LOCATION.timezone)}
                                 </span>
                                 <span>-{formatCentsExact(r.amountCents)}</span>
                               </li>

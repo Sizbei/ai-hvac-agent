@@ -65,6 +65,8 @@ vi.mock("@/lib/admin/org-config-queries", () => ({
 }));
 
 import { db } from "@/lib/db";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";
 
@@ -485,6 +487,25 @@ describe("importJobsFromFieldpulse", () => {
     const statusVal = capturedSet!.status;
     // drizzle sql template produces an object; a plain string would mean no guard.
     expect(typeof statusVal).not.toBe("string");
+  });
+
+  it("re-sync recomputes is_after_hours with created_at, for FieldPulse's real booking time", async () => {
+    // 2026-07-07 23:30 UTC = 19:30 New York: after hours under the mocked config.
+    const client = makeClient([makeJob({ createdAt: "2026-07-07 23:30:00" })]);
+    const counts = makeCounts();
+    wireSelectSequence([
+      [{ fieldpulseJobId: "10000001" }],
+      [{ id: "cust-uuid", fieldpulseCustomerId: "20000001" }],
+      [],
+    ]);
+    const { set } = wireUpdate();
+
+    await importJobsFromFieldpulse(ORG, counts, client);
+
+    const captured = set.mock.calls[0]?.[0] as Record<string, unknown>;
+    const q = new PgDialect().sqlToQuery(captured.isAfterHours as SQL);
+    expect(q.sql).toContain('THEN $2 ELSE "service_requests"."is_after_hours" END');
+    expect(q.params).toEqual(["2026-07-07T23:30:00.000Z", true]);
   });
 
   it("resolves technician from pre-selected cache", async () => {

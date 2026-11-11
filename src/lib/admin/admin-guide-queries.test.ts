@@ -69,7 +69,6 @@ describe("readAdminGuide", () => {
         state: { tourStartedAt: T1, lastLesson: "customers", junk: 1 },
         has_field_pulse: true,
         feature_flags: { payLinks: false },
-        contact_name: "Raymond Chen",
       })],
     });
     const g = await readAdminGuide(viewer(), { readOnly: false });
@@ -81,23 +80,16 @@ describe("readAdminGuide", () => {
       readOnly: false,
       payLinks: false,
       hasFieldPulse: true,
-      historyHidden: true,
-      historyContact: "Raymond Chen",
     });
     expect(executed).toHaveLength(1);
     expect(render(executed[0]).params.slice(0, 2)).toEqual([ME, ORG]);
-    expect(render(executed[0]).params).toContainEqual(["owner@x.com"]);
+    expect(render(executed[0]).params).not.toContainEqual(["owner@x.com"]);
     expect(flat(executed[0])).not.toMatch(/\bUPDATE\b/);
   });
 
   it("payLinks defaults on when the org has no flag stored (getFeatures semantics)", async () => {
     queue.push({ rows: [row({ feature_flags: null })] });
     expect((await readAdminGuide(viewer(), { readOnly: false })).payLinks).toBe(true);
-  });
-
-  it("historyHidden is !viewer.showHidden", async () => {
-    queue.push({ rows: [row()] });
-    expect((await readAdminGuide(viewer({ showHidden: true }), { readOnly: false })).historyHidden).toBe(false);
   });
 
   it("an active preview reads the TARGET's state with the target's role, read-only", async () => {
@@ -134,11 +126,6 @@ describe("readAdminGuide", () => {
     expect(render(executed[0]).params).not.toContain(ME);
     expect(flat(executed[0])).toContain("NULL::jsonb AS state");
     expect(g).toMatchObject({ welcomeDue: false, readOnly: true, lastLesson: null, tourStartedAt: null });
-  });
-
-  it("no matching platform admin: the generic contact", async () => {
-    queue.push({ rows: [row({ contact_name: null })] });
-    expect((await readAdminGuide(viewer(), { readOnly: false })).historyContact).toBe("your account administrator");
   });
 
   it("throws on a DB error (the route turns it into guide: null)", async () => {

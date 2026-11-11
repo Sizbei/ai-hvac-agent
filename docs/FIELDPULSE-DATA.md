@@ -58,8 +58,11 @@ revealed the pipeline: **1=pending, 2=on the way (→ native `assigned`),
 custom status still unnamed — imports as `pending` and is tallied in every run
 log; map it in `FP_JOB_STATUS_MAP` (`src/lib/integrations/fieldpulse/import/jobs.ts`)
 when named. FP payment status `4` = succeeded (proven by exact to-the-cent
-reconciliation across 2,249 fully-paid invoices). Estimate statuses carry real
-names via per-id `custom_status` (Sent / Completed / Draft / Accepted / Lost…).
+reconciliation across 2,249 fully-paid invoices). Estimate stage = `status_id`,
+named by `GET /estimates/status-workflows` (each status has a company name and a
+bucket `type`); `estimate_accept_at` marks acceptance. Per-id `custom_status` no
+longer exists (2026-11-11) and `estimate_status` 0–8 has drifted from the
+workflow — mapping in `src/lib/integrations/fieldpulse/estimate-status.ts`.
 
 ## Sync architecture
 

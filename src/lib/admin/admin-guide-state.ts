@@ -24,8 +24,6 @@ export interface AdminGuidePayload {
   readOnly: boolean;
   payLinks: boolean;
   hasFieldPulse: boolean;
-  historyHidden: boolean;
-  historyContact: string;
 }
 
 export const HISTORY_CONTACT_FALLBACK = "your account administrator";
@@ -96,8 +94,6 @@ export function buildGuidePayload(input: {
   readOnly: boolean;
   payLinks: boolean;
   hasFieldPulse: boolean;
-  historyHidden: boolean;
-  contactName: string | null;
 }): AdminGuidePayload {
   const state = input.state ?? {};
   return {
@@ -108,8 +104,6 @@ export function buildGuidePayload(input: {
     readOnly: input.readOnly,
     payLinks: input.payLinks,
     hasFieldPulse: input.hasFieldPulse,
-    historyHidden: input.historyHidden,
-    historyContact: contactOrFallback(input.contactName),
   };
 }
 

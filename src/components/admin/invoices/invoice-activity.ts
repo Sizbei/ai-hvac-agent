@@ -43,20 +43,34 @@ export function collectionsStats(
   return { daysOverdue, lastRemindedRel, balanceCents: balance };
 }
 
+const SOURCE_NAME = { fieldpulse: 'FieldPulse', housecall: 'Housecall Pro' } as const;
+
 export function buildActivity(
-  inv: Pick<InvoiceDetailView, 'createdAt' | 'lastReminderSentAt' | 'payments'>,
+  inv: Pick<InvoiceDetailView, 'createdAt' | 'lastReminderSentAt' | 'payments'> &
+    Partial<Pick<InvoiceDetailView, 'issuedAt' | 'syncedSource'>>,
   reminders: InvoiceReminderView[] = [],
 ): ActivityEvent[] {
   const events: ActivityEvent[] = [];
 
-  events.push({ kind: 'created', at: inv.createdAt, label: 'Invoice created' });
+  // A mirrored invoice was created in its source system on its issue date;
+  // our createdAt is only the import run, which read as "created" after its
+  // own payments.
+  const source = inv.syncedSource ? SOURCE_NAME[inv.syncedSource] : null;
+  events.push(
+    source
+      ? { kind: 'created', at: inv.issuedAt ?? inv.createdAt, label: `Invoice created in ${source}` }
+      : { kind: 'created', at: inv.createdAt, label: 'Invoice created' },
+  );
 
   for (const payment of inv.payments) {
     // Amount and method, so the trail reads without opening Payments.
     events.push({
       kind: 'payment',
       at: payment.createdAt,
-      label: `Payment recorded · ${formatCentsExact(payment.amountCents)} · ${paymentMethodLabel(payment.method)}`,
+      label:
+        payment.provider === 'fieldpulse'
+          ? `Payment recorded in FieldPulse · ${formatCentsExact(payment.amountCents)}`
+          : `Payment recorded · ${formatCentsExact(payment.amountCents)} · ${paymentMethodLabel(payment.method)}`,
     });
     for (const refund of payment.refunds ?? []) {
       events.push({

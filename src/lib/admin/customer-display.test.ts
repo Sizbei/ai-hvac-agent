@@ -5,6 +5,8 @@ import {
   lastSeenLabel,
   lastSeenTone,
   bookingDateParts,
+  customerActivity,
+  countLabel,
 } from './customer-display';
 
 describe('customerInitials', () => {
@@ -27,12 +29,16 @@ describe('customerInitials', () => {
 describe('customerCity', () => {
   it('pulls the city from a full address', () => {
     expect(
-      customerCity('3280 East Andrew Johnson Highway, Greeneville, Tennessee 37745'),
-    ).toBe('Greeneville');
+      customerCity('3280 East Millrace Highway, Ashgrove, Tennessee 37745'),
+    ).toBe('Ashgrove');
   });
   it('returns null for a single-segment or empty address', () => {
     expect(customerCity('603 Sharon Dr')).toBeNull();
     expect(customerCity(null)).toBeNull();
+  });
+  it('does not mistake a business name for the city', () => {
+    expect(customerCity('Larkin Health Care, 1633 Fernhill Dr')).toBeNull();
+    expect(customerCity('P & Q Hair Care, Inc., 1315 Osprey Ave')).toBeNull();
   });
 });
 
@@ -78,5 +84,35 @@ describe('bookingDateParts', () => {
       day: '15',
       year: '2026',
     });
+  });
+});
+
+describe('customerActivity', () => {
+  const now = new Date('2026-11-11T12:00:00Z');
+  it('prefers the last completed service', () => {
+    expect(
+      customerActivity({ lastServiceDate: '2026-11-01T12:00:00Z', lastInvoiceDate: '2026-11-10T12:00:00Z' }, now),
+    ).toEqual({ label: 'Last service 10d ago', date: '2026-11-01T12:00:00Z' });
+  });
+  it('falls back to the last invoice for imported history', () => {
+    expect(customerActivity({ lastServiceDate: null, lastInvoiceDate: '2025-07-28 00:00:00+00' }, now)).toEqual({
+      label: 'Last invoiced 1y ago',
+      date: '2025-07-28 00:00:00+00',
+    });
+  });
+  it('says so when there is nothing', () => {
+    expect(customerActivity({ lastServiceDate: null, lastInvoiceDate: null }, now)).toEqual({
+      label: 'No service on record',
+      date: null,
+    });
+  });
+});
+
+describe('countLabel', () => {
+  it('separates thousands and picks the noun', () => {
+    expect(countLabel(2660, 'customer')).toBe('2,660 customers');
+    expect(countLabel(1, 'invoice')).toBe('1 invoice');
+    expect(countLabel(0, 'request')).toBe('0 requests');
+    expect(countLabel(3, 'equipment', 'equipment')).toBe('3 equipment');
   });
 });

@@ -108,6 +108,11 @@ describe("mapAccountType", () => {
   it("maps empty string → null", () => {
     expect(mapAccountType("")).toBeNull();
   });
+  it("maps FieldPulse's live values: 'company' → 'commercial', 'individual' → 'residential'", () => {
+    expect(mapAccountType("company")).toBe("commercial");
+    expect(mapAccountType("Company ")).toBe("commercial");
+    expect(mapAccountType("individual")).toBe("residential");
+  });
   it("maps unknown value → null (safe default)", () => {
     expect(mapAccountType("industrial")).toBeNull();
     expect(mapAccountType("business")).toBeNull();

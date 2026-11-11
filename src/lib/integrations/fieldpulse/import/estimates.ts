@@ -7,13 +7,13 @@
  * Key decisions:
  *  - totalCount is NULL on /estimates (same as /invoices — Phase 9 live-verified);
  *    counts.total is set to null so the run ledger reflects "indeterminate".
- *  - Estimate status mapping: FP status is a free string. Best-effort map to the
- *    native estimateStatusEnum ("open"|"sold"|"dismissed"|"expired"):
- *      "1","draft","open" → "open"
- *      "2","approved","sold","accepted" → "sold"
- *      "3","void","declined","dismissed","rejected" → "dismissed"
- *      "4","expired" → "expired"
- *      unknown → "open" (safe default; tallied + logged once at end)
+ *  - Estimate status: resolved from FP `status_id` against the company's
+ *    estimate status workflows (fetched once per run) plus `estimate_accept_at`
+ *    — see ../estimate-status.ts for the evidence and the mapping. The FP name
+ *    is stored in fieldpulse_status_name. If the workflows can't be fetched
+ *    or come back empty, or a status id is in no workflow (and nothing
+ *    records an acceptance), new rows land "open" and existing rows keep
+ *    their status and name.
  *  - FP estimates are SYNCED-READ-ONLY in native money flows (fieldpulseEstimateId
  *    IS NOT NULL discriminator — same pattern as invoices).
  *  - Money (subtotalCents, taxCents, totalCents) in cents from the client mapper.
@@ -38,18 +38,9 @@ import type { FieldpulseClient } from "../client";
 import type { FieldpulseEstimate } from "../types";
 import type { PhaseResult } from "./run-import";
 import { parseFpDate } from "./jobs";
+import { keepEarliest } from "./keep-earliest";
+import { fpEstimateStatusUpdate, type FpEstimateStatusLookup } from "../estimate-status";
 import { buildFpSpillover } from "./spillover";
-
-export function mapFpEstimateStatus(
-  fpStatus: string | null | undefined,
-): "open" | "sold" | "dismissed" | "expired" {
-  const s = (fpStatus ?? "").toLowerCase().trim();
-  if (["1", "draft", "open"].includes(s)) return "open";
-  if (["2", "approved", "sold", "accepted"].includes(s)) return "sold";
-  if (["3", "void", "declined", "dismissed", "rejected"].includes(s)) return "dismissed";
-  if (["4", "expired"].includes(s)) return "expired";
-  return "open"; // safe default for unknowns
-}
 
 export async function importEstimatesFromFieldpulse(
   orgId: string,
@@ -98,6 +89,25 @@ export async function importEstimatesFromFieldpulse(
     .where(and(eq(serviceRequests.organizationId, orgId), isNotNull(serviceRequests.fieldpulseJobId)));
   const jobMap = new Map(jobRows.map((r) => [r.fpId as string, r.nativeId]));
 
+  // The company's status workflows, once per run. A failure must not reset
+  // every estimate to "open", so existing rows then keep status and name.
+  let statusLookup: FpEstimateStatusLookup | null = null;
+  try {
+    statusLookup = await client.listEstimateStatuses();
+  } catch (err) {
+    logger.warn(
+      { orgId, error: err instanceof Error ? err.message : String(err) },
+      "FP estimate import: status workflows unavailable — existing estimate statuses left as they are",
+    );
+  }
+
+  if (statusLookup && statusLookup.size === 0) {
+    logger.warn(
+      { orgId },
+      "FP estimate import: status workflows came back empty — existing estimate statuses left as they are",
+    );
+  }
+
   const unknownStatuses = new Map<string, number>();
 
   for (const est of items) {
@@ -108,31 +118,25 @@ export async function importEstimatesFromFieldpulse(
 
     try {
       const isNew = !existingFpIds.has(est.id);
-      const status = mapFpEstimateStatus(est.status);
-
-      // Tally unknown statuses.
-      if (est.status != null) {
-        const s = est.status.toLowerCase().trim();
-        const known = ["1", "draft", "open", "2", "approved", "sold", "accepted", "3", "void", "declined", "dismissed", "rejected", "4", "expired"];
-        if (!known.includes(s)) {
-          unknownStatuses.set(est.status, (unknownStatuses.get(est.status) ?? 0) + 1);
-        }
+      // null = no FieldPulse evidence (workflows unread or empty, or an
+      // unknown status id with no acceptance): a new row lands "open" and an
+      // existing row keeps its status and name.
+      const update = fpEstimateStatusUpdate(
+        { statusId: est.statusId, acceptedAt: est.acceptedAt },
+        statusLookup,
+      );
+      const status = update?.status ?? "open";
+      const fieldpulseStatusName = update?.name ?? est.customStatus ?? null;
+      if (statusLookup && statusLookup.size > 0 && est.statusId && !statusLookup.has(est.statusId)) {
+        unknownStatuses.set(est.statusId, (unknownStatuses.get(est.statusId) ?? 0) + 1);
       }
+      const statusSet = update
+        ? { status: update.status, ...(update.name !== undefined ? { fieldpulseStatusName: update.name } : {}) }
+        : {};
 
       const customerId = est.customerId ? (customerMap.get(est.customerId) ?? null) : null;
       const serviceRequestId = est.jobId ? (jobMap.get(est.jobId) ?? null) : null;
-
-      // Per-id enrichment to get custom_status (not present on list rows).
-      let fieldpulseStatusName: string | null = null;
-      try {
-        const detail = await client.getEstimate(est.id);
-        fieldpulseStatusName = detail?.customStatus ?? null;
-      } catch (enrichErr) {
-        logger.warn(
-          { orgId, fpEstimateId: est.id, error: enrichErr instanceof Error ? enrichErr.message : String(enrichErr) },
-          "FP estimate import: per-id enrichment failed — continuing with null status name",
-        );
-      }
+      const createdAt = parseFpDate(est.createdAt);
 
       // P1: parse due_date and title.
       const dueDate = parseFpDate(est.dueDate) ?? null;
@@ -156,7 +160,7 @@ export async function importEstimatesFromFieldpulse(
           dueDate: dueDate ?? undefined,
           title: title ?? undefined,
           fieldpulseData: fpSpillover,
-          createdAt: parseFpDate(est.createdAt) ?? undefined,
+          createdAt: createdAt ?? undefined,
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -165,9 +169,9 @@ export async function importEstimatesFromFieldpulse(
           set: {
             customerId: customerId ?? undefined,
             serviceRequestId: serviceRequestId ?? undefined,
-            status,
+            ...statusSet,
             totalCents: est.totalCents ?? 0,
-            fieldpulseStatusName,
+            ...(createdAt ? { createdAt: keepEarliest(estimates.createdAt, createdAt) } : {}),
             dueDate: dueDate ?? undefined,
             title: title ?? undefined,
             fieldpulseData: fpSpillover,
@@ -268,8 +272,8 @@ export async function importEstimatesFromFieldpulse(
 
   if (unknownStatuses.size > 0) {
     logger.warn(
-      { orgId, unknownStatuses: Object.fromEntries(unknownStatuses) },
-      "FP estimate import: unknown FP status codes encountered — mapped to 'open'",
+      { orgId, unknownStatusIds: Object.fromEntries(unknownStatuses) },
+      "FP estimate import: status_id not in any FP estimate workflow — existing rows keep their status",
     );
   }
 

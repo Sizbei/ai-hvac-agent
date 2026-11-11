@@ -60,18 +60,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { MAX_TECHNICIANS_PER_VISIT, type AppointmentRecord } from '@/lib/admin/appointment-types';
-import { WINDOW_LABELS, formatIsoDayShort, initialVisitDay } from '@/lib/admin/create-request';
+import { initialVisitDay } from '@/lib/admin/create-request';
 import {
   BUSINESS_TIME_ZONE,
   arrivalWindowUtcForBusinessDate,
-  businessIsoDate,
-  formatBusinessTime,
-  windowRowOfInstant,
 } from '@/lib/admin/calendar-time';
 import { cn } from '@/lib/utils';
-import { humanizeSeconds } from '@/lib/admin/duration-format';
-import { formatCentsExact } from '@/lib/admin/money-format';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { ExpandableDescription } from '@/components/admin/expandable-description';
+import { businessDateLabel, visitWhenLabel } from '@/lib/admin/visit-when';
+import { fieldpulseMetricRows, requestFieldpulseExtras } from '@/lib/admin/request-fieldpulse-view';
+import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { SyncPill } from '@/components/admin/sync-pill';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
 import { canSaveSchedule, scheduleInputsFrom } from '@/lib/admin/request-schedule-inputs';
@@ -365,13 +364,7 @@ const VISIT_ERROR_COPY: Record<string, string> = {
 const VISIT_GENERIC_ERROR = 'Couldn’t save the visit. Try again.';
 
 function visitWhen(a: AppointmentRecord): string {
-  if (!a.arrivalWindowStart) {
-    return a.scheduledDate ? formatIsoDayShort(a.scheduledDate.slice(0, 10)) : 'Not scheduled';
-  }
-  const start = new Date(a.arrivalWindowStart);
-  const day = formatIsoDayShort(businessIsoDate(start));
-  const row = windowRowOfInstant(start);
-  return `${day} ${row ? WINDOW_LABELS[row] : formatBusinessTime(start)}`;
+  return visitWhenLabel(a.arrivalWindowStart, a.arrivalWindowEnd, a.scheduledDate);
 }
 
 async function visitErrorFrom(res: Response): Promise<string> {
@@ -1066,6 +1059,8 @@ export function RequestDetailSheet({
   const activeTechnicians = technicians.filter((t) => t.isActive);
   // The visit the office shows as current — the same one the technician's phone shows.
   const visitView = detail ? sheetVisitView(detail) : null;
+  const fpMetricRows = fieldpulseMetricRows(detail?.fieldpulseMetrics);
+  const fpExtras = requestFieldpulseExtras(detail?.fieldpulseData);
   const statusButtons = detail
     ? allowedTransitions(detail.status as RequestStatus).filter(
         (next) => !visitView?.hiddenTransitions.includes(next),
@@ -1123,6 +1118,7 @@ export function RequestDetailSheet({
                 {detail.syncedSource && (
                   <SyncPill source={detail.syncedSource} size="md" />
                 )}
+                {fpExtras.multiDay && <ContextBadge variant="info" label="Multi-day" />}
                 <InvoiceStatusBadge status={detail.invoiceStatus} />
               </SheetDescription>
             </SheetHeader>
@@ -1181,26 +1177,22 @@ export function RequestDetailSheet({
               <section>
                 <h3 className="text-sm font-semibold mb-2">Issue details</h3>
                 <div className="rounded-md border p-3 space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Type</span>
-                    <span className="text-sm font-medium">
+                  <div className="flex justify-between gap-4">
+                    <span className="shrink-0 text-sm text-muted-foreground">Type</span>
+                    <span className="min-w-0 break-words text-right text-sm font-medium">
                       {issueTypeLabel(detail.issueType)}
                     </span>
                   </div>
                   {detail.description && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {detail.description}
-                    </p>
+                    <ExpandableDescription key={detail.id} text={detail.description} />
                   )}
                 </div>
               </section>
 
               {/* FieldPulse operational metrics (only for enriched FP jobs).
-                  Hidden entirely when all three metrics are empty. */}
-              {detail.fieldpulseMetrics &&
-                (detail.fieldpulseMetrics.totalPriceCents != null ||
-                  (detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 ||
-                  (detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0) && (
+                  Hidden entirely when no metric has a real value ($0 totals
+                  and zero times are FieldPulse placeholders). */}
+              {fpMetricRows.length > 0 && (
                 <section>
                   <div className="rounded-md border border-border-strong bg-surface-sunken">
                     <button
@@ -1221,34 +1213,21 @@ export function RequestDetailSheet({
                     </button>
                     {fpMetricsOpen && (
                       <div className="border-t border-border px-3 pb-3 pt-2 space-y-1">
-                        {detail.fieldpulseMetrics.totalPriceCents != null && (
-                          <InfoRow
-                            label="Total price"
-                            value={formatCentsExact(detail.fieldpulseMetrics.totalPriceCents)}
-                          />
-                        )}
-                        {(detail.fieldpulseMetrics.statusLogSeconds.on_the_way ?? 0) > 0 && (
-                          <InfoRow
-                            label="Time on the way"
-                            value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.on_the_way)}
-                          />
-                        )}
-                        {(detail.fieldpulseMetrics.statusLogSeconds.in_progress ?? 0) > 0 && (
-                          <InfoRow
-                            label="Time in progress"
-                            value={humanizeSeconds(detail.fieldpulseMetrics.statusLogSeconds.in_progress)}
-                          />
-                        )}
+                        {fpMetricRows.map((row) => (
+                          <InfoRow key={row.label} label={row.label} value={row.value} />
+                        ))}
                       </div>
                     )}
                   </div>
                 </section>
               )}
 
-              {/* FieldPulse spillover details — collapsed; hidden when null */}
-              {detail.fieldpulseData && (
+              {/* FieldPulse spillover details — collapsed; hidden when nothing
+                  readable is left (bare tag ids and the multi-day flag are not
+                  shown here). */}
+              {fpExtras.details && (
                 <section>
-                  <FieldpulseDetails data={detail.fieldpulseData} />
+                  <FieldpulseDetails data={fpExtras.details} />
                 </section>
               )}
 
@@ -1424,7 +1403,12 @@ export function RequestDetailSheet({
                   )}
                   <div className="flex items-center gap-2">
                     <Select
-                      value={selectedTechId}
+                      // An assignee who is no longer an active technician has no
+                      // item, and the trigger would print their raw id: show the
+                      // placeholder instead (the line above names them).
+                      value={
+                        activeTechnicians.some((t) => t.id === selectedTechId) ? selectedTechId : ''
+                      }
                       onValueChange={(value) => setSelectedTechId(value ?? '')}
                     >
                       <SelectTrigger className="flex-1">
@@ -1534,7 +1518,9 @@ export function RequestDetailSheet({
                     <p className="text-sm text-muted-foreground">
                       {detail.status === 'cancelled'
                         ? 'This request is cancelled.'
-                        : 'This request is complete.'}{' '}
+                        : businessDateLabel(detail.completedAt)
+                          ? `This request was completed on ${businessDateLabel(detail.completedAt)}.`
+                          : 'This request is complete.'}{' '}
                       No further changes.
                     </p>
                   ) : (

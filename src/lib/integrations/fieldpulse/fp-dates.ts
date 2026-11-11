@@ -25,3 +25,14 @@ export function parseFpDate(value: string | null | undefined): Date | null {
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
+
+/**
+ * The FieldPulse created date to write over a stored created_at, or null to
+ * leave it. Only an EARLIER FieldPulse date wins: an imported row stamped with
+ * the import day moves back to when FieldPulse created it, while a row we made
+ * first (a native request later pushed to FieldPulse) keeps its own date.
+ */
+export function earlierFpDate(current: Date, fpCreatedAt: Date | null): Date | null {
+  if (!fpCreatedAt) return null;
+  return fpCreatedAt.getTime() < current.getTime() ? fpCreatedAt : null;
+}

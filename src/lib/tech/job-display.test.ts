@@ -18,6 +18,11 @@ describe("issueLabel", () => {
     expect(issueLabel("")).toBe("Service request");
     expect(issueLabel(null)).toBe("Service request");
   });
+  it("shows an imported job title as typed", () => {
+    expect(issueLabel("Change out ODU & Coil")).toBe("Change out ODU & Coil");
+    expect(issueLabel("HVAC in back room  not working")).toBe("HVAC in back room not working");
+    expect(issueLabel("constructor")).toBe("Constructor");
+  });
 });
 
 describe("statusLabel", () => {

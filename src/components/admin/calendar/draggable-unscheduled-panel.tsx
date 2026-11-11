@@ -14,7 +14,7 @@ import {
 } from '@/lib/admin/calendar-dnd';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import { DASHBOARD_LIST_LIMIT, type DashboardRequest } from '@/lib/admin/types';
-import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel, issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface DraggableUnscheduledPanelProps {
   /** Jobs not yet placed: no technician and/or no arrival window. */
@@ -48,7 +48,7 @@ function UnscheduledRow({
     kind: 'job',
     requestId: job.id,
     currentStartIso: job.arrivalWindowStart,
-    label: `${job.customerName ?? 'Unknown customer'}, ${job.referenceNumber}`,
+    label: `${customerNameLabel(job.customerName)}, ${job.referenceNumber}`,
   };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragJobId(job.id),
@@ -71,7 +71,7 @@ function UnscheduledRow({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-[13px] font-medium">
-          {job.customerName ?? 'Unknown'}
+          {customerNameLabel(job.customerName)}
         </span>
         {job.isAfterHours && (
           <span
@@ -86,10 +86,10 @@ function UnscheduledRow({
         {issueTypeLabel(job.issueType)} ·{' '}
         <span className="font-mono">{job.referenceNumber}</span>
       </div>
-      <div className="mt-1 flex items-center gap-1.5">
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
         <UrgencyBadge urgency={job.urgency} />
         <StatusBadge status={job.status} />
-        <span className="ml-auto text-[10px] font-medium text-warning-strong">
+        <span className="ml-auto whitespace-nowrap text-[10px] font-medium text-warning-strong">
           {reason(job)}
         </span>
       </div>

@@ -32,6 +32,8 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import { rollUpMargin, hasUncostedLines, UNCOSTED_MARGIN_NOTE } from '@/lib/admin/margin';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
 import { SyncPill } from '@/components/admin/sync-pill';
+import { lineQuantity } from '@/lib/admin/line-quantity';
+import { estimateOptionTitle } from '@/lib/admin/estimate-detail-display';
 
 interface LineItem {
   readonly id: string;
@@ -327,7 +329,7 @@ export default function EstimateDetailPage({
             <CardHeader>
               <CardTitle className="flex items-center justify-between text-base">
                 <span>
-                  {opt.name}
+                  {estimateOptionTitle(opt.name)}
                   {isSold && (
                     <span className="ml-2 text-xs font-medium text-success">
                       (sold)
@@ -343,7 +345,7 @@ export default function EstimateDetailPage({
                   <li key={li.id} className="flex justify-between text-sm">
                     <span className="text-muted-foreground">
                       {li.name}
-                      {li.quantity > 1 ? ` × ${li.quantity}` : ''}
+                      {lineQuantity(li) !== 1 ? ` × ${lineQuantity(li)}` : ''}
                     </span>
                     <span>{formatCentsExact(li.lineTotalCents)}</span>
                   </li>

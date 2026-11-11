@@ -3,6 +3,7 @@
  * the insights chart uses. Pure; safe on client and server.
  */
 import { ISSUE_TYPE_LABELS } from "./create-request";
+import { codeOrTextLabel, issueTypeLabel as sharedIssueTypeLabel } from "./request-labels";
 
 const KNOWN = ISSUE_TYPE_LABELS as Readonly<Record<string, string>>;
 
@@ -10,15 +11,16 @@ export function isKnownIssueType(raw: string): boolean {
   return Object.hasOwn(KNOWN, raw);
 }
 
-/** Sentence case for a raw enum value: "water_leak" → "Water leak". */
+/** "water_leak" → "Water leak"; free text as typed (the shared rule in
+ * request-labels). */
 export function humanizeCode(raw: string): string {
-  const text = raw.replace(/_/g, " ").trim().toLowerCase();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+  return codeOrTextLabel(raw);
 }
 
-/** The label for an issue type; unknown values are humanized, never shown raw. */
-export function issueTypeLabel(raw: string): string {
-  return isKnownIssueType(raw) ? KNOWN[raw]! : humanizeCode(raw);
+/** The label for an issue type: known codes use the office wording, other
+ * codes are humanized, and an imported free-text job title shows as typed. */
+export function issueTypeLabel(raw: string | null | undefined): string {
+  return sharedIssueTypeLabel(raw);
 }
 
 export interface IssueTypeBar {

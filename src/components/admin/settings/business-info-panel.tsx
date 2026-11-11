@@ -184,7 +184,7 @@ export function BusinessInfoPanel({ config, onSave, onDirtyChange }: BusinessInf
             id="licensed"
             value={licensedInsured}
             onChange={(e) => setLicensedInsured(e.target.value)}
-            placeholder="Yes — we're fully licensed (TACLB#…) and insured."
+            placeholder="Yes — we're fully licensed and insured. License #…"
             maxLength={300}
             rows={2}
           />

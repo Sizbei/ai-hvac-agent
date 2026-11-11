@@ -5,14 +5,21 @@
  * tested in the node environment without a DOM.
  */
 
+const ACRONYMS: Record<string, string> = { id: "ID", ids: "IDs", qb: "QB", qbo: "QBO", url: "URL", hvi: "HVI" };
+
 /**
- * Convert a snake_case key to Title Case (spaces + capitalised words).
- * "due_date" → "Due Date", "is_tax_exempt" → "Is Tax Exempt".
+ * Convert a snake_case key to a sentence-case label (copy canon), keeping
+ * acronyms. "due_date" → "Due date", "qbo_id" → "QBO ID".
  */
 export function humanizeKey(key: string): string {
   return key
     .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .filter((word) => word !== "")
+    .map((word, i) => {
+      const lower = word.toLowerCase();
+      if (ACRONYMS[lower]) return ACRONYMS[lower];
+      return i === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower;
+    })
     .join(" ");
 }
 
@@ -112,7 +119,14 @@ function isPercentKey(key: string): boolean {
 
 /** Returns true when key matches money pattern AND value is numeric. */
 function isMoneyKey(key: string): boolean {
+  // A *_type key is a code ("commission_type": 1), never dollars.
+  if (/_type$/.test(key)) return false;
   return /(price|total|subtotal|tax|cost|discount|commission|surcharge|amount)/.test(key);
+}
+
+/** A key naming an enum: its numeric value is a code, not a quantity. */
+function isEnumCodeKey(key: string): boolean {
+  return /_(type|status)$/.test(key);
 }
 
 /** Returns true when key matches a date pattern. */
@@ -178,9 +192,14 @@ function classifyEntry(
 
   const label = parentLabel ? `${parentLabel} · ${humanizeKey(key)}` : humanizeKey(key);
 
-  // Boolean → Flags
+  // Boolean → Flags. "is_template" reads "Template: No", not "Is template".
   if (typeof value === "boolean") {
-    return { section: "Flags", label, value: value ? "Yes" : "No" };
+    const flagLabel = /^is_./.test(key) ? humanizeKey(key.slice(3)) : humanizeKey(key);
+    return {
+      section: "Flags",
+      label: parentLabel ? `${parentLabel} · ${flagLabel}` : flagLabel,
+      value: value ? "Yes" : "No",
+    };
   }
 
   // Arrays of scalars → join as CSV, classify by key
@@ -194,6 +213,10 @@ function classifyEntry(
     const formatted = formatDateString(String(value));
     return { section: "Dates", label, value: formatted };
   }
+
+  // A numeric enum ("commission_type": 1, "estimate_status": 0) is FieldPulse's
+  // internal code with no label we can show; a bare "1" reads as nothing.
+  if (isEnumCodeKey(key) && isNumericValue(value)) return null;
 
   // ID keys → IDs
   if (isIdKey(key)) {
@@ -211,7 +234,20 @@ function classifyEntry(
   }
 
   // Fallback → Other
-  return { section: "Other", label, value: String(value) };
+  return { section: "Other", label, value: capitalizeWordValue(String(value)) };
+}
+
+/**
+ * FieldPulse sends enum-like values in lower case, some as codes ("company",
+ * "current customer", "current_customer", "not-paid"); show them as
+ * sentence-case words ("Current customer", "Not paid"). Only plain lower-case
+ * letter words are touched — never emails, URLs, codes with digits or
+ * mixed-case text.
+ */
+export function capitalizeWordValue(value: string): string {
+  if (!/^[a-z]+(?:[ _-][a-z]+)*$/.test(value)) return value;
+  const words = value.replace(/[_-]/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**

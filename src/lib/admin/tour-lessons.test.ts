@@ -5,13 +5,11 @@ import {
   lessonContext,
   type LessonContext,
 } from "./tour-lessons";
-import { HISTORY_CONTACT_FALLBACK, LESSON_IDS, type AdminGuidePayload } from "./admin-guide-state";
+import { LESSON_IDS, type AdminGuidePayload } from "./admin-guide-state";
 
 const OFF: LessonContext = {
   payLinks: false,
   hasFieldPulse: false,
-  historyHidden: false,
-  historyContact: "Raymond Chen",
 };
 
 function copyOf(ctx: Partial<LessonContext>, id: string): string {
@@ -21,9 +19,7 @@ function copyOf(ctx: Partial<LessonContext>, id: string): string {
 }
 
 const ALL_CONTEXTS: LessonContext[] = [false, true].flatMap((payLinks) =>
-  [false, true].flatMap((hasFieldPulse) =>
-    [false, true].map((historyHidden) => ({ payLinks, hasFieldPulse, historyHidden, historyContact: "Raymond Chen" })),
-  ),
+  [false, true].map((hasFieldPulse) => ({ payLinks, hasFieldPulse })),
 );
 
 describe("buildLessons", () => {
@@ -60,40 +56,30 @@ describe("buildLessons", () => {
   });
 
   describe("requests variants", () => {
-    it("FieldPulse + history hidden prepends the carried-over sentence", () => {
-      expect(copyOf({ hasFieldPulse: true, historyHidden: true }, "requests")).toBe(
-        "Your upcoming FieldPulse work carried over as requests. Calls, texts and website chat arrive as requests with the problem and contact already filled in.",
-      );
-    });
-
-    it("FieldPulse with history shown prepends the jobs sentence", () => {
-      expect(copyOf({ hasFieldPulse: true, historyHidden: false }, "requests")).toBe(
+    it("FieldPulse prepends the jobs sentence", () => {
+      expect(copyOf({ hasFieldPulse: true }, "requests")).toBe(
         "Your FieldPulse jobs are requests here. Calls, texts and website chat arrive as requests with the problem and contact already filled in.",
       );
     });
 
-    it("history hidden without FieldPulse makes no FieldPulse claim", () => {
-      expect(copyOf({ historyHidden: true }, "requests")).not.toContain("FieldPulse");
+    it("without FieldPulse makes no FieldPulse claim", () => {
+      expect(copyOf({}, "requests")).not.toContain("FieldPulse");
     });
   });
 
+  it("no stop ever says records are hidden (history is shown)", () => {
+    for (const ctx of [...ALL_CONTEXTS, CONSERVATIVE_LESSON_CONTEXT]) {
+      for (const lesson of buildLessons(ctx)) expect(lesson.copy).not.toMatch(/hidden|clean start/i);
+    }
+  });
+
   describe("customers variants", () => {
-    it("customers + historyHidden appends the history note naming the contact", () => {
-      expect(copyOf({ historyHidden: true }, "customers")).toBe(
-        "Each customer’s requests, equipment, estimates and invoices live on their page. Older records are hidden for a clean start. Ask Raymond Chen if you need them back.",
-      );
-    });
-
-    it("says Older FieldPulse records only with FieldPulse", () => {
-      expect(copyOf({ historyHidden: true, hasFieldPulse: true }, "customers")).toBe(
-        "Each customer’s requests, equipment, estimates and invoices live on their page. Older FieldPulse records are hidden for a clean start. Ask Raymond Chen if you need them back.",
-      );
-    });
-
-    it("no history note when history is shown, even with FieldPulse", () => {
-      expect(copyOf({ hasFieldPulse: true }, "customers")).toBe(
-        "Each customer’s requests, equipment, estimates and invoices live on their page.",
-      );
+    it("never mentions hidden records, with or without FieldPulse", () => {
+      for (const ctx of ALL_CONTEXTS) {
+        expect(copyOf(ctx, "customers")).toBe(
+          "Each customer’s requests, equipment, estimates and invoices live on their page.",
+        );
+      }
     });
   });
 
@@ -141,29 +127,14 @@ describe("lessonContext", () => {
     readOnly: false,
     payLinks: true,
     hasFieldPulse: true,
-    historyHidden: false,
-    historyContact: "Raymond Chen",
   };
 
-  it("takes the switches and contact from the guide", () => {
-    expect(lessonContext(guide)).toEqual({
-      payLinks: true,
-      hasFieldPulse: true,
-      historyHidden: false,
-      historyContact: "Raymond Chen",
-    });
+  it("takes the switches from the guide", () => {
+    expect(lessonContext(guide)).toEqual({ payLinks: true, hasFieldPulse: true });
   });
 
-  it("no guide → conservative: no FieldPulse or pay-link claims, history note on", () => {
+  it("no guide → conservative: no FieldPulse or pay-link claims", () => {
     expect(lessonContext(null)).toBe(CONSERVATIVE_LESSON_CONTEXT);
-    expect(CONSERVATIVE_LESSON_CONTEXT).toEqual({
-      payLinks: false,
-      hasFieldPulse: false,
-      historyHidden: true,
-      historyContact: HISTORY_CONTACT_FALLBACK,
-    });
-    expect(copyOf(CONSERVATIVE_LESSON_CONTEXT, "customers")).toContain(
-      "Older records are hidden for a clean start. Ask your account administrator if you need them back.",
-    );
+    expect(CONSERVATIVE_LESSON_CONTEXT).toEqual({ payLinks: false, hasFieldPulse: false });
   });
 });

@@ -13,6 +13,7 @@ import {
   type PortalPaymentNotice,
 } from "@/lib/portal/portal-notice";
 import { logger } from "@/lib/logger";
+import { issueTypeLabel } from "@/lib/admin/request-labels";
 import type { PortalEstimateAmount } from "@/lib/portal/portal-estimate";
 import { BusinessIdentity } from "@/components/public/business-identity";
 import { PayButton } from "./pay-button";
@@ -286,7 +287,7 @@ function JobsSection({ jobs }: { readonly jobs: PortalData["jobs"] }) {
               <li key={job.id} className="py-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[15px] font-medium text-foreground">
-                    {humanize(job.issueType)}
+                    {issueTypeLabel(job.issueType)}
                   </span>
                   <span className="rounded-[3px] border border-border bg-surface-raised px-2 py-0.5 text-[12px] font-semibold text-muted-foreground">
                     {humanize(job.status)}

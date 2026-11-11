@@ -87,7 +87,7 @@ const AUDIT_COLUMNS: ReadonlyArray<DataTableColumn<AuditLogEntry>> = [
     key: 'action',
     header: 'Action',
     cell: (e) => {
-      const details = formatAuditDetails(e.details);
+      const details = formatAuditDetails(e.details, e.refs);
       return (
         <div className="min-w-0 space-y-1">
           <p className="text-xs text-muted-foreground sm:hidden">
@@ -152,7 +152,7 @@ export default function AdminAuditLogPage() {
       <PageHeader
         title="Audit log"
         subtitle="A record of every admin action and safety-critical event for your organization. Details show which fields changed — never the values themselves."
-        actions={error ? undefined : <span className="text-sm text-muted-foreground">{total} entries</span>}
+        actions={error || isLoading ? undefined : <span className="text-sm text-muted-foreground">{total.toLocaleString('en-US')} {total === 1 ? 'entry' : 'entries'}</span>}
       />
 
       {error ? (

@@ -55,6 +55,16 @@ the revenue tile shows the breakdown in its sublabel.
   `hidden sm:table-cell`; card explanations go in SectionCard `description`,
   never in `action`/`meta` (that squeezed titles to nothing on phones).
 
+- Period windows use the REAL dates: invoices by `coalesce(issuedAt,
+  createdAt)`, estimates by `EFFECTIVE_CREATED_AT_SQL` (FieldPulse's
+  created_at). Raw `createdAt` is the import run and put every imported
+  invoice in "last 365 days" (3012 of 3012).
+- Net revenue headline = net collected here + synced paid-to-date on
+  FieldPulse/HCP invoices issued in the period (`netRevenueTile`,
+  `report-format.ts`); the sublabel names both parts and the synced basis.
+  No invoice is in both. Lead source `unknown` reads "Not recorded"
+  (`leadSourceLabel`); close-rate sublabel "N sold of M estimates".
+
 **Gotchas:**
 - Figures read visible rows only (go-live P6, `src/lib/admin/visibility.ts`);
   bot turns follow their session. Scorecards drop retired demo users for org viewers.

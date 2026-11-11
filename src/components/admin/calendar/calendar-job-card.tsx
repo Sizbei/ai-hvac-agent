@@ -6,7 +6,7 @@ import { formatBusinessTimeRange, shortBusinessTime } from '@/lib/admin/calendar
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 import { SyncPill } from '@/components/admin/sync-pill';
-import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel, issueTypeLabel } from '@/lib/admin/request-labels';
 
 interface CalendarJobCardProps {
   readonly job: DashboardRequest;
@@ -43,7 +43,9 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
   return (
     <button
       type="button"
-      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}${visitTag ? ` · ${visitTag}` : ''}`}
+      aria-label={`${customerNameLabel(job.customerName)} · ${job.referenceNumber}${visitTag ? ` · ${visitTag}` : ''}`}
+      // Week cards can be a sliver wide when several overlap: the full line is on hover.
+      title={`${customerNameLabel(job.customerName)} · ${issueTypeLabel(job.issueType)} · ${time}`}
       onClick={() => onSelect(job.id)}
       // Raised (white = a record) body, hairline border, and a 3px urgency
       // left rail so a glance reads priority by color — same semantic families
@@ -62,8 +64,9 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
             AH
           </span>
         )}
-        {job.syncedSource && (
+        {job.syncedSource && !compact && (
           // ml-auto keeps the pill right-anchored in the chip row (pre-SyncPill layout).
+          // Week (compact) cards drop it so the time and customer get the width.
           <span className="ml-auto flex shrink-0">
             <SyncPill source={job.syncedSource} size="sm" />
           </span>
@@ -71,7 +74,7 @@ export function CalendarJobCard({ job, onSelect, compact }: CalendarJobCardProps
       </div>
       {/* shrink-0: on a short card the customer outranks the badges. */}
       <span className={`shrink-0 truncate font-medium ${ended ? 'text-muted-foreground' : 'text-foreground'}`}>
-        {job.customerName ?? 'Unknown'}
+        {customerNameLabel(job.customerName)}
       </span>
       {visitTag && (
         <span className="shrink-0 truncate text-[11px] font-medium leading-[14px] text-muted-foreground">

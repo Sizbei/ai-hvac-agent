@@ -13,6 +13,8 @@ export interface AuditLogEntry {
   readonly sessionId: string | null;
   /** Free-form JSON string; we only ever log field names, never PII values. */
   readonly details: string | null;
+  /** Display labels for the ids in `details` (staff names, request numbers), keyed by lower-case id. */
+  readonly refs: Readonly<Record<string, string>>;
   readonly ipAddress: string | null;
   readonly createdAt: string;
 }

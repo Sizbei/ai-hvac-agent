@@ -6,6 +6,7 @@ import { formatCentsExact } from '@/lib/admin/money-format';
 import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 import { docDateLabel, invoiceDocModel } from './invoice-document-model';
 import { signatureBlock, type DocumentSignature } from './invoice-signature-model';
+import { lineQuantityLabel } from '@/lib/admin/line-quantity';
 
 export interface OrgIdentity {
   readonly companyName: string;
@@ -165,7 +166,7 @@ export function InvoiceDocument({
                       {li.name}
                     </td>
                     <td className="px-2 sm:px-3.5 py-3 text-right tabular-nums text-muted-foreground">
-                      {li.quantity}
+                      {lineQuantityLabel(li)}
                     </td>
                     <td className="hidden px-2 sm:table-cell sm:px-3.5 py-3 text-right tabular-nums text-muted-foreground">
                       {formatCentsExact(li.unitPriceCents)}

@@ -28,6 +28,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { visibleRows, visibleRowsSql, type Visibility } from "./visibility";
 import { decrypt } from "@/lib/crypto";
 import { ERASED_PLACEHOLDER } from "./report-format";
+import { isDeletedFieldpulsePlaceholder } from "./customer-name-display";
 import { notStandInSession } from "./stand-in-session";
 import { sessionContactMatches, sessionPhoneDigitsMatch } from "./session-contact-search";
 import {
@@ -126,7 +127,7 @@ function requestCustomerName(
     if (!encrypted) continue;
     try {
       const name = decrypt(encrypted).trim();
-      if (name.length > 0 && name !== ERASED_PLACEHOLDER) return name;
+      if (name.length > 0 && name !== ERASED_PLACEHOLDER && !isDeletedFieldpulsePlaceholder(name)) return name;
     } catch {
       // Undecryptable (rotated key / bad row): try the next copy.
     }

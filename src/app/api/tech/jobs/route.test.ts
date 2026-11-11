@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 vi.mock("@/lib/auth/tech-session", () => ({ getTechSession: vi.fn() }));
-vi.mock("@/lib/crypto", () => ({ decrypt: (v: string) => `dec:${v}` }));
+// "plain:" values decrypt to themselves, so a test can feed a real stored name.
+vi.mock("@/lib/crypto", () => ({ decrypt: (v: string) => (v.startsWith("plain:") ? v.slice(6) : `dec:${v}`) }));
 
 const orderBy = vi.fn();
 vi.mock("@/lib/db", () => {
@@ -68,6 +69,19 @@ describe("GET /api/tech/jobs", () => {
       appointmentId: "a-today", appointmentNumber: 1, assignmentStatus: "scheduled",
       isLead: true, address: "dec:addr", customerName: "dec:name",
     });
+  });
+
+  it("a customer deleted in FieldPulse leads with the address, or reads No name on file without one", async () => {
+    const placeholder = "plain:Fieldpulse Customer (deleted #16981620)";
+    orderBy.mockResolvedValue([
+      row("addr", { customerNameEncrypted: null, customerNameFromCustomer: placeholder }),
+      row("bare", { customerNameEncrypted: null, customerNameFromCustomer: placeholder, addressEncrypted: null, addressFromCustomer: null }),
+    ]);
+    const jobs = await ids("");
+    expect(jobs.map((j) => [j.customerName, j.address])).toEqual([
+      [null, "dec:addr"],
+      ["No name on file", null],
+    ]);
   });
 
   it("upcoming lists future visits only", async () => {

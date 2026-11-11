@@ -53,7 +53,7 @@ const STATUS_BADGE: Record<IntegrationStatus, { label: string; className: string
     className: 'bg-warning-light text-warning-strong border-warning-border',
   },
   not_configured: {
-    label: 'Not configured',
+    label: 'Not set up',
     className: 'bg-surface-raised text-muted-foreground border-border',
   },
 };

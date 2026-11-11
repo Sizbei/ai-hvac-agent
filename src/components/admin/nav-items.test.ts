@@ -123,3 +123,21 @@ describe("map gate", () => {
     expect(navLabelFor("/admin/map", "operations", OFF)).toBe("Map");
   });
 });
+
+describe("platform-only items", () => {
+  const hrefs = (platformUi?: boolean) =>
+    navGroupsFor("operations", { map: true, platformUi }).flatMap((g) => g.items.map((i) => i.href));
+
+  it("drops the FieldPulse import board from an org's own nav, keeps it for the platform owner", () => {
+    expect(hrefs(false)).not.toContain("/admin/fieldpulse-import");
+    expect(hrefs(true)).toContain("/admin/fieldpulse-import");
+    expect(hrefs(undefined)).toContain("/admin/fieldpulse-import");
+    expect(hrefs(false)).toContain("/admin/audit-log");
+  });
+
+  it("still names the hidden page when it is opened by URL", () => {
+    expect(navLabelFor("/admin/fieldpulse-import", "operations", { map: true, platformUi: false })).toBe(
+      "FieldPulse import",
+    );
+  });
+});

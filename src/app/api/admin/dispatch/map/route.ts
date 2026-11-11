@@ -19,6 +19,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { logger } from "@/lib/logger";
 import { getCachedFeatures } from "@/lib/tenancy/features";
 import { IN_FLIGHT_STATUSES } from "@/lib/admin/request-status";
+import { displayCustomerName } from "@/lib/admin/customer-name-display";
 
 export const dynamic = "force-dynamic";
 
@@ -271,7 +272,7 @@ export async function GET() {
 
     const arCustomers = arRows.map((r) => ({
       customerId: r.customerId,
-      name: safeDecrypt(r.nameEncrypted),
+      name: displayCustomerName(safeDecrypt(r.nameEncrypted)),
       latitude: r.latitude,
       longitude: r.longitude,
       owingCents: Number(r.owingCents),

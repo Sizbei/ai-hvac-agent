@@ -12,7 +12,10 @@
  *   and resumable conversations updated in the last 14 days (ruling 16,
  *   tightened at P8).
  * - "empty" keeps only visits from today and those recent resumable conversations.
- * Both modes hide the seeded rows: HVAC-DEMO / HVAC-CAP requests, demo-seed- /
+ * - "seeded" hides ONLY the seeded rows below and keeps everything else (all
+ *   imported history); kept = every non-seeded row. A customer is hidden only
+ *   when it has a seeded link and no non-seeded link.
+ * Every mode hides the seeded rows: HVAC-DEMO / HVAC-CAP requests, demo-seed- /
  * demo-cap- sessions, the sessions of seeded requests, and any invoice or
  * estimate on a seeded request.
  *
@@ -34,7 +37,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { BUSINESS_TIME_ZONE } from "./calendar-time";
 
-export type MarkingMode = "history" | "empty";
+export type MarkingMode = "history" | "empty" | "seeded";
 
 /** The five tables 0059 gave `hidden_from_org`, children first. */
 export const MARKED_TABLES = [
@@ -112,6 +115,9 @@ export function visitFromTodaySql(org: string): SQL {
  * or a visit from today, or referenced by a kept invoice or estimate.
  */
 export function keptRequestIdsSql(org: string, mode: MarkingMode, staleDays = DEFAULT_STALE_DAYS): SQL {
+  if (mode === "seeded") {
+    return sql`SELECT sr.id FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT ${seededRef("sr")}`;
+  }
   if (mode === "empty") {
     return sql`SELECT sr.id FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT ${seededRef("sr")} AND ${visitFromTodaySql(org)}`;
   }
@@ -120,11 +126,17 @@ export function keptRequestIdsSql(org: string, mode: MarkingMode, staleDays = DE
 
 export function keptInvoiceIdsSql(org: string, mode: MarkingMode): SQL {
   if (mode === "empty") return NONE();
+  if (mode === "seeded") {
+    return sql`SELECT i.id FROM invoices i WHERE i.organization_id = ${org}::uuid AND ${notOnSeededRequest(org, "i")}`;
+  }
   return sql`SELECT i.id FROM invoices i WHERE i.organization_id = ${org}::uuid AND ${invoiceKeptWhere("i")} AND ${notOnSeededRequest(org, "i")}`;
 }
 
 export function keptEstimateIdsSql(org: string, mode: MarkingMode): SQL {
   if (mode === "empty") return NONE();
+  if (mode === "seeded") {
+    return sql`SELECT e.id FROM estimates e WHERE e.organization_id = ${org}::uuid AND ${notOnSeededRequest(org, "e")}`;
+  }
   return sql`SELECT e.id FROM estimates e WHERE e.organization_id = ${org}::uuid AND ${notOnSeededRequest(org, "e")} AND (${estimateKeptWhere("e")} OR e.id IN (SELECT ki.estimate_id FROM invoices ki WHERE ki.organization_id = ${org}::uuid AND ki.estimate_id IS NOT NULL AND ki.id IN (${keptInvoiceIdsSql(org, mode)})))`;
 }
 
@@ -133,6 +145,9 @@ export function keptEstimateIdsSql(org: string, mode: MarkingMode): SQL {
  * updated in the last 14 days that are not seeded.
  */
 export function keptSessionIdsSql(org: string, mode: MarkingMode, staleDays = DEFAULT_STALE_DAYS): SQL {
+  if (mode === "seeded") {
+    return sql`SELECT cs.id FROM customer_sessions cs WHERE cs.organization_id = ${org}::uuid AND ${notSeededSession(org, "cs")}`;
+  }
   return sql`SELECT cs.id FROM customer_sessions cs WHERE cs.organization_id = ${org}::uuid AND ((cs.status IN (${RESUMABLE_SESSIONS()}) AND cs.updated_at >= now() - interval '14 days' AND ${notSeededSession(org, "cs")}) OR cs.id IN (SELECT kr.session_id FROM service_requests kr WHERE kr.organization_id = ${org}::uuid AND kr.id IN (${keptRequestIdsSql(org, mode, staleDays)})))`;
 }
 
@@ -142,6 +157,11 @@ export function keptSessionIdsSql(org: string, mode: MarkingMode, staleDays = DE
  * list could hold a NULL customer_id.
  */
 export function keptCustomerIdsSql(org: string, mode: MarkingMode, staleDays = DEFAULT_STALE_DAYS): SQL {
+  if (mode === "seeded") {
+    // Kept unless it has a seeded link and no kept (non-seeded) link.
+    const seededLink = sql`(EXISTS (SELECT 1 FROM service_requests sx WHERE sx.organization_id = ${org}::uuid AND sx.customer_id = c.id AND ${seededRef("sx")}) OR EXISTS (SELECT 1 FROM invoices ix WHERE ix.organization_id = ${org}::uuid AND ix.customer_id = c.id AND NOT ${notOnSeededRequest(org, "ix")}) OR EXISTS (SELECT 1 FROM estimates ex WHERE ex.organization_id = ${org}::uuid AND ex.customer_id = c.id AND NOT ${notOnSeededRequest(org, "ex")}) OR EXISTS (SELECT 1 FROM customer_sessions sx2 WHERE sx2.organization_id = ${org}::uuid AND sx2.customer_id = c.id AND NOT ${notSeededSession(org, "sx2")}))`;
+    return sql`SELECT c.id FROM customers c WHERE c.organization_id = ${org}::uuid AND (NOT ${seededLink} OR c.id IN (SELECT kr.customer_id FROM service_requests kr WHERE kr.organization_id = ${org}::uuid AND kr.id IN (${keptRequestIdsSql(org, mode)})) OR c.id IN (SELECT ki.customer_id FROM invoices ki WHERE ki.organization_id = ${org}::uuid AND ki.id IN (${keptInvoiceIdsSql(org, mode)})) OR c.id IN (SELECT ke.customer_id FROM estimates ke WHERE ke.organization_id = ${org}::uuid AND ke.id IN (${keptEstimateIdsSql(org, mode)})) OR c.id IN (SELECT ks.customer_id FROM customer_sessions ks WHERE ks.organization_id = ${org}::uuid AND ks.id IN (${keptSessionIdsSql(org, mode)})))`;
+  }
   return sql`SELECT c.id FROM customers c WHERE c.organization_id = ${org}::uuid AND (c.id IN (SELECT kr.customer_id FROM service_requests kr WHERE kr.organization_id = ${org}::uuid AND kr.id IN (${keptRequestIdsSql(org, mode, staleDays)})) OR c.id IN (SELECT ki.customer_id FROM invoices ki WHERE ki.organization_id = ${org}::uuid AND ki.id IN (${keptInvoiceIdsSql(org, mode)})) OR c.id IN (SELECT ke.customer_id FROM estimates ke WHERE ke.organization_id = ${org}::uuid AND ke.id IN (${keptEstimateIdsSql(org, mode)})) OR c.id IN (SELECT ks.customer_id FROM customer_sessions ks WHERE ks.organization_id = ${org}::uuid AND ks.id IN (${keptSessionIdsSql(org, mode, staleDays)})))`;
 }
 
@@ -184,6 +204,125 @@ export function unhideStatements(org: string): SQL[] {
   );
 }
 
+/** The four tables --unhide-fieldpulse touches. Conversations keep their state: FieldPulse has none. */
+export const FIELDPULSE_TABLES = ["invoices", "estimates", "service_requests", "customers"] as const;
+export type FieldpulseTable = (typeof FIELDPULSE_TABLES)[number];
+
+/**
+ * The request (alias `a`) came in through the FieldPulse import: the importer
+ * gives every job it creates a synthetic `fp-import-<job id>` session
+ * (import/jobs.ts). A native request later pushed to FieldPulse also gets a
+ * fieldpulse_job_id (job-sync.ts) but keeps its own chat, voice or admin
+ * session, so the token is what tells them apart.
+ */
+function importedRequestSql(org: string, a: string): SQL {
+  return sql`(${sql.raw(`${a}.fieldpulse_job_id`)} IS NOT NULL AND EXISTS (SELECT 1 FROM customer_sessions fs WHERE fs.organization_id = ${org}::uuid AND fs.id = ${sql.raw(`${a}.session_id`)} AND fs.token LIKE 'fp-import-%'))`;
+}
+
+/**
+ * The customer (alias `a`) is FieldPulse-imported: it has imported work (an
+ * imported request, or a FieldPulse invoice or estimate; those two are only
+ * ever pulled, never pushed), or it has a FieldPulse id and no native request.
+ * A native customer gets a FieldPulse id only when one of its native requests
+ * is pushed (customer-sync.ts, called from job-sync.ts), so a FieldPulse id
+ * next to native requests alone marks a native customer.
+ */
+function importedCustomerSql(org: string, a: string): SQL {
+  const id = sql.raw(`${a}.id`);
+  return sql`(EXISTS (SELECT 1 FROM service_requests fr WHERE fr.organization_id = ${org}::uuid AND fr.customer_id = ${id} AND ${importedRequestSql(org, "fr")}) OR EXISTS (SELECT 1 FROM invoices fi WHERE fi.organization_id = ${org}::uuid AND fi.customer_id = ${id} AND fi.fieldpulse_invoice_id IS NOT NULL) OR EXISTS (SELECT 1 FROM estimates fe WHERE fe.organization_id = ${org}::uuid AND fe.customer_id = ${id} AND fe.fieldpulse_estimate_id IS NOT NULL) OR (${sql.raw(`${a}.fieldpulse_customer_id`)} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM service_requests nr WHERE nr.organization_id = ${org}::uuid AND nr.customer_id = ${id} AND NOT ${importedRequestSql(org, "nr")})))`;
+}
+
+/**
+ * FieldPulse-IMPORTED rows of `table` (the UPDATE / count target, referenced by
+ * its table name). Reads data columns only, never hidden_from_org, so the
+ * UPDATEs give the same result in any order.
+ */
+export function fieldpulseImportedSql(table: FieldpulseTable, org: string): SQL {
+  switch (table) {
+    case "invoices":
+      return sql.raw("invoices.fieldpulse_invoice_id IS NOT NULL");
+    case "estimates":
+      return sql.raw("estimates.fieldpulse_estimate_id IS NOT NULL");
+    case "service_requests":
+      return importedRequestSql(org, "service_requests");
+    case "customers":
+      return importedCustomerSql(org, "customers");
+  }
+}
+
+/**
+ * Native rows that carry FieldPulse links (requests pushed to FieldPulse and
+ * their customers). --unhide-fieldpulse lists them for review and leaves them.
+ */
+function nativeFieldpulseSql(table: "service_requests" | "customers", org: string): SQL {
+  if (table === "service_requests") {
+    return sql`(service_requests.fieldpulse_job_id IS NOT NULL AND NOT ${importedRequestSql(org, "service_requests")})`;
+  }
+  return sql`(customers.fieldpulse_customer_id IS NOT NULL AND NOT ${importedCustomerSql(org, "customers")})`;
+}
+
+/** Row ids an --unhide-fieldpulse run must leave hidden (the fp-hide-deleted-jobs undo files). */
+export interface FieldpulseKeepHidden {
+  readonly invoices: readonly string[];
+  readonly estimates: readonly string[];
+  readonly service_requests: readonly string[];
+}
+
+const NO_KEEP: FieldpulseKeepHidden = { invoices: [], estimates: [], service_requests: [] };
+
+function notKeptSql(table: FieldpulseTable, keep: FieldpulseKeepHidden): SQL {
+  const ids = table === "customers" ? [] : keep[table];
+  // One bound array literal; the ids were read back from undo files and are checked as uuids by the caller.
+  return ids.length === 0 ? sql.raw("true") : sql`NOT (id = ANY(${`{${ids.join(",")}}`}::uuid[]))`;
+}
+
+/**
+ * Restores only FieldPulse-IMPORTED history (four UPDATEs for one db.batch).
+ * Conversations, native requests (demo-era traffic, seeded rows, requests
+ * pushed to FieldPulse), their native customers, and the `keep` rows (requests
+ * hidden because FieldPulse deleted the job) keep whatever state they have.
+ * The history cutoff is not touched.
+ */
+export function unhideFieldpulseStatements(org: string, keep: FieldpulseKeepHidden = NO_KEEP): SQL[] {
+  return FIELDPULSE_TABLES.map(
+    (table) =>
+      sql`UPDATE ${sql.raw(table)} SET hidden_from_org = false WHERE organization_id = ${org}::uuid AND hidden_from_org AND ${fieldpulseImportedSql(table, org)} AND ${notKeptSql(table, keep)}`,
+  );
+}
+
+/**
+ * One row: per table, the hidden imported rows --unhide-fieldpulse would
+ * restore (`<table>_fp_hidden`) and the `keep` rows it leaves
+ * (`<table>_fp_kept`); then the hidden native rows with FieldPulse links,
+ * listed and left alone (`native_requests`: reference numbers,
+ * `native_customers`: row ids).
+ */
+export function unhideFieldpulseDryRunSql(org: string, keep: FieldpulseKeepHidden = NO_KEEP): SQL {
+  const cols = FIELDPULSE_TABLES.flatMap((table) => [
+    sql`(SELECT count(*) FROM ${sql.raw(table)} WHERE organization_id = ${org}::uuid AND hidden_from_org AND ${fieldpulseImportedSql(table, org)} AND ${notKeptSql(table, keep)})::int AS ${sql.raw(`${table}_fp_hidden`)}`,
+    sql`(SELECT count(*) FROM ${sql.raw(table)} WHERE organization_id = ${org}::uuid AND hidden_from_org AND ${fieldpulseImportedSql(table, org)} AND NOT ${notKeptSql(table, keep)})::int AS ${sql.raw(`${table}_fp_kept`)}`,
+  ]);
+  const natives = [
+    sql`ARRAY(SELECT reference_number FROM service_requests WHERE organization_id = ${org}::uuid AND hidden_from_org AND ${nativeFieldpulseSql("service_requests", org)} ORDER BY reference_number)::text[] AS native_requests`,
+    sql`ARRAY(SELECT id::text FROM customers WHERE organization_id = ${org}::uuid AND hidden_from_org AND ${nativeFieldpulseSql("customers", org)} ORDER BY id)::text[] AS native_customers`,
+  ];
+  return sql`SELECT ${sql.join([...cols, ...natives], sql`, `)}`;
+}
+
+/**
+ * One row: per table, the VISIBLE imported FieldPulse rows a `mode` --apply
+ * would hide (`<table>_fp_rehide`). The script refuses an --apply that would
+ * re-hide FieldPulse history (rows the sync or backfill re-dated before the
+ * cutoff included) unless the operator passes --hide-fieldpulse.
+ */
+export function fieldpulseRehideSql(org: string, mode: MarkingMode, staleDays = DEFAULT_STALE_DAYS): SQL {
+  const cols = FIELDPULSE_TABLES.map(
+    (table) =>
+      sql`(SELECT count(*) FROM ${sql.raw(table)} WHERE organization_id = ${org}::uuid AND NOT hidden_from_org AND id NOT IN (${keptIdsSql(table, org, mode, staleDays)}) AND ${beforeCutoffSql(org)} AND ${fieldpulseImportedSql(table, org)})::int AS ${sql.raw(`${table}_fp_rehide`)}`,
+  );
+  return sql`SELECT ${sql.join(cols, sql`, `)}`;
+}
+
 function tableCountsSql(table: MarkedTable, org: string, staleDays: number): SQL {
   const t = sql.raw(table);
   const wouldHide = (mode: MarkingMode) =>
@@ -194,6 +333,7 @@ function tableCountsSql(table: MarkedTable, org: string, staleDays: number): SQL
       sql`(SELECT count(*) FROM ${t} WHERE organization_id = ${org}::uuid AND hidden_from_org)::int AS ${sql.raw(`${table}_hidden`)}`,
       wouldHide("history"),
       wouldHide("empty"),
+      wouldHide("seeded"),
     ],
     sql`, `,
   );

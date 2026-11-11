@@ -80,6 +80,10 @@ visit #1). Lane counts skip ended cards.
 - Overlapping cards sit side by side: `overlapColumns`
   (`src/lib/admin/calendar-overlap.ts`) splits each cluster of overlapping
   cards into equal columns (pixel spans, so min-height and pinned cards count).
+- Week view caps that at two side-by-side cards (`cappedOverlapColumns`,
+  same file): a cluster needing more shows its first column of cards at full
+  width plus a "+N more" bar (right under the shown cards, or at the cluster's
+  bottom) that opens the day. Day view is uncapped.
 - A failed day/week load renders `LoadErrorState` instead of the grid (never
   "Nothing to place"); the hook's error copy is human.
 - A job whose window lies wholly outside the drawn hours is pinned to the

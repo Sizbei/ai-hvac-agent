@@ -57,7 +57,7 @@ const further = (id: StepId, title: string, why: string, how: string, leadOnly =
   ({ id, group: "further", title, why, how, required: false, leadOnly });
 
 export const STEP_DEFS: readonly StepDef[] = [
-  run("start_job", "Start your first job", "The office sees where you are without calling you.", "Open your job in the list. Tap On my way when you leave. Tap I've arrived at the door, then Working."),
+  run("start_job", "Start your first job", "Each tap tells the office you're on the way, on site and working, so nobody has to call you.", "Open your job in the list. Tap On my way when you leave. Tap I've arrived at the door, then Working."),
   run("finish_job", "Finish a job", "Done tells the office your part is finished. Close out finishes the whole request.", "Tap Done when your part is finished. If Close out shows instead, tap that."),
   further("clock_in", "Clock in for the day", "Your hours land on the office timesheet without a paper form.", "Tap Clock in for the day at the top of your jobs. Tap Clock out when you're done."),
   further("share_location", "Share your location while working", "Dispatch sends the nearest technician to the next job.", "Turn on Share my location at the top of the screen."),

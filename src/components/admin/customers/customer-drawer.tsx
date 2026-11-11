@@ -11,9 +11,11 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { BookingHistoryList } from '@/components/admin/customers/booking-history-list';
-import { customerInitials } from '@/lib/admin/customer-display';
+import { countLabel, customerActivity, customerInitials } from '@/lib/admin/customer-display';
+import { formatAddressDisplay, formatPhoneDisplay } from '@/lib/admin/contact-format';
 import type { CustomerListRecord } from '@/lib/admin/crm-types';
 import type { AgendaBooking } from '@/lib/admin/types';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
 
 interface CustomerDrawerProps {
   /** The customer to show, or null when the drawer is closed. */
@@ -25,10 +27,13 @@ function ContactRow({
   icon: Icon,
   value,
   href,
+  empty,
 }: {
   readonly icon: typeof Phone;
   readonly value: string | null;
   readonly href?: string;
+  /** Shown muted when there is no value ("No phone on file"). */
+  readonly empty: string;
 }) {
   return (
     <div className="flex items-center gap-2.5 text-sm">
@@ -42,7 +47,7 @@ function ContactRow({
           <span className="truncate">{value}</span>
         )
       ) : (
-        <span className="italic text-muted-foreground">—</span>
+        <span className="text-muted-foreground">{empty}</span>
       )}
     </div>
   );
@@ -106,11 +111,12 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
                 </div>
                 <span className="min-w-0">
                   <span className="block truncate text-[20px] font-semibold leading-[26px] tracking-[-0.02em]">
-                    {customer.name ?? 'Unknown'}
+                    {customerNameLabel(customer.name)}
                   </span>
                   <span className="block text-xs font-normal text-muted-foreground">
-                    {customer.requestCount} request
-                    {customer.requestCount === 1 ? '' : 's'} on record
+                    {countLabel(customer.requestCount, 'request')} ·{' '}
+                    {countLabel(customer.invoiceCount, 'invoice')} ·{' '}
+                    {customerActivity(customer).label}
                   </span>
                 </span>
               </SheetTitle>
@@ -120,15 +126,17 @@ export function CustomerDrawer({ customer, onClose }: CustomerDrawerProps) {
             <div className="mt-1 flex flex-col gap-2.5 px-4">
               <ContactRow
                 icon={Phone}
-                value={customer.phone}
+                value={formatPhoneDisplay(customer.phone)}
                 href={customer.phone ? `tel:${customer.phone}` : undefined}
+                empty="No phone on file"
               />
               <ContactRow
                 icon={Mail}
                 value={customer.email}
                 href={customer.email ? `mailto:${customer.email}` : undefined}
+                empty="No email on file"
               />
-              <ContactRow icon={MapPin} value={customer.address} />
+              <ContactRow icon={MapPin} value={formatAddressDisplay(customer.address)} empty="No address on file" />
             </div>
 
             {/* booking history */}

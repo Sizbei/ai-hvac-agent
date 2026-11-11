@@ -20,6 +20,7 @@ import { emptyActionFor } from '@/lib/admin/empty-state-actions';
 import { UrgencyLegend } from '@/components/admin/ui/urgency-legend';
 import { businessIsoDate } from '@/lib/admin/calendar-time';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { issueTypeLabel } from '@/lib/admin/request-labels';
 
 /** Current BUSINESS day as YYYY-MM-DD. Anchoring on the UTC day put the board
  * on tomorrow every evening after 8pm ET; the server buckets jobs by business
@@ -142,7 +143,7 @@ export default function DispatchPage() {
                   className="flex w-full items-center gap-2 rounded-sm border border-border border-l-2 border-l-warning bg-surface px-3 py-2 text-left text-[13px] transition-colors hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="font-mono font-medium">{ex.referenceNumber}</span>
-                  <span className="text-muted-foreground">{ex.issueType}</span>
+                  <span className="min-w-0 truncate text-muted-foreground">{issueTypeLabel(ex.issueType)}</span>
                   <ContextBadge
                     variant="warning"
                     label={outcomeLabel(ex.autoDispatchOutcome)}

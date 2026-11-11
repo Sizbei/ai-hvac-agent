@@ -119,6 +119,15 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
 - **List** `GET /api/tech/jobs?range=today|upcoming|past` (`visit-range.ts`,
   business-timezone days; past = last 30 days of done/cancelled rows); one row
   per visit, tabs in `tech-jobs-list-client.tsx`.
+- **Today grouping:** `splitTodayJobs` (`src/lib/tech/today-groups.ts`) keeps
+  today's visits and ones up to `RECENT_OVERDUE_DAYS` (7) old, with their
+  "Overdue" chip, in the main list. Older open visits (imported FieldPulse
+  jobs nobody closed, including stale "in progress" ones) go into a
+  collapsed "Older open jobs (N)" group, newest first, with no chip. The
+  guide card's "Open the job" picks from the main group first. Imported
+  titles render as typed, clamped to 3 lines with `overflow-wrap:anywhere`.
+  A customer deleted in FieldPulse (`isDeletedFieldpulsePlaceholder`) has
+  no name on the card when it has an address, else "No name on file".
 - **General clock** `GET/POST /api/tech/time` (`{ action: "in" | "out" }`, 409
   `ALREADY_OPEN`; GET is 200 `{ id: null, clockInAt: null }` when clocked
   out), one open general entry per technician (partial unique

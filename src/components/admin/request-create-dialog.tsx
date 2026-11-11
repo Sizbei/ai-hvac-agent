@@ -44,6 +44,7 @@ import type { ContactRecord } from '@/lib/admin/contact-types';
 import type { JobTypeRecord } from '@/lib/admin/job-type-types';
 import type { CustomerLocation } from '@/lib/admin/location-queries';
 import { cn } from '@/lib/utils';
+import { customerNameLabel } from '@/lib/admin/customer-name-display';
 
 interface RequestCreateDialogProps {
   readonly open: boolean;
@@ -433,7 +434,7 @@ export function RequestCreateDialog({
               {pickedCustomer ? (
                 <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{pickedCustomer.name ?? 'Unnamed customer'}</p>
+                    <p className="truncate text-sm font-medium">{customerNameLabel(pickedCustomer.name)}</p>
                     <p className="truncate text-xs text-muted-foreground">
                       {pickedCustomer.phone ?? pickedCustomer.email ?? 'No contact on file'}
                     </p>
@@ -521,7 +522,7 @@ export function RequestCreateDialog({
                                 onClick={() => pickCustomer(c)}
                                 className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                               >
-                                <span className="truncate font-medium">{c.name ?? 'Unnamed customer'}</span>
+                                <span className="truncate font-medium">{customerNameLabel(c.name)}</span>
                                 <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                                   {c.phone ?? c.email ?? ''}
                                 </span>

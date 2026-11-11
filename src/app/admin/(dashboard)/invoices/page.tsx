@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
 import { reconcileShouldRun } from '@/lib/admin/reconcile-gate';
+import { effectiveInvoiceSort, type InvoiceFilter } from '@/lib/admin/invoice-list-sort';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ const VOID_FAIL: Record<string, string> = {
 
 // ── filter types ─────────────────────────────────────────────────────────────
 
-type Filter = 'overdue' | 'all' | 'unpaid' | 'paid';
+type Filter = InvoiceFilter;
 
 const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
   { value: 'overdue', label: 'Overdue' },
@@ -89,7 +90,7 @@ type SourceOption = { value: SourceValue; label: string };
 // ── sort options ──────────────────────────────────────────────────────────────
 
 const SORT_OPTIONS: ReadonlyArray<{ value: InvoiceSortKey; label: string }> = [
-  { value: 'age-oldest', label: 'Age oldest-first' },
+  { value: 'age-oldest', label: 'Most overdue first' },
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'balance-high', label: 'Balance high→low' },
@@ -164,7 +165,9 @@ export default function InvoicesPage() {
   const [filter, setFilter] = useState<Filter>('overdue');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sortKey, setSortKey] = useState<InvoiceSortKey>('age-oldest');
+  // null = the tab's default (collections tabs: most overdue; history tabs: newest).
+  const [chosenSort, setChosenSort] = useState<InvoiceSortKey | null>(null);
+  const sortKey = effectiveInvoiceSort(filter, chosenSort);
   const [source, setSource] = useState<SourceValue>('all');
   const [page, setPage] = useState(1);
   const [unreminded, setUnreminded] = useState(false);
@@ -184,7 +187,7 @@ export default function InvoicesPage() {
   const urlFilterState = {
     filter: filter === 'overdue' ? '' : filter,
     q: search,
-    sort: sortKey === 'age-oldest' ? '' : sortKey,
+    sort: chosenSort ?? '',
     source: source === 'all' ? '' : source,
     unreminded: unreminded ? '1' : '',
     min: minDollars,
@@ -196,7 +199,7 @@ export default function InvoicesPage() {
     const sorts: readonly string[] = ['newest', 'oldest', 'balance-high', 'age-oldest'];
     if (p.filter && filters.includes(p.filter)) setFilter(p.filter as Filter);
     if (p.q) { setSearch(p.q); setDebouncedSearch(p.q); }
-    if (p.sort && sorts.includes(p.sort)) setSortKey(p.sort as InvoiceSortKey);
+    if (p.sort && sorts.includes(p.sort)) setChosenSort(p.sort as InvoiceSortKey);
     if (p.source && sources.includes(p.source)) setSource(p.source as SourceValue);
     if (p.unreminded === '1') setUnreminded(true);
     if (p.min) setMinDollars(p.min);
@@ -219,7 +222,7 @@ export default function InvoicesPage() {
     return Number.isFinite(d) && d >= 0 ? Math.round(d * 100) : undefined;
   }, [maxDollars]);
 
-  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, cardPaymentsEnabled, isLoading, error, refetch, sendReminder, voidInvoice } = useInvoices({
+  const { invoices, total, sourceCounts, stats, collectedThisMonthCents, hasSyncedInvoices, cardPaymentsEnabled, isLoading, error, refetch, sendReminder, voidInvoice } = useInvoices({
     page,
     limit: PER_PAGE,
     search: debouncedSearch || undefined,
@@ -351,7 +354,11 @@ export default function InvoicesPage() {
           <StatTileSkeleton />
         </StatStrip>
       ) : (
-        !error && <SummaryBand stats={stats} collectedThisMonthCents={collectedThisMonthCents} />
+        !error && <SummaryBand
+          stats={stats}
+          collectedThisMonthCents={collectedThisMonthCents}
+          hasSyncedInvoices={hasSyncedInvoices}
+        />
       )}
 
       {/* Filter band — one fused strip (spec: filter rows are fused strips).
@@ -411,7 +418,7 @@ export default function InvoicesPage() {
           {/* sort select */}
           <Select
             value={sortKey}
-            onValueChange={(v) => { setSortKey(v as InvoiceSortKey); setPage(1); }}
+            onValueChange={(v) => { setChosenSort(v as InvoiceSortKey); setPage(1); }}
           >
             <SelectTrigger aria-label="Sort invoices" className="w-[168px]">
               {/* Base UI renders the raw value unless it is given a formatter —

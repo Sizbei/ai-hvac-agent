@@ -40,7 +40,7 @@ import {
   UNASSIGNED_SCOPE,
 } from '@/lib/admin/calendar-optimistic';
 import { isWindowWithinAvailability } from '@/lib/admin/availability-coverage';
-import { overlapColumns } from '@/lib/admin/calendar-overlap';
+import { cappedOverlapColumns, type OverflowTile } from '@/lib/admin/calendar-overlap';
 import {
   describeDragJob,
   describeDropTarget,
@@ -91,6 +91,12 @@ interface PositionedJob {
   readonly columns: number;
 }
 
+/** Week columns are ~100px at 1440: two side-by-side cards are the most that
+ * read. A more crowded cluster shows one full-width card and a "+N more" bar. */
+const WEEK_MAX_COLUMNS = 2;
+/** Height of that bar. */
+const OVERFLOW_BAR_PX = 20;
+
 /** Minimum card height inside the grid. */
 const MIN_CARD_PX = 28;
 /** A pinned out-of-hours card: tall enough for its time and customer. */
@@ -99,7 +105,8 @@ const PINNED_CARD_PX = 44;
 function positionJobs(
   jobs: readonly DashboardRequest[],
   isoDay: string,
-): readonly PositionedJob[] {
+  maxColumns: number,
+): { readonly cards: readonly PositionedJob[]; readonly overflow: readonly OverflowTile[] } {
   const positioned: Omit<PositionedJob, 'column' | 'columns'>[] = [];
   for (const job of jobs) {
     if (!job.arrivalWindowStart || !job.arrivalWindowEnd) continue;
@@ -116,11 +123,49 @@ function positionJobs(
       outside: placement.outside,
     });
   }
-  // Overlapping cards sit side by side instead of exactly on top of each other.
-  const slots = overlapColumns(
+  // Overlapping cards sit side by side instead of exactly on top of each other;
+  // past maxColumns the rest fold into a "+N more" tile.
+  const { slots, overflow } = cappedOverlapColumns(
     positioned.map((p) => ({ top: p.topPx, bottom: p.topPx + p.heightPx })),
+    maxColumns,
+    OVERFLOW_BAR_PX,
   );
-  return positioned.map((p, i) => ({ ...p, ...slots[i]! }));
+  const cards: PositionedJob[] = [];
+  positioned.forEach((p, i) => {
+    const slot = slots[i]!;
+    if (slot.hidden) return;
+    const heightPx = slot.bottom === undefined ? p.heightPx : slot.bottom - p.topPx;
+    cards.push({ ...p, heightPx, column: slot.column, columns: slot.columns });
+  });
+  return { cards, overflow };
+}
+
+/** "+N more" bar under a crowded week cluster: opens the day, where each
+ * technician has a lane and the cards have room. */
+function OverflowTileButton({
+  tile,
+  isoDay,
+  onPickDay,
+}: {
+  readonly tile: OverflowTile;
+  readonly isoDay: string;
+  readonly onPickDay?: (isoDay: string) => void;
+}) {
+  const label = `${tile.count} more ${tile.count === 1 ? 'request' : 'requests'}`;
+  return (
+    <button
+      type="button"
+      onClick={() => onPickDay?.(isoDay)}
+      title={`${label}. Open the day to see them all.`}
+      aria-label={`${label} at this time. Open ${isoDay} in day view.`}
+      // @container: on a phone the day is ~30px wide, so only "+8" shows.
+      className="@container absolute inset-x-0.5 z-10 flex items-center justify-center overflow-hidden whitespace-nowrap rounded-sm border border-border-strong bg-surface-sunken px-0.5 text-[11px] font-medium leading-none text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      style={{ top: tile.top, height: tile.bottom - tile.top }}
+    >
+      <span className="font-mono tabular-nums">+{tile.count}</span>
+      <span className="hidden @[4rem]:inline">&nbsp;more</span>
+    </button>
+  );
 }
 
 /** Lane header count: visits a hold ended are shown but aren't booked work. */
@@ -170,18 +215,24 @@ function DayLane({
   compact,
   disabled,
   availability,
+  onPickDay,
 }: {
   readonly scope: string;
   readonly jobs: readonly DashboardRequest[];
   readonly isoDay: string;
   readonly onSelect: (id: string) => void;
   readonly compact?: boolean;
+  /** Week view: where a "+N more" tile sends the dispatcher. */
+  readonly onPickDay?: (isoDay: string) => void;
   readonly disabled?: boolean;
   /** This technician's recurring slots (empty for the unassigned lane, which has
    * no hours to shade against). */
   readonly availability?: readonly AvailabilitySlot[];
 }) {
-  const positioned = useMemo(() => positionJobs(jobs, isoDay), [jobs, isoDay]);
+  const { cards: positioned, overflow } = useMemo(
+    () => positionJobs(jobs, isoDay, compact ? WEEK_MAX_COLUMNS : Number.POSITIVE_INFINITY),
+    [jobs, isoDay, compact],
+  );
 
   return (
     <div
@@ -258,6 +309,9 @@ function DayLane({
           </div>
         );
       })}
+      {overflow.map((tile) => (
+        <OverflowTileButton key={`more-${tile.top}`} tile={tile} isoDay={isoDay} onPickDay={onPickDay} />
+      ))}
     </div>
   );
 }
@@ -404,6 +458,7 @@ function WeekView({
                   onSelect={onSelect}
                   compact
                   disabled={disabled}
+                  onPickDay={onPickDay}
                 />
               </div>
             </div>

@@ -27,7 +27,7 @@
  * the trigger's exception back to the same `last_admin` sentinel so the race
  * loser gets the same 409 rather than a 500.
  */
-import { eq, ne, count, asc, inArray, isNull } from "drizzle-orm";
+import { eq, ne, count, asc, desc, inArray, isNull } from "drizzle-orm";
 import { hash } from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -143,7 +143,9 @@ export async function listStaff(
     .select(STAFF_COLUMNS)
     .from(users)
     .where(withTenant(users, organizationId))
-    .orderBy(asc(users.role), asc(users.name));
+    // Active people first: imported FieldPulse technicians who have left sat
+    // between the current team in plain name order.
+    .orderBy(desc(users.isActive), asc(users.role), asc(users.name));
 
   return withoutRetiredDemoUsers(rows, vis).map(toStaffRecord);
 }

@@ -69,3 +69,15 @@ export function dispatchHealthSublabel(
   parts.push(`${d.overrides} changed by a dispatcher`);
   return parts.join(" · ");
 }
+
+/**
+ * "Requests booked": the booking rate in a unit that reads (18 in a year is
+ * "0.3 / week avg", not "0.0 / day avg"), plus imported jobs in the window.
+ */
+export function bookedSublabel(booked: number, rangeDays: number, imported: number): string {
+  const perDay = booked / Math.max(1, rangeDays);
+  const rate = perDay >= 1 || booked === 0
+    ? `${perDay.toFixed(1)} / day avg`
+    : `${(perDay * 7).toFixed(1)} / week avg`;
+  return `Booked here · ${rate}` + (imported > 0 ? ` · +${imported} imported` : "");
+}

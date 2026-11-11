@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { formatRate, visibleLeadSources } from '@/lib/admin/report-format';
+import { closeRateSublabel, formatRate, leadSourceLabel, netRevenueTile, visibleLeadSources } from '@/lib/admin/report-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
@@ -94,14 +94,8 @@ export default function ReportsPage() {
       <StatStrip>
         <StatCard
           label="Net revenue (period)"
-          value={report ? formatCentsExact(report.netCollectedCents) : '—'}
-          sublabel={
-            report
-              ? report.syncedCollectedCents > 0
-                ? `${formatCentsExact(report.grossCollectedCents)} native − ${formatCentsExact(report.refundedCents)} refunded · +${formatCentsExact(report.syncedCollectedCents)} synced`
-                : `${formatCentsExact(report.grossCollectedCents)} collected − ${formatCentsExact(report.refundedCents)} refunded`
-              : undefined
-          }
+          value={report ? formatCentsExact(netRevenueTile(report).valueCents) : '—'}
+          sublabel={report ? netRevenueTile(report).sublabel : undefined}
           icon={DollarSign}
           intent="success"
           loading={isLoading}
@@ -111,7 +105,7 @@ export default function ReportsPage() {
           value={report ? formatCentsExact(report.outstandingArCents) : '—'}
           sublabel={
             report && report.syncedArCents > 0
-              ? `${formatCentsExact(report.nativeArCents)} native · ${formatCentsExact(report.syncedArCents)} synced`
+              ? `${formatCentsExact(report.syncedArCents)} in FieldPulse/HCP · ${formatCentsExact(report.nativeArCents)} here`
               : 'Balance on open invoices'
           }
           icon={Wallet}
@@ -122,12 +116,9 @@ export default function ReportsPage() {
           label="Estimate close rate"
           value={report ? formatRate(report.closeRatePct, report.estimatesCreated) : '—'}
           sublabel={
-            // estimatesCreated already accounts for every status (open, sold,
-            // dismissed, expired) — using it here keeps "decided" from silently
-            // excluding dismissed estimates, a real decided/lost outcome.
-            report
-              ? `${report.estimatesSold} sold of ${report.estimatesCreated} decided`
-              : undefined
+            // estimatesCreated counts every status (open, sold, dismissed,
+            // expired), the close rate's denominator; open ones aren't decided.
+            report ? closeRateSublabel(report.estimatesSold, report.estimatesCreated) : undefined
           }
           icon={Target}
           intent="info"
@@ -198,22 +189,6 @@ function formatRating(rating: number | null): string {
 
 function formatHours(hours: number | null): string {
   return hours == null ? EMPTY : `${hours.toFixed(1)}h`;
-}
-
-const LEAD_SOURCE_LABELS: Record<string, string> = {
-  google: 'Google',
-  facebook: 'Facebook',
-  yelp: 'Yelp',
-  referral: 'Referral',
-  repeat_customer: 'Repeat customer',
-  website: 'Website',
-  direct_mail: 'Direct mail',
-  other: 'Other',
-  unknown: 'Unknown',
-};
-
-function leadSourceLabel(source: string): string {
-  return LEAD_SOURCE_LABELS[source] ?? source;
 }
 
 interface LeadSourceTableProps {

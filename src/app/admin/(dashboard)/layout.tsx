@@ -42,6 +42,7 @@ export default async function DashboardLayout({
   const orgReads = Promise.all([
     loadBillingState(signedIn.organizationId),
     loadSetupPlacement(signedIn.organizationId),
+    loadLogoUrl(signedIn.organizationId),
   ]);
   const viewer = await getViewerContext();
 
@@ -49,7 +50,7 @@ export default async function DashboardLayout({
     redirect('/admin/login');
   }
   const { session } = viewer;
-  const [[{ billingAttention, orgName, mapEnabled }, setupPlacement], billingEntry] = await Promise.all([
+  const [[{ billingAttention, orgName, mapEnabled }, setupPlacement, logoUrl], billingEntry] = await Promise.all([
     orgReads,
     resolveBillingEntry(viewer),
   ]);
@@ -60,6 +61,7 @@ export default async function DashboardLayout({
   return (
     <DashboardShell
       orgName={orgName}
+      logoUrl={logoUrl}
       adminName={chip.name}
       adminEmail={chip.email}
       platformUi={seesPlatformUi(viewer)}
@@ -128,5 +130,19 @@ async function loadSetupPlacement(organizationId: string): Promise<SetupPlacemen
     return placementFor(parseOnboardingState(row.onboardingState), false);
   } catch {
     return 'integrations';
+  }
+}
+
+/** The org's own logo for the brand mark; null (the default mark) on a miss. */
+async function loadLogoUrl(organizationId: string): Promise<string | null> {
+  try {
+    const [row] = await db
+      .select({ logoUrl: organizationSettings.logoUrl })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, organizationId))
+      .limit(1);
+    return row?.logoUrl || null;
+  } catch {
+    return null;
   }
 }

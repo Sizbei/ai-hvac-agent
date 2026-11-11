@@ -156,9 +156,14 @@ export function StaffTable({
 
 function NameCell({ member, isSelf }: { readonly member: StaffRecord; readonly isSelf: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 font-medium">
-      {member.name}
-      {isSelf && <span className="text-xs font-normal text-muted-foreground">(you)</span>}
+    // The pill sits on its own line under the name, like "No sign-in yet"
+    // under the email: inline it wrapped under long names only, so rows
+    // were ragged, and forcing it inline pushed the actions column off.
+    <div className="flex flex-col items-start gap-1 font-medium">
+      <div className="flex items-center gap-1.5">
+        <span className="whitespace-nowrap">{member.name}</span>
+        {isSelf && <span className="text-xs font-normal text-muted-foreground">(you)</span>}
+      </div>
       {member.isFpSynced && <SyncPill source="fieldpulse" size="md" />}
     </div>
   );
@@ -169,7 +174,7 @@ function EmailCell({ member }: { readonly member: StaffRecord }) {
     <div>
       {member.email}
       {member.isFpSynced && !member.hasLogin && (
-        <div className="text-xs text-muted-foreground">no local sign-in</div>
+        <div className="text-xs text-muted-foreground">No sign-in yet</div>
       )}
     </div>
   );

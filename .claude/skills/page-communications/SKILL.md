@@ -65,8 +65,8 @@ the first field, Template ID second.
   dialog's "falls back to defaults" promise doesn't exist. Deactivate
   (`isActive: false`) instead to stop future sends without losing history.
   Deletion is only reachable for templates with zero send history.
-- `priority` is a numeric field (lower = higher priority); shown as "Priority N"
-  on the card.
+- `priority` is a numeric field (lower = higher priority); edited in the
+  template dialog only (the card no longer shows a bare "Priority N").
 
 **Gotchas:**
 - Inactive templates (isActive=false) render at 60% opacity — this is

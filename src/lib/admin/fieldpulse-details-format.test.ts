@@ -1,16 +1,17 @@
 import { describe, it, expect } from "vitest";
 import {
   humanizeKey,
+  capitalizeWordValue,
   formatValue,
   buildFieldpulseEntries,
   buildFieldpulseSections,
 } from "./fieldpulse-details-format";
 
 describe("humanizeKey", () => {
-  it("converts snake_case to Title Case", () => {
-    expect(humanizeKey("due_date")).toBe("Due Date");
-    expect(humanizeKey("is_tax_exempt")).toBe("Is Tax Exempt");
-    expect(humanizeKey("account_type")).toBe("Account Type");
+  it("converts snake_case to sentence case", () => {
+    expect(humanizeKey("due_date")).toBe("Due date");
+    expect(humanizeKey("is_tax_exempt")).toBe("Is tax exempt");
+    expect(humanizeKey("account_type")).toBe("Account type");
   });
 
   it("handles single words", () => {
@@ -18,7 +19,7 @@ describe("humanizeKey", () => {
   });
 
   it("handles already-capitalised words untouched (only first char forced)", () => {
-    expect(humanizeKey("qbo_id")).toBe("Qbo Id");
+    expect(humanizeKey("qbo_id")).toBe("QBO ID");
   });
 });
 
@@ -120,7 +121,7 @@ describe("buildFieldpulseEntries", () => {
 
   it("humanizes snake_case keys", () => {
     const result = buildFieldpulseEntries({ booking_portal_consent: "yes" });
-    expect(result![0].label).toBe("Booking Portal Consent");
+    expect(result![0].label).toBe("Booking portal consent");
   });
 });
 
@@ -216,7 +217,7 @@ describe("buildFieldpulseSections — IDs section", () => {
   it("puts *_id keys in IDs section", () => {
     const { sections } = buildFieldpulseSections({ customer_id: "abc123" });
     const ids = sections.find((s) => s.title === "IDs");
-    expect(ids!.entries[0].label).toBe("Customer Id");
+    expect(ids!.entries[0].label).toBe("Customer ID");
   });
 });
 
@@ -350,5 +351,62 @@ describe("buildFieldpulseSections — garbage-input robustness", () => {
   it("percent key with numeric 0 → \"0%\" (zero passes the empty-skip guard)", () => {
     const r = buildFieldpulseSections({ tax_rate: 0 });
     expect(entryValue(r, "Other")).toBe("0%");
+  });
+});
+
+describe("buildFieldpulseSections: *_type codes", () => {
+  it("a commission_type code is not formatted as dollars", () => {
+    const r = buildFieldpulseSections({ commission: "47.71", commission_type: 1 });
+    const money = r.sections.find((x) => x.title === "Money");
+    expect(money?.entries).toEqual([{ label: "Commission", value: "$47.71" }]);
+    // The bare enum number means nothing to the office: it is left out.
+    expect(r.sections.find((x) => x.title === "Other")).toBeUndefined();
+  });
+  it("drops numeric *_status codes but keeps worded ones", () => {
+    const r = buildFieldpulseSections({ estimate_status: 0, related_invoices_status: "not-paid" });
+    expect(r.sections.find((x) => x.title === "Other")?.entries).toEqual([
+      { label: "Related invoices status", value: "Not paid" },
+    ]);
+  });
+});
+
+describe("buildFieldpulseSections: no raw codes or Title Case", () => {
+  it("words snake_case enum values", () => {
+    const r = buildFieldpulseSections({
+      bill_to_mode: "current_customer",
+      invoice_amount_due_display_type: "remaining_balance",
+      last_qbo_sync_status_type: "invoice_paid",
+    });
+    expect(r.sections.find((x) => x.title === "Other")?.entries).toEqual([
+      { label: "Bill to mode", value: "Current customer" },
+      { label: "Invoice amount due display type", value: "Remaining balance" },
+      { label: "Last QBO sync status type", value: "Invoice paid" },
+    ]);
+  });
+  it("drops the leading Is from flags", () => {
+    const r = buildFieldpulseSections({ is_template: false, is_qbo_auto_tax_enabled: true, qb_originated: true });
+    expect(r.sections.find((x) => x.title === "Flags")?.entries).toEqual([
+      { label: "QB originated", value: "Yes" },
+      { label: "QBO auto tax enabled", value: "Yes" },
+      { label: "Template", value: "No" },
+    ]);
+  });
+  it("keeps acronyms upper case", () => {
+    expect(humanizeKey("hvi")).toBe("HVI");
+  });
+});
+
+describe("capitalizeWordValue", () => {
+  it("sentence-cases lower-case enum values", () => {
+    expect(capitalizeWordValue("company")).toBe("Company");
+    expect(capitalizeWordValue("current customer")).toBe("Current customer");
+    expect(capitalizeWordValue("current_customer")).toBe("Current customer");
+    expect(capitalizeWordValue("not-paid")).toBe("Not paid");
+  });
+  it("leaves anything else as sent", () => {
+    expect(capitalizeWordValue("ap@example.com")).toBe("ap@example.com");
+    expect(capitalizeWordValue("net30")).toBe("net30");
+    expect(capitalizeWordValue("Net 30")).toBe("Net 30");
+    expect(capitalizeWordValue("https://x.io")).toBe("https://x.io");
   });
 });

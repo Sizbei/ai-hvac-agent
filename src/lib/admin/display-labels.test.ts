@@ -15,6 +15,19 @@ describe("humanizeCode", () => {
     expect(humanizeCode("")).toBe("");
     expect(humanizeCode(null)).toBe("");
   });
+
+  it("shows free text (FieldPulse job titles) as written", () => {
+    expect(humanizeCode("Job for Hollow Creek Community Chapel")).toBe(
+      "Job for Hollow Creek Community Chapel",
+    );
+    expect(humanizeCode("HVAC DOWN")).toBe("HVAC DOWN");
+    expect(humanizeCode("HVAC")).toBe("HVAC");
+    expect(humanizeCode("  Ice  Machine ")).toBe("Ice Machine");
+    expect(humanizeCode("hccc open door classroom")).toBe("hccc open door classroom");
+    expect(issueTypeLabel("Lazy Lady Baking Company")).toBe("Lazy Lady Baking Company");
+    expect(humanizeCode("refrigeration")).toBe("Refrigeration");
+    expect(issueTypeLabel("Marlow's Deli Ashgrove: HVAC")).toBe("Marlow's Deli Ashgrove: HVAC");
+  });
 });
 
 describe("issueTypeLabel", () => {

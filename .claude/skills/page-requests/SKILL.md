@@ -218,6 +218,16 @@ rows run the subqueries). Integration proof:
 - Enum labels on read surfaces come from `src/lib/admin/request-labels.ts`
   (`issueTypeLabel`, `jobTypeLabel`, `urgencyLabel`) — don't add local
   formatIssueType copies.
+  An imported free-text title (not `isCodeShaped`) is shown as typed, never
+  lowercased; a missing customer name reads `customerNameLabel` ("No name on
+  file"), never "Unknown".
+- Sheet display helpers (FieldPulse history): long descriptions go through
+  `src/components/admin/expandable-description.tsx` (`readableDescription` /
+  `previewText` in `src/lib/admin/long-text.ts`); visit lines use
+  `visitWhenLabel` (`src/lib/admin/visit-when.ts`: band name only when the
+  window fills the band exactly); FieldPulse metrics/details are filtered by
+  `src/lib/admin/request-fieldpulse-view.ts` ($0 totals, bare tag ids hidden;
+  multi-day becomes a badge).
 
 - `refetch` on `useAdminRequests` busts the SWR cache (`bust: true`) so a
   status change committed via the detail sheet always fetches fresh data, not

@@ -40,6 +40,7 @@ import type { RequestStatus } from "@/lib/admin/request-status";
 import { generateReferenceNumber } from "@/lib/requests/submit-session-request";
 import { importOneFpCustomer, createDeletedPlaceholderCustomer } from "./customers";
 import { buildFpSpillover } from "./spillover";
+import { afterHoursIfMovedEarlier, keepEarliest } from "./keep-earliest";
 import { getOrgConfig } from "@/lib/admin/org-config-queries";
 import { isAfterHours } from "@/lib/admin/after-hours";
 
@@ -535,6 +536,20 @@ export async function importJobsFromFieldpulse(
             arrivalWindowEnd: job.arrivalWindowEnd,
             completedAt: job.completedAt,
             fieldpulseData: fpJobSpillover,
+            // Rows imported before createdAt was carried still hold the import
+            // day; move them back to FP's date (never forward).
+            // A row that moves earlier gets the after-hours answer for its real time.
+            ...(job.createdAt
+              ? {
+                  createdAt: keepEarliest(serviceRequests.createdAt, job.createdAt),
+                  isAfterHours: afterHoursIfMovedEarlier(
+                    serviceRequests.createdAt,
+                    serviceRequests.isAfterHours,
+                    job.createdAt,
+                    isAfterHours(job.createdAt, afterHoursCfg),
+                  ),
+                }
+              : {}),
             updatedAt: new Date(),
           })
           .where(

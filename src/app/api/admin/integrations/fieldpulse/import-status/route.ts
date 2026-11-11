@@ -1,4 +1,5 @@
 import { getAdminSession } from "@/lib/auth/session";
+import { isPlatformAdmin } from "@/lib/auth/authz";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { slidingWindow, RATE_LIMITS } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
@@ -12,6 +13,8 @@ export async function GET() {
   try {
     const session = await getAdminSession();
     if (!session) return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    // Operator tool: the board is platform-only, so the runs are too.
+    if (!isPlatformAdmin(session)) return errorResponse("Not found", "NOT_FOUND", 404);
 
     const rateCheck = slidingWindow(
       `admin:fp-import-status:${session.userId}`,

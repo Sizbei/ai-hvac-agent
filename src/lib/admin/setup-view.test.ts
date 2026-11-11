@@ -228,7 +228,10 @@ describe("rowActionsFor", () => {
 
   it("keeps the secondary link on the hero step's row, hiding only the primary", () => {
     expect(rowActionsFor(step("add_technician"), "add_technician")).toEqual({ primary: false, secondary: true });
-    expect(rowActionsFor(step("pricebook"), "pricebook")).toEqual({ primary: false, secondary: true });
+  });
+
+  it("pricebook has no secondary link (the FieldPulse import console is platform-only)", () => {
+    expect(rowActionsFor(step("pricebook"), "pricebook")).toEqual({ primary: false, secondary: false });
   });
 
   it("has no secondary for a step without one, and nothing on done rows", () => {

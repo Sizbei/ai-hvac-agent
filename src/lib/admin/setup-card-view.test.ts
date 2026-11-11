@@ -115,8 +115,6 @@ function guide(welcomeDue: boolean): AdminGuidePayload {
     readOnly: false,
     payLinks: false,
     hasFieldPulse: false,
-    historyHidden: false,
-    historyContact: "your account administrator",
   };
 }
 

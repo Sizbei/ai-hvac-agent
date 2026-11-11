@@ -36,12 +36,6 @@ const HIDDEN: WelcomeRowView = {
 };
 
 function welcomeLine(guide: AdminGuidePayload): string {
-  if (guide.historyHidden && guide.hasFieldPulse) {
-    return (
-      "Your upcoming work, customers and team carried over from FieldPulse. " +
-      `Older records are hidden for a clean start; ask ${guide.historyContact} if you need them back. ${TOUR_TAIL}`
-    );
-  }
   if (guide.hasFieldPulse) return `Your FieldPulse jobs, customers and team, in one place. ${TOUR_TAIL}`;
   return `Your jobs, customers and team, in one place. ${TOUR_TAIL}`;
 }

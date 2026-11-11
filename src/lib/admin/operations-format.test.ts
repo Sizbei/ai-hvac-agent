@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  bookedSublabel,
   formatDuration,
   countOf,
   responseSublabel,
@@ -59,5 +60,17 @@ describe("operations-format", () => {
     expect(dispatchHealthSublabel({ real: counts(1), shadow: counts(2), overrides: 0 })).toContain(
       "3 decisions · 2 suggested only",
     );
+  });
+});
+
+describe("bookedSublabel", () => {
+  it("a slow rate reads per week instead of 0.0 a day", () => {
+    expect(bookedSublabel(18, 365, 207)).toBe("Booked here · 0.3 / week avg · +207 imported");
+  });
+  it("a busy rate stays per day", () => {
+    expect(bookedSublabel(45, 30, 0)).toBe("Booked here · 1.5 / day avg");
+  });
+  it("none booked reads 0.0 a day", () => {
+    expect(bookedSublabel(0, 30, 0)).toBe("Booked here · 0.0 / day avg");
   });
 });

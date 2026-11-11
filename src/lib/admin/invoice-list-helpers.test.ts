@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pageLabel } from './invoice-list-helpers';
+import { collectedThisMonthSublabel, pageLabel } from './invoice-list-helpers';
 
 describe('pageLabel', () => {
   it('returns "0 results" when total is 0', () => {
@@ -20,5 +20,14 @@ describe('pageLabel', () => {
 
   it('returns "1–1 of 1" for single item', () => {
     expect(pageLabel(1, 1, 50)).toBe('1–1 of 1');
+  });
+});
+
+describe('collectedThisMonthSublabel', () => {
+  it('says synced payments are not included when the org has synced invoices', () => {
+    expect(collectedThisMonthSublabel(true)).toBe('Paid here since the 1st · FieldPulse/HCP not included');
+  });
+  it('keeps the plain line otherwise', () => {
+    expect(collectedThisMonthSublabel(false)).toBe('Received since the 1st, less refunds');
   });
 });

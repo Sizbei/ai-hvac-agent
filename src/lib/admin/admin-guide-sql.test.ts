@@ -21,6 +21,7 @@ describe("adminGuideSelectSql", () => {
     expect(text).toContain("SELECT feature_flags FROM organizations WHERE id = $4");
     expect(text).toMatch(/SELECT NULLIF\(name, email\) FROM users WHERE organization_id = \$5 AND is_active AND lower\(trim\(email\)\) = ANY\(\$6::text\[\]\) ORDER BY created_at, id LIMIT 1/);
     expect(render(q).params).toEqual([USER, ORG, ORG, ORG, ORG, ["owner@x.com"]]);
+    expect(text).not.toContain("hidden_from_org");
   });
 
   it("a stale preview (no subject) reads no user row", () => {

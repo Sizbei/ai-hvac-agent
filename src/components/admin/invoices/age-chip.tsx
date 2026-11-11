@@ -62,20 +62,34 @@ const CLS: Record<string, string> = {
   green: 'bg-success-light text-success-strong border-success-border',
   amber: 'bg-warning-light text-warning-strong border-warning-border',
   red: 'bg-danger-light text-danger-strong border-danger-border',
+  neutral: 'bg-muted text-muted-foreground border-border',
 };
-export function AgeChip({ issuedAt, dueDate, createdAt, state, compact = false }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string; compact?: boolean }) {
-  if (state === 'paid') {
-    return <span className={`${CHIP} ${CLS.green}`}>Paid</span>;
-  }
+const STATE_LABEL: Record<string, string> = { draft: 'Draft', void: 'Void', refunded: 'Refunded' };
+
+export type AgeChipView = { label: string; tone: 'green' | 'amber' | 'red' | 'neutral'; mono: boolean };
+
+/** What the chip says. Only an OPEN invoice has an age that matters: paid is
+ * green; a draft, void or refunded invoice names its state in grey (a $0 FieldPulse
+ * draft from 2023 must not read "1098 days" in red). */
+export function ageChipView(inv: InvoiceAgeDates & { state: string }, compact: boolean, now: Date = new Date()): AgeChipView {
+  if (inv.state === 'paid') return { label: 'Paid', tone: 'green', mono: false };
+  if (inv.state !== 'open') return { label: STATE_LABEL[inv.state] ?? 'Closed', tone: 'neutral', mono: false };
   // Days PAST DUE is the number that matters for collections when the source
   // system gave us a due date (FP's issue dates are onboarding artifacts for
   // migrated books); otherwise fall back to age since issue. A past-due open
   // invoice is never green — the chip must agree with the Overdue filter.
-  const overdueDays = state === 'open' ? daysPastDue({ issuedAt, dueDate, createdAt }) : 0;
-  if (overdueDays >= 1) {
-    return <span className={`${CHIP} ${CLS.red} font-mono tabular-nums`}>{overdueDays}d overdue</span>;
-  }
-  const days = invoiceAgeDays({ issuedAt, createdAt });
-  const b = state === 'open' && overdueByDates({ issuedAt, dueDate, createdAt }) ? 'red' : ageBucket(days);
-  return <span className={`${CHIP} ${CLS[b]} font-mono tabular-nums`}>{compact ? compactAgeLabel(days) : ageLabel(days)}</span>;
+  const overdueDays = daysPastDue(inv, now);
+  if (overdueDays >= 1) return { label: `${overdueDays}d overdue`, tone: 'red', mono: true };
+  const days = invoiceAgeDays(inv, now);
+  const tone = overdueByDates(inv, now) ? 'red' : ageBucket(days);
+  return { label: compact ? compactAgeLabel(days) : ageLabel(days), tone, mono: true };
+}
+
+export function AgeChip({ issuedAt, dueDate, createdAt, state, compact = false }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string; compact?: boolean }) {
+  const view = ageChipView({ issuedAt, dueDate, createdAt, state }, compact);
+  return (
+    <span className={`${CHIP} ${CLS[view.tone]}${view.mono ? ' font-mono tabular-nums' : ''}`}>
+      {view.label}
+    </span>
+  );
 }

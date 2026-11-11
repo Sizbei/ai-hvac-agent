@@ -31,3 +31,13 @@ export function businessWhen(iso: string, timeZone: string = TZ): string {
 export function businessDay(iso: string, timeZone: string = TZ): string {
   return new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric", year: "numeric" }).format(new Date(iso));
 }
+
+/**
+ * An option's heading. The FieldPulse import puts each estimate in one option
+ * named "FieldPulse" (the sync pill already says where it came from), so that
+ * one reads "Estimate"; real option names (Good / Better / Best) stay.
+ */
+export function estimateOptionTitle(name: string): string {
+  const trimmed = name.trim();
+  return trimmed === "" || trimmed === "FieldPulse" ? "Estimate" : trimmed;
+}

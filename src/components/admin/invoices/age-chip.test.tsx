@@ -1,5 +1,5 @@
-import { it, expect } from 'vitest';
-import { compactAgeLabel, ageBucket, ageLabel, daysBetween, daysPastDue, invoiceAgeDays, overdueByDates } from './age-chip';
+import { describe, it, expect } from 'vitest';
+import { ageChipView, compactAgeLabel, ageBucket, ageLabel, daysBetween, daysPastDue, invoiceAgeDays, overdueByDates } from './age-chip';
 
 it('buckets invoice age into green/amber/red at 30 and 60 days', () => {
   expect(ageBucket(10)).toBe('green');
@@ -76,4 +76,27 @@ it('ageLabel reads naturally for fresh invoices', () => {
 it('compactAgeLabel is short enough for a list row', () => {
   expect(compactAgeLabel(0)).toBe('Today');
   expect(compactAgeLabel(91)).toBe('91d old');
+});
+
+describe('ageChipView', () => {
+  const OLD = { issuedAt: '2023-11-08T12:00:00Z', dueDate: '2023-11-08T12:00:00Z', createdAt: '2026-07-09T00:00:00Z' };
+
+  it('a draft, void or refunded invoice names its state in grey, never an age in red', () => {
+    expect(ageChipView({ ...OLD, state: 'draft' }, true, NOW)).toEqual({ label: 'Draft', tone: 'neutral', mono: false });
+    expect(ageChipView({ ...OLD, state: 'void' }, true, NOW)).toEqual({ label: 'Void', tone: 'neutral', mono: false });
+    expect(ageChipView({ ...OLD, state: 'refunded' }, false, NOW)).toEqual({ label: 'Refunded', tone: 'neutral', mono: false });
+  });
+
+  it('paid is green', () => {
+    expect(ageChipView({ ...OLD, state: 'paid' }, true, NOW)).toEqual({ label: 'Paid', tone: 'green', mono: false });
+  });
+
+  it('an open invoice past its due date counts days overdue in red', () => {
+    expect(ageChipView({ ...OLD, dueDate: '2026-06-10T12:00:00Z', state: 'open' }, true, NOW)).toEqual({ label: '30d overdue', tone: 'red', mono: true });
+  });
+
+  it('an open invoice not yet due shows its age', () => {
+    const v = ageChipView({ issuedAt: '2026-07-05T12:00:00Z', dueDate: '2026-08-04T12:00:00Z', createdAt: '2026-07-09T00:00:00Z', state: 'open' }, true, NOW);
+    expect(v).toEqual({ label: '5d old', tone: 'green', mono: true });
+  });
 });

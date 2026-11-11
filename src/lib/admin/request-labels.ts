@@ -7,10 +7,46 @@
  */
 import { ISSUE_TYPE_LABELS, JOB_TYPE_LABELS, URGENCY_LABELS } from "@/lib/admin/create-request";
 
-/** "cooling_not_working" -> "Cooling not working". */
-export function humanizeCode(code: string): string {
+/**
+ * "cooling_not_working" -> "Cooling not working". Codes only: it always
+ * lowercases, so a value that may be free text goes through `codeOrTextLabel`
+ * (which the `humanizeCode` helpers in display-labels and issue-type-label
+ * call) instead.
+ */
+export function humanizeSnake(code: string): string {
   const spaced = code.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
   return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : "";
+}
+
+/**
+ * True for a machine code: lowercase letters/digits joined by _ or -
+ * ("water_leak", "tune-up", "boiler"), or an upper-case snake code
+ * ("COOLING_NOT_WORKING"). Anything else (spaces, mixed case, punctuation,
+ * emoji) is free text, such as a FieldPulse job title.
+ */
+export function isCodeShaped(value: string): boolean {
+  const v = value.trim();
+  return /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(v) || /^[A-Z0-9]+(?:_[A-Z0-9]+)+$/.test(v);
+}
+
+/**
+ * An imported free-text title as the office typed it: whitespace collapsed,
+ * capitals, punctuation and dashes kept ("Marlow's Deli W. Main St: PREP TABLE",
+ * "ON CALL: TROY 8/10-8/16"). Humanizing it would lowercase proper nouns.
+ */
+function freeText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * THE display rule for a value that may be a code or free text: a code is
+ * humanized ("water_leak" -> "Water leak"); free text is shown exactly as
+ * typed, apart from collapsed whitespace ("Job for Hollow Creek Community
+ * Chapel", "hccc open door classroom"). Every label helper defers to this.
+ */
+export function codeOrTextLabel(value: string | null | undefined): string {
+  if (!value) return "";
+  return isCodeShaped(value) ? humanizeSnake(value) : freeText(value);
 }
 
 function fromMap(
@@ -20,7 +56,7 @@ function fromMap(
 ): string {
   if (!code) return fallback;
   if (Object.prototype.hasOwnProperty.call(map, code)) return map[code];
-  return humanizeCode(code) || fallback;
+  return codeOrTextLabel(code) || fallback;
 }
 
 export function issueTypeLabel(code: string | null | undefined): string {
@@ -42,3 +78,7 @@ export function inSentence(label: string): string {
   const lowered = /^[A-Z0-9]{2,}$/.test(first) ? first : first.toLowerCase();
   return [lowered, ...rest].join(" ");
 }
+
+/** A request's customer name for read surfaces: one implementation, in
+ * customer-name-display (blank reads "No name on file", never "Unknown"). */
+export { NO_CUSTOMER_NAME, customerNameLabel } from "@/lib/admin/customer-name-display";

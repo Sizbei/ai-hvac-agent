@@ -21,7 +21,7 @@ interface FieldpulseDetailsProps {
  * Collapsed header shows "FieldPulse details · N fields" with preview chips
  * of the most informative values (custom fields first, then Money/Dates).
  * Expanded view shows a "Custom fields" section first (when present), then
- * grouped sections (Money, Dates, Flags, IDs, Other) with a min-w-40 label
+ * grouped sections (Money, Dates, Flags, IDs, Other) with a fixed w-40 label
  * column. If nested objects were truncated, a footer line "+N nested fields
  * not shown" is displayed.
  *
@@ -73,7 +73,7 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
         <span className="rounded-[3px] border border-border-strong bg-surface-raised px-1.5 py-px text-[10px] font-medium text-muted-foreground">
           FieldPulse
         </span>
-        <span>details · {totalFields} {totalFields === 1 ? 'field' : 'fields'}</span>
+        <span>Details · {totalFields} {totalFields === 1 ? 'field' : 'fields'}</span>
         {!open && combinedPreview.length > 0 && (
           <span className="ml-2 flex min-w-0 flex-1 gap-1.5 overflow-hidden">
             {combinedPreview.map((chip) => (
@@ -99,8 +99,8 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
                 <dl className="flex flex-col gap-1">
                   {normalizedCustomFields.map((cf) => (
                     <div key={cf.name} className="flex gap-2 text-xs">
-                      <dt className="min-w-40 shrink-0 text-muted-foreground">{cf.name}</dt>
-                      <dd className="break-words text-foreground">{cf.value}</dd>
+                      <dt className="w-40 shrink-0 break-words text-muted-foreground">{cf.name}</dt>
+                      <dd className="min-w-0 break-words text-foreground">{cf.value}</dd>
                     </div>
                   ))}
                 </dl>
@@ -114,12 +114,12 @@ export function FieldpulseDetails({ data, customFields }: FieldpulseDetailsProps
                 <dl className="flex flex-col gap-1">
                   {section.entries.map((entry) => (
                     <div key={entry.label} className="flex gap-2 text-xs">
-                      <dt className="min-w-40 shrink-0 text-muted-foreground">{entry.label}</dt>
+                      <dt className="w-40 shrink-0 break-words text-muted-foreground">{entry.label}</dt>
                       <dd
                         className={
                           section.title === 'IDs'
-                            ? 'break-all font-mono text-foreground'
-                            : 'break-words text-foreground'
+                            ? 'min-w-0 break-all font-mono text-foreground'
+                            : 'min-w-0 break-words text-foreground'
                         }
                       >
                         {entry.value}

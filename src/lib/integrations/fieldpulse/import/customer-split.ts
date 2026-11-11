@@ -25,6 +25,8 @@ import type { PhaseResult } from "./run-import";
 import { buildFpSpillover } from "./spillover";
 import {
   findByFpId,
+  fpCreatedAtSet,
+  fpCreatedAtValues,
   updateCustomerFields,
   type MappedFpCustomer,
 } from "./customers";
@@ -204,6 +206,7 @@ async function claimNativeCustomer(
       billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
       fieldpulseData: fpSpillover,
       ...(customer.customerType ? { customerType: customer.customerType } : {}),
+      ...fpCreatedAtSet(customer),
       updatedAt: new Date(),
     })
     .where(
@@ -256,6 +259,7 @@ async function insertFpCustomer(
       billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
       fieldpulseData: fpSpillover,
       ...(customer.customerType ? { customerType: customer.customerType } : {}),
+      ...fpCreatedAtValues(customer),
     })
     .onConflictDoNothing({
       target: [customers.organizationId, customers.fieldpulseCustomerId],
@@ -307,6 +311,8 @@ async function insertArchivedFpCustomer(
       isTaxExempt: customer.isTaxExempt ?? null,
       billingAddressEncrypted: customer.billingAddress ? encrypt(sanitizeAddress(customer.billingAddress)) : null,
       fieldpulseData: fpSpillover,
+      ...(customer.customerType ? { customerType: customer.customerType } : {}),
+      ...fpCreatedAtValues(customer),
       archivedAt: new Date(),
     })
     .onConflictDoNothing({

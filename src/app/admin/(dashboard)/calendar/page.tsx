@@ -312,6 +312,7 @@ export default function CalendarPage() {
             error={agendaError}
             onSelect={setSelectedRequestId}
             onLoadOlder={loadOlder}
+            onRetry={refetchAgenda}
           />
         ) : isMonth ? (
           <MonthGrid

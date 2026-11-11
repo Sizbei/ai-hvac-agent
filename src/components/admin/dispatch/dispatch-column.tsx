@@ -9,7 +9,7 @@ import { ContextBadge } from '@/components/admin/ui/context-badge';
 import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
-import { issueTypeLabel } from '@/lib/admin/request-labels';
+import { customerNameLabel, issueTypeLabel } from '@/lib/admin/request-labels';
 import {
   EMPTY_LANE_COPY,
   UNASSIGNED_EMPTY_COPY,
@@ -60,7 +60,7 @@ function JobCard({
   return (
     <button
       type="button"
-      aria-label={`${job.customerName ?? 'Unknown'} · ${job.referenceNumber}${visitTag ? ` · ${visitTag}` : ''}`}
+      aria-label={`${customerNameLabel(job.customerName)} · ${job.referenceNumber}${visitTag ? ` · ${visitTag}` : ''}`}
       onClick={() => onSelect(job.id)}
       className={`w-full rounded-sm border border-l-2 px-3 py-2 text-left transition-colors hover:bg-row-hover ${urgencyAccent(job.urgency).bar} ${
         ended ? 'border-dashed border-border-strong bg-surface-sunken text-muted-foreground' : 'border-border bg-surface-raised'
@@ -87,7 +87,7 @@ function JobCard({
           )}
         </div>
       </div>
-      <div className="mt-0.5 truncate text-sm">{job.customerName ?? 'Unknown'}</div>
+      <div className="mt-0.5 truncate text-sm">{customerNameLabel(job.customerName)}</div>
       <div className="truncate text-xs text-muted-foreground">
         {issueTypeLabel(job.issueType)} ·{' '}
         <span className="font-mono">{job.referenceNumber}</span>

@@ -26,9 +26,13 @@ Entity filter uses the static `KNOWN_ENTITIES` enum in the page.
   PII values (no customer names, emails, addresses). The page renders it via
   `formatAuditDetails` (`src/lib/admin/audit-format.ts`, tested: camelCase
   keys and field-name values become words, ISO dates become "Oct 6, 2026").
-  If `JSON.parse` throws or the payload isn't an object, it returns
-  `'(details unavailable)'` — not the raw string (which could contain a future
-  leaked value).
+  If `JSON.parse` throws or the payload isn't an object, it returns null (no
+  details line) — never the raw string (which could contain a future leaked
+  value). Ids never show raw: `getAuditLog` resolves them per entry into
+  `refs` (org-scoped staff names, request numbers, tag and job type names;
+  customer ids are NOT resolved — PII) and the formatter drops any id without
+  a label. `*Cents` numbers read as dollars, booleans as yes/no, snake_case
+  codes as words; null values and empty lists are left out.
 - Phone (<640px) stacks: the When and Actor columns are `hidden sm:table-cell`
   and fold into a `sm:hidden` line at the top of the Action cell, which wraps
   (`whitespace-normal`, details `break-words`, at every width), so nothing
