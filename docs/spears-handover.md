@@ -857,3 +857,17 @@ errors, `npx vitest run` → no drop from the live baseline.
 - Verified: visible open AR is **$192,586.59** across 195 invoices, equal to FieldPulse's Σ `amount_unpaid` on Invoiced + Sent + Partially Paid. 0 open rows carry a Draft/Paid/Void status. Invoices, Reports and Dashboard agree when viewed as Chick.
 - Lifetime FieldPulse payments on record: 2,747 payments, $2,840,773.89, May 8 2023 – Nov 9 2026. No page shows this figure.
 - Open: `accounting-export.ts` has no state filter (drafts and voids appear in the export). New dev-tooling npm advisories (promptfoo, vitest, drizzle-kit) appeared today; none ship to the site, and the audit CI job is advisory.
+
+## Deploy record: speed, flow and security pass (2026-11-11, night)
+- Commits `8c6988f`..`395118b` on `main`. Smoke passes on prod.
+- **Fluid compute is ON** (2048 MB, `iad1`). Sections 2.3 and 7 predate this check.
+- **Speed.** Pages already visited paint from memory at once and refresh behind (cache kept 30 min, `src/lib/admin/swr-cache.ts`). Return visits measured 70–230 ms on dev, was about 800 ms. Sidebar links preload on hover or touch. Sign-in page is static and edge-cached. Logo 73 KB → 15 KB. Twilio and Sentry load only when used. Technician price list sends 4 columns, not the whole pricebook.
+- **Bug fixed:** technician suggestions returned HTTP 500 (`src/lib/ai/dispatch/signals.ts`, array passed to `ANY()`).
+- **Flow.** Back closes an open request and restores the scroll position. Calendar view and date, and the dispatch date, live in the URL. After a session expires, sign-in returns to the page you were on. Phone and email in a request are tap-to-call and tap-to-mail. Invoice tabs can no longer show the previous tab's rows.
+- **Security.**
+  - Online booking needs at least one chat turn, and an org accepts at most 150 online bookings in 24 hours (`src/app/api/session/confirm/route.ts`).
+  - Chat messages are capped at 8,000 characters; intake fields have length caps; the address clean-up no longer has a slow regex.
+  - ZIP verification locks a customer out after 3 failed sessions in 24 hours (`src/lib/ai/account-zips.ts`).
+  - A new booking can turn text consent off, never back on.
+  - `/docs.html`, `/schema.html` and `/widget-demo.html` are no longer public (moved to `docs/site/`).
+- **Not done** (first visits are still 0.4–1.5 s on dev): request sheet and customer profile load their sections one after another; invoice and global search scan on every keystroke; rate limits are per server instance, not shared; no per-account sign-in lockout; a signed-in session cannot be revoked before it expires.
