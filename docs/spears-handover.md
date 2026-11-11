@@ -80,8 +80,10 @@ It ships the final fix wave, including migration 0061. Once 0061 is applied:
 ### 2.1 Check Chick's user row, then send the owner invite
 
 The invite only works if Chick's row is **active, role `admin`, with no
-password**. The ledger shows `owner_email` was set, but not that the row was
-activated. Check it first (read-only):
+password**. **Done 2026-11-11 by the controller:** the row was inactive and is now
+active, `admin`, password-less (owner_email already set at D1). Until he accepts
+the invite he can also sign in with Google as an admin; accepting the owner invite
+makes him `super_admin`. To re-check (read-only):
 
 ```sql
 SELECT id, role, is_active, password_hash IS NULL AS no_password
