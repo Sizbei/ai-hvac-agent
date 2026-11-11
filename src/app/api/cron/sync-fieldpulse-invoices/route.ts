@@ -20,13 +20,15 @@ import { db } from "@/lib/db";
 import { fieldpulseConnections, serviceRequests } from "@/lib/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { verifyCronAuth } from "@/lib/cron-auth";
+import { getFieldpulseClient } from "@/lib/integrations/fieldpulse/client";
+import { importPaymentsFromFieldpulse } from "@/lib/integrations/fieldpulse/import/payments";
 import {
   pullInvoicesForJob,
   pullOpenFieldpulseInvoices,
 } from "@/lib/integrations/fieldpulse/invoice-sync";
 
 // The sweep runs in after(); give it the longest window every plan allows.
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -57,6 +59,24 @@ export async function GET(request: Request): Promise<Response> {
             { organizationId, ...open },
             "Cron-triggered Fieldpulse open-invoice refresh complete",
           );
+
+          // Payments next: "Collected" is summed from payment rows, and these
+          // used to arrive only through the GitHub nightly sync — when GitHub
+          // paused that, invoices kept turning paid while Collected stood still.
+          // Rows already mirrored are skipped, so a normal day inserts a handful.
+          try {
+            const client = await getFieldpulseClient(organizationId);
+            if (client) {
+              const counts = { fetched: 0, created: 0, updated: 0, skipped: 0, errors: 0 };
+              await importPaymentsFromFieldpulse(organizationId, counts, client);
+              logger.info(
+                { organizationId, created: counts.created, errors: counts.errors },
+                "Cron-triggered Fieldpulse payments refresh complete",
+              );
+            }
+          } catch (error) {
+            logger.error({ organizationId, error }, "Cron-triggered Fieldpulse payments refresh failed");
+          }
 
           // Org-scoped: only this org's jobs (defense-in-depth + index use).
           const jobs = await db

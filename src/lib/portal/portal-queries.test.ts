@@ -31,9 +31,14 @@ vi.mock("@/lib/db", () => ({
 
 // Decrypt is mocked to a fixed value so the test never needs ENCRYPTION_KEY and
 // we can assert the name is decrypted server-side (not shipped as ciphertext).
-vi.mock("@/lib/crypto", () => ({
-  decrypt: vi.fn(() => "Jane Customer"),
-}));
+vi.mock("@/lib/crypto", async () => {
+  const { createHmac } = await import("node:crypto");
+  return {
+    decrypt: vi.fn(() => "Jane Customer"),
+    macHex: (label: string, value: string) =>
+      createHmac("sha256", "test-key").update(`${label}:${value}`).digest("hex"),
+  };
+});
 
 // takePayment is the existing payment seam — mocked so payPortalInvoice is tested
 // for its OWNERSHIP GUARD + delegation, not the payment mechanics.
@@ -114,6 +119,25 @@ describe("generatePortalToken", () => {
     expect(set.portalTokenHash).not.toBe(token);
     expect(set.portalTokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(set.portalTokenCreatedAt).toBeInstanceOf(Date);
+  });
+
+  it("hands out the SAME link again while one is live (an earlier text keeps working)", async () => {
+    let stored: { portalTokenHash?: unknown; portalTokenCreatedAt?: unknown } = {};
+    mockSelectSeq([[{ id: CUSTOMER }]]);
+    vi.mocked(db.update).mockReturnValue({
+      set: (v: Record<string, unknown>) => {
+        stored = v;
+        return { where: () => ({ returning: () => Promise.resolve([{ id: CUSTOMER }]) }) };
+      },
+    } as never);
+    const first = await generatePortalToken(ORG, CUSTOMER);
+
+    vi.mocked(db.update).mockClear();
+    mockSelectSeq([[{ id: CUSTOMER, portalTokenHash: stored.portalTokenHash, portalTokenCreatedAt: stored.portalTokenCreatedAt }]]);
+    const second = await generatePortalToken(ORG, CUSTOMER);
+
+    expect(second).toBe(first);
+    expect(db.update).not.toHaveBeenCalled();
   });
 
   it("returns null when the customer is not in this org", async () => {

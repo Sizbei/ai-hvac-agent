@@ -113,7 +113,7 @@ export function DispatchColumn({
   const unscheduledLink = isUnassigned ? unscheduledLinkLabel(unscheduledCount) : null;
   const Icon = isUnassigned ? Inbox : User;
   return (
-    <Card className="flex w-72 shrink-0 flex-col p-0">
+    <Card className="flex w-72 max-sm:w-60 shrink-0 flex-col p-0">
       <div className="flex h-10 items-center gap-2 border-b border-border-strong bg-surface-sunken px-3 shadow-[var(--keyline-top)]">
         <Icon
           className={

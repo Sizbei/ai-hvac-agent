@@ -398,10 +398,15 @@ export default function CustomerDetailPage({
         </div>
         {/* Contact info card */}
         <Skeleton className="h-36 w-full rounded-xl" />
-        {/* Membership card */}
-        <Skeleton className="h-24 w-full rounded-xl" />
-        {/* Equipment card */}
-        <Skeleton className="h-48 w-full rounded-xl" />
+        {/* These sections need only the id from the URL, so they load alongside
+            the profile, not after it. The keys match the loaded page below, so
+            React keeps them (and their fetched data) when the profile arrives. */}
+        <CustomerBookingsSection key="bookings" customerId={id} />
+        <LocationsSection key="locations" customerId={id} />
+        <ContactsSection key="contacts" customerId={id} />
+        <CustomerMembershipCard key="membership" customerId={id} />
+        <CustomerEstimatesCard key={`estimates-${id}`} customerId={id} />
+        <CustomerInvoicesCard key={`invoices-${id}`} customerId={id} />
       </PageShell>
     );
   }
@@ -608,12 +613,12 @@ export default function CustomerDetailPage({
       {/* Bookings — real service_requests (service_history is empty for imports).
           High on the page: "what did you do last time?" is the first question
           on a call. */}
-      <CustomerBookingsSection customerId={id} />
+      <CustomerBookingsSection key="bookings" customerId={id} />
 
       {/* Service locations (hidden when none are recorded) */}
-      <LocationsSection customerId={id} />
+      <LocationsSection key="locations" customerId={id} />
 
-      <ContactsSection customerId={id} />
+      <ContactsSection key="contacts" customerId={id} />
 
       {/* FieldPulse details — collapsed panel (custom fields + structured data) */}
       <FieldpulseDetails
@@ -622,7 +627,7 @@ export default function CustomerDetailPage({
       />
 
       {/* Membership */}
-      <CustomerMembershipCard customerId={id} />
+      <CustomerMembershipCard key="membership" customerId={id} />
 
       {/* Customer self-service portal link */}
       <PortalLinkCard

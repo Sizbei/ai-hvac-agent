@@ -22,6 +22,12 @@ vi.mock("@/lib/integrations/fieldpulse/invoice-sync", () => ({
     .fn()
     .mockResolvedValue({ created: 1, updated: 0, skipped: 0, failed: 0 }),
 }));
+vi.mock("@/lib/integrations/fieldpulse/client", () => ({
+  getFieldpulseClient: vi.fn().mockResolvedValue({}),
+}));
+vi.mock("@/lib/integrations/fieldpulse/import/payments", () => ({
+  importPaymentsFromFieldpulse: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

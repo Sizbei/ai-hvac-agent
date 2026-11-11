@@ -34,9 +34,10 @@ function safeDecrypt(value: string | null): string | null {
   }
 }
 
-/** "no_cool" → "no cool" — readable in "Your <serviceType> is scheduled". */
+/** "no_cool" → "no cool visit" — the template reads "Your <serviceType> is
+ * scheduled", and a bare symptom ("Your no cool is scheduled") is not English. */
 function humanizeIssue(issueType: string | null): string {
-  return issueType ? issueType.replaceAll("_", " ") : "service visit";
+  return issueType ? `${issueType.replaceAll("_", " ")} visit` : "service visit";
 }
 
 /** Time-only span in the BUSINESS timezone (the held bounds are Eastern-

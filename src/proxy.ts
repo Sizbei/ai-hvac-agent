@@ -180,6 +180,18 @@ async function routeRequest(request: NextRequest) {
     request.headers.get("x-request-id") ?? crypto.randomUUID();
   addSecurityHeaders(response, requestId);
 
+  // Staff pages: the directives that cannot break a page but close the usual
+  // injection escalations — no plugins, no <base> hijack, forms only post back
+  // here, never framed. (A script-src allowlist needs nonces through the whole
+  // render and is not set here.)
+  // /tech is left alone on purpose (camera and location capture).
+  if (pathname.startsWith("/admin")) {
+    response.headers.set(
+      "Content-Security-Policy",
+      "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    );
+  }
+
   return response;
 }
 

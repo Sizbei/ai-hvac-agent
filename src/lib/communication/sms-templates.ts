@@ -322,7 +322,7 @@ export const defaultSmsTemplates: Record<
   { subject?: never; body: string }
 > = {
   appointment_scheduled: {
-    body: `{{companyName}}: Your {{serviceType}} is scheduled for {{date appointmentDate "short"}} at {{appointmentTime}}. Technician: {{technicianName}}. Address: {{appointmentAddress}}. Reply or call {{phoneNumber}} to change.`,
+    body: `{{companyName}}: Your {{serviceType}} is scheduled for {{date appointmentDate "short"}} at {{appointmentTime}}. Technician: {{technicianName}}. Address: {{appointmentAddress}}. Call {{phoneNumber}} to change.`,
   },
   appointment_reminder_24h: {
     body: `Reminder: {{companyName}} technician {{technicianName}} will arrive tomorrow {{date appointmentDate "short"}} at {{appointmentTime}} at {{appointmentAddress}}. Questions? Call {{phoneNumber}}.`,

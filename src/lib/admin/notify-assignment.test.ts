@@ -82,7 +82,7 @@ describe("notifyCustomerOfAssignment", () => {
       customerName: "Pat Doe",
       customerPhone: "+14235550100",
       technicianName: "Alex Rivera",
-      serviceType: "no cool",
+      serviceType: "no cool visit",
       companyName: "Spears Services",
     });
     // Eastern hours, never raw UTC (12 PM–4 PM would be the UTC bug).

@@ -140,7 +140,7 @@ export default function SettingsPage() {
             window.history.replaceState(null, '', search);
           }}
         >
-          <TabsList className="h-auto w-full flex-wrap justify-start gap-y-1 group-data-horizontal/tabs:h-auto">
+          <TabsList className="h-auto w-full flex-wrap justify-start gap-y-1 group-data-horizontal/tabs:h-auto max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[&>*]:shrink-0 max-sm:[&>*]:min-h-11">
             <TabsTrigger value="branding">
               <Palette className="size-4" />
               Branding

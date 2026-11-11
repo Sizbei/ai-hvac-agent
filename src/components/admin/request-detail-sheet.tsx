@@ -1081,6 +1081,15 @@ export function RequestDetailSheet({
       <SheetContent side="right" className="w-full sm:w-[480px] sm:max-w-[480px] flex flex-col overflow-hidden">
         {isLoadingDetail ? (
           <div className="space-y-4 p-4">
+            {/* Start the two slowest sections now. They need only the request
+                id, and their results land in the shared caches, so the real
+                sections below paint at once when the request arrives. */}
+            {requestId && (
+              <div hidden>
+                <ScopedEstimatesSection serviceRequestId={requestId} variant="plain" />
+                <ScopedInvoicesSection serviceRequestId={requestId} variant="plain" />
+              </div>
+            )}
             <Skeleton className="h-6 w-3/4" />
             <Skeleton className="h-4 w-1/2" />
             <Skeleton className="h-24 w-full" />

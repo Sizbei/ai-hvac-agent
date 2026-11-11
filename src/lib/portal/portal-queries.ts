@@ -19,7 +19,7 @@ import "server-only";
  *  - Internal cost fields (costCents / margin / unitCostCents) are NEVER
  *    selected into a portal payload. Customers must not see cost.
  */
-import { randomBytes, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -35,12 +35,9 @@ import {
   type PortalEstimateOption,
 } from "@/lib/portal/portal-estimate";
 import { withTenant } from "@/lib/db/tenant";
-import { decrypt } from "@/lib/crypto";
+import { decrypt, macHex } from "@/lib/crypto";
 import { OPEN_STATUSES } from "@/lib/admin/request-status";
 import { takePayment, type TakePaymentResult } from "@/lib/admin/invoice-queries";
-
-/** Random bytes in the token body (32 bytes -> 64 hex chars -> 256-bit). */
-const TOKEN_BYTES = 32;
 
 /** SHA-256 hex of a portal token. Deterministic, so a presented token can be
  * looked up by its (indexed, unique) hash. Mirrors hashInviteToken. */
@@ -57,30 +54,50 @@ function safeDecrypt(ciphertext: string | null): string | null {
   }
 }
 
+/** The token for a customer's link minted at `createdAt`. Derived (keyed MAC),
+ * not random, so the SAME link can be handed out again later — only its hash is
+ * stored, and a random token could never be recovered from that. */
+function derivePortalToken(customerId: string, createdAt: Date): string {
+  return macHex("portal-token", `${customerId}:${createdAt.getTime()}`);
+}
+
 /**
- * ADMIN path: mint a fresh portal token for a customer, store ONLY its hash on
- * the customer row (rotate = overwrite), and return the plaintext ONCE. The
- * customer read is tenant-scoped, and the update is conditioned on both org and
- * id so a token can never be planted on another tenant's customer. Returns null
- * if the customer doesn't exist in this org.
+ * ADMIN path: the customer's portal token, plaintext. If the customer already
+ * has a live link it is returned again — a pay link texted this morning must
+ * still work after a reminder goes out this afternoon. Otherwise (no link yet,
+ * or one minted before tokens were derivable) a new one is minted and ONLY its
+ * hash stored. Revoking clears the hash, so the next call mints a fresh link.
+ * Tenant-scoped on both the read and the write. Returns null if the customer
+ * doesn't exist in this org.
  */
 export async function generatePortalToken(
   organizationId: string,
   customerId: string,
 ): Promise<string | null> {
   const [existing] = await db
-    .select({ id: customers.id })
+    .select({
+      id: customers.id,
+      portalTokenHash: customers.portalTokenHash,
+      portalTokenCreatedAt: customers.portalTokenCreatedAt,
+    })
     .from(customers)
     .where(withTenant(customers, organizationId, eq(customers.id, customerId)))
     .limit(1);
   if (!existing) return null;
 
-  const token = randomBytes(TOKEN_BYTES).toString("hex");
+  if (existing.portalTokenHash && existing.portalTokenCreatedAt) {
+    const current = derivePortalToken(customerId, existing.portalTokenCreatedAt);
+    if (hashPortalToken(current) === existing.portalTokenHash) return current;
+  }
+
+  // Whole milliseconds, so the stored timestamp reads back as the same instant.
+  const createdAt = new Date(Math.floor(Date.now()));
+  const token = derivePortalToken(customerId, createdAt);
   const [updated] = await db
     .update(customers)
     .set({
       portalTokenHash: hashPortalToken(token),
-      portalTokenCreatedAt: new Date(),
+      portalTokenCreatedAt: createdAt,
       updatedAt: new Date(),
     })
     .where(withTenant(customers, organizationId, eq(customers.id, customerId)))

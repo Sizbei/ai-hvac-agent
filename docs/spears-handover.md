@@ -887,3 +887,12 @@ errors, `npx vitest run` → no drop from the live baseline.
   - A reply of "Cancel" to an appointment text is an opt-out keyword (Twilio enforces this too); the appointment stays booked.
   - Admin pages have no script-blocking content security policy.
   - Speed: the request sheet and customer profile still load their sections only after the main record arrives (about one extra round trip each).
+
+## Deploy record: follow-up fixes (2026-11-12, later)
+- Auto-assign on online bookings is accepted as is (owner's call).
+- Customer profile sections load alongside the profile, not after it; the request sheet starts its estimates and invoices early.
+- Portal and pay links are now reusable: a new link no longer invalidates the customer's earlier one. Links minted before this deploy are replaced once, on the next send.
+- The daily Vercel cron (`sync-fieldpulse-invoices`, now up to 300 s) also mirrors FieldPulse payments, so "Collected" no longer depends on the GitHub nightly sync.
+- Admin pages send `object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. A script allowlist is still not set (it needs nonces).
+- Default appointment text says "Call … to change" (was "Reply or call"), and "Your no cool visit is scheduled". **Prod's existing template row still has the old wording: edit it under Communications → Templates.**
+- Phone: settings tabs scroll sideways; dispatch columns are narrower so the next one shows.

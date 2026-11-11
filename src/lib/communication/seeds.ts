@@ -20,7 +20,7 @@ export const defaultTemplates = [
     triggerType: "appointment_scheduled",
     templateType: "sms" as const,
     subjectTemplate: null,
-    bodyTemplate: `{{companyName}}: Your {{serviceType}} is scheduled for {{date appointmentDate "short"}} at {{appointmentTime}}. Technician: {{technicianName}}. Address: {{appointmentAddress}}. Reply or call {{phoneNumber}} to change.`,
+    bodyTemplate: `{{companyName}}: Your {{serviceType}} is scheduled for {{date appointmentDate "short"}} at {{appointmentTime}}. Technician: {{technicianName}}. Address: {{appointmentAddress}}. Call {{phoneNumber}} to change.`,
     variables: {
       customerName: "Customer name",
       technicianName: "Technician name",
