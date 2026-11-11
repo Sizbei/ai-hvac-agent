@@ -34,9 +34,10 @@ export async function GET(request: NextRequest) {
       ? Math.min(100, Math.max(1, parseInt(limitParam, 10) || 50))
       : 50;
 
-    // Org viewers see entries from the go-live moment on; the platform admin
-    // (not previewing) and orgs with showHistory see everything. A failed
-    // cutoff read throws to the 500 below rather than showing all history.
+    // Org viewers see entries from the go-live moment on, minus the sync
+    // entries of hidden invoices; the platform admin (not previewing) and orgs
+    // with showHistory see everything. A failed cutoff read throws to the 500
+    // below, and a malformed cutoff lists nothing, rather than showing all history.
     const since = viewer.showHidden
       ? undefined
       : ((await getCachedHistoryCutoff(session.organizationId)) ?? undefined);
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
       page,
       limit,
       since,
+      visibleOnly: !viewer.showHidden,
     });
 
     return successResponse({

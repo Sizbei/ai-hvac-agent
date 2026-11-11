@@ -27,13 +27,14 @@ describe("migration 0060", () => {
     expect(code).not.toContain("NOT NULL");
   });
 
-  it("is the last journal entry, right after 0059_golive", () => {
+  it("is the journal entry right after 0059_golive", () => {
     const entries = journal.entries as { idx: number; tag: string; when: number }[];
-    const last = entries[entries.length - 1];
-    const prev = entries[entries.length - 2];
+    const at = entries.findIndex((e) => e.tag === "0060_admin_guide");
+    const entry = entries[at];
+    const prev = entries[at - 1];
     expect(prev.tag).toBe("0059_golive");
-    expect(last).toMatchObject({ idx: 60, tag: "0060_admin_guide", version: "7", breakpoints: true });
-    expect(last.when).toBeGreaterThan(prev.when);
+    expect(entry).toMatchObject({ idx: 60, tag: "0060_admin_guide", version: "7", breakpoints: true });
+    expect(entry.when).toBeGreaterThan(prev.when);
   });
 
   it("snapshot = the 0059 snapshot plus the one nullable users column, chained by prevId", () => {

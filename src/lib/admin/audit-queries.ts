@@ -14,6 +14,7 @@ import { db } from "@/lib/db";
 import { auditLog, users } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import type { AuditLogEntry, AuditLogFilters, AuditLogPage } from "./audit-types";
+import { VISIBLE_ONLY, visibleRowsSql } from "./visibility";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 50;
@@ -27,9 +28,17 @@ export async function getAuditLog(
   const limit = Math.min(MAX_LIMIT, Math.max(1, filters.limit ?? DEFAULT_LIMIT));
   const offset = (page - 1) * limit;
 
-  // Org viewers who don't see hidden history start at the go-live cutoff.
-  const sinceConditions: SQL[] = filters.since ? [gte(auditLog.createdAt, filters.since)] : [];
-  const conditions: SQL[] = [...sinceConditions];
+  // Org viewers who don't see hidden history start at the go-live cutoff and
+  // skip the sync entries of hidden invoices (the nightly pull re-logs them).
+  const baseConditions: SQL[] = [
+    ...(filters.since ? [gte(auditLog.createdAt, filters.since)] : []),
+    ...(filters.visibleOnly
+      ? [
+          sql`NOT (${auditLog.action} = 'invoice_synced' AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = ${auditLog.entityId} AND i.organization_id = ${organizationId} AND NOT ${visibleRowsSql("i", VISIBLE_ONLY)}))`,
+        ]
+      : []),
+  ];
+  const conditions: SQL[] = [...baseConditions];
   const action = filters.action?.trim();
   if (action) {
     conditions.push(eq(auditLog.action, action));
@@ -41,9 +50,9 @@ export async function getAuditLog(
 
   const whereClause = withTenant(auditLog, organizationId, ...conditions);
 
-  // The distinct-actions list is keyed only on the org and the cutoff (not the
-  // action/entity filters) so the filter dropdown always shows every option,
-  // even after one is selected.
+  // The distinct-actions list is keyed only on the org, the cutoff and the
+  // hidden-invoice filter (not the action/entity filters) so the filter
+  // dropdown always shows every option, even after one is selected.
   const [countResult, rows, actionRows] = await Promise.all([
     db
       .select({ value: count() })
@@ -84,7 +93,7 @@ export async function getAuditLog(
     db
       .selectDistinct({ action: auditLog.action })
       .from(auditLog)
-      .where(withTenant(auditLog, organizationId, ...sinceConditions))
+      .where(withTenant(auditLog, organizationId, ...baseConditions))
       .orderBy(sql`${auditLog.action} ASC`),
   ]);
 

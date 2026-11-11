@@ -31,6 +31,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/field-forms.test.ts",
   // Go-live: hidden_from_org un-hide triggers (migration 0059) against the dev DB (throwaway org).
   "tests/integration/golive-unhide.test.ts",
+  // Go-live: activity un-hides work (migration 0061): requests, visits, invoices, messages (throwaway org).
+  "tests/integration/golive-unhide-activity.test.ts",
   // Go-live marking builders + script: both modes, timezone boundary, refusals (one throwaway org).
   "tests/integration/golive-marking.test.ts",
   // Go-live hidden history: each sweep's reads against visibility-fixture.ts (one throwaway org each).

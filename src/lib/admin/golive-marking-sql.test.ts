@@ -136,6 +136,40 @@ describe("golive marking SQL", () => {
     }
   });
 
+  it("every mark UPDATE is bounded by the org's historyCutoff, unbounded when it is unset", () => {
+    const bound =
+      " AND created_at < COALESCE((SELECT (o.feature_flags->>'historyCutoff')::timestamptz FROM organizations o WHERE o.id = $";
+    for (const mode of MODES) {
+      for (const statement of markStatements(ORG, mode)) {
+        const { flat, params } = render(statement);
+        const at = flat.lastIndexOf(bound);
+        expect(at, flat.slice(0, 40)).toBeGreaterThan(0);
+        // the bound closes the statement, outside every kept-set subquery
+        expect(flat.slice(at)).toMatch(/^ AND created_at < COALESCE\(\(SELECT \(o\.feature_flags->>'historyCutoff'\)::timestamptz FROM organizations o WHERE o\.id = \$(\d+)::uuid\), 'infinity'::timestamptz\)$/);
+        const param = flat.slice(at).match(/o\.id = \$(\d+)/)![1];
+        expect(params[Number(param) - 1]).toBe(ORG);
+      }
+    }
+  });
+
+  it("the dry run's would-hide counts carry the same cutoff bound as the apply", () => {
+    const { flat } = render(dryRunSql(ORG));
+    for (const t of MARKED_TABLES) {
+      for (const mode of MODES) {
+        const col = ` AS ${t}_hide_${mode}`;
+        const end = flat.indexOf(col);
+        expect(end).toBeGreaterThan(0);
+        expect(flat.slice(0, end)).toMatch(/AND created_at < COALESCE\(\(SELECT \(o\.feature_flags->>'historyCutoff'\)::timestamptz FROM organizations o WHERE o\.id = \$\d+::uuid\), 'infinity'::timestamptz\)\)::int$/);
+      }
+    }
+  });
+
+  it("unhide is not bounded by the cutoff", () => {
+    for (const statement of unhideStatements(ORG)) {
+      expect(render(statement).flat).not.toContain("historyCutoff");
+    }
+  });
+
   it("statements never DELETE", () => {
     for (const statement of allStatements()) {
       expect(render(statement).flat).not.toMatch(/\b(DELETE|TRUNCATE|DROP)\b/i);
@@ -154,7 +188,7 @@ describe("golive marking SQL", () => {
       const { flat } = render(statement);
       const literals = [...flat.matchAll(/'(\w+)'(::\w+)?/g)];
       for (const [, value, cast] of literals) {
-        if (value === "day" || value === "timezone" || value === "60 days") continue;
+        if (value === "day" || value === "timezone" || value === "60 days" || value === "historyCutoff") continue;
         expect(cast, `'${value}' needs a cast`).toBeDefined();
       }
     }

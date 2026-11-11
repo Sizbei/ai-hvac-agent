@@ -476,6 +476,61 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     expect(await hiddenTotal()).toBe(0);
   });
 
+  it("with a historyCutoff set, marking never hides a row created from the cutoff on; the dry run agrees", async () => {
+    const before = (await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`))[0]!.feature_flags;
+    try {
+      // Every fixture row was created in beforeAll except the backdated ones.
+      await db.execute(sql`UPDATE organizations SET feature_flags = feature_flags || jsonb_build_object('historyCutoff', (now() - interval '10 days')::text) WHERE id = ${org}`);
+      await batch(m.unhideStatements(org));
+      const dry = (await run(m.dryRunSql(org)))[0]!;
+      const changed = await batch(m.markStatements(org, "history"));
+      expect(changed).toEqual(m.MARKED_TABLES.map((t) => dry[`${t}_hide_history`]));
+      // created recently: history would hide them, the cutoff keeps them
+      await expectHidden(false, [
+        ["service_requests", "doneR"], ["customers", "doneC"], ["invoices", "paidI"], ["estimates", "soldE"],
+        ["customer_sessions", "orphanS"], ["service_requests", "seedDemoR"],
+      ]);
+      // created before the cutoff (backdated): still hidden
+      await expectHidden(true, [["service_requests", "staleR"], ["customer_sessions", "oldChatS"], ["estimates", "oldEstE"]]);
+      // every hidden row predates the cutoff
+      const late = await run(sql`SELECT count(*)::int AS n FROM service_requests WHERE organization_id = ${org} AND hidden_from_org AND created_at >= now() - interval '10 days'`);
+      expect(late[0]!.n).toBe(0);
+    } finally {
+      await db.execute(sql`UPDATE organizations SET feature_flags = ${JSON.stringify(before)}::jsonb WHERE id = ${org}`);
+    }
+  });
+
+  it("--unhide clears historyCutoff and keeps the switches beside it", async () => {
+    await db.execute(sql`UPDATE organizations SET feature_flags = feature_flags || '{"historyCutoff":"2026-11-10T17:30:00.000Z","map":true}'::jsonb WHERE id = ${org}`);
+    await apply("history");
+    const out = spawnScript(["--org", org, "--unhide"]);
+    expect(out.status, out.stderr).toBe(0);
+    expect(out.stdout).toContain("Audit log cutoff cleared.");
+    const [row] = await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`);
+    const flags = row!.feature_flags as Record<string, unknown>;
+    expect(flags).not.toHaveProperty("historyCutoff");
+    expect(flags.map).toBe(true);
+    expect(await hiddenTotal()).toBe(0);
+  });
+
+  it("a malformed historyCutoff: dry run and --apply refuse and change nothing; --unhide still clears it", async () => {
+    await batch(m.unhideStatements(org));
+    await db.execute(sql`UPDATE organizations SET feature_flags = feature_flags || '{"historyCutoff":"not a date"}'::jsonb WHERE id = ${org}`);
+    for (const args of [["--org", org], ["--org", org, "--apply"]]) {
+      const out = spawnScript(args);
+      expect(out.status).toBe(1);
+      expect(out.stderr).toBe("Refused: the organization's historyCutoff is not a timestamp; fix it with set-history-cutoff.mjs or clear it with --unhide\n");
+    }
+    expect(await hiddenTotal()).toBe(0);
+    // the builder backstop: the bound's cast fails rather than run unbounded
+    await expect(batch(m.markStatements(org, "history"))).rejects.toThrow();
+    expect(await hiddenTotal()).toBe(0);
+    const out = spawnScript(["--org", org, "--unhide"]);
+    expect(out.status, out.stderr).toBe(0);
+    const [row] = await run(sql`SELECT feature_flags FROM organizations WHERE id = ${org}`);
+    expect(row!.feature_flags).not.toHaveProperty("historyCutoff");
+  });
+
   it("script refuses ep-withered-hill without --prod", () => {
     const env = { ...process.env, DATABASE_URL: "postgresql://probe:probe@ep-withered-hill-000000.invalid/neondb" };
     for (const args of [["--org", org], ["--org", org, "--apply"], ["--org", org, "--unhide"]]) {
@@ -486,6 +541,16 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
       // nothing past the refusal ran: no dry-run header, no connection error
       expect(out.stdout).toBe("");
       expect(Date.now() - started).toBeLessThan(30_000);
+    }
+  });
+
+  it("script refuses the production host in any letter case", () => {
+    for (const host of ["EP-WITHERED-HILL-000000.invalid", "Ep-Withered-Hill-000000.invalid"]) {
+      const env = { ...process.env, DATABASE_URL: `postgresql://probe:probe@${host}/neondb` };
+      const out = spawnScript(["--org", org, "--unhide"], env);
+      expect(out.status).toBe(1);
+      expect(out.stderr).toBe("Refused: this is the production database; pass --prod to run against it\n");
+      expect(out.stdout).toBe("");
     }
   });
 });

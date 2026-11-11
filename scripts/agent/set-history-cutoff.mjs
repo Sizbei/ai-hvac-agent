@@ -60,7 +60,8 @@ if (!process.env.DATABASE_URL && existsSync(".env.local")) {
 const url = process.env.DATABASE_URL ?? "";
 if (!url) refuse("DATABASE_URL is not set");
 // Before any connection: the database modules are imported only past this line.
-if (url.includes(PROD_HOST) && !args.prod) refuse("this is the production database; pass --prod to run against it");
+// Hostnames are case-insensitive: match the production host in any letter case.
+if (url.toLowerCase().includes(PROD_HOST) && !args.prod) refuse("this is the production database; pass --prod to run against it");
 
 const { neon } = await import("@neondatabase/serverless");
 const { drizzle } = await import("drizzle-orm/neon-http");

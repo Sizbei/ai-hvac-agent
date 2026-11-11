@@ -23,8 +23,13 @@
  *
  * The kept sets read data columns only, never `hidden_from_org`, so the five
  * UPDATEs give the same result in any order. They SET only `hidden_from_org`,
- * which fires none of 0059's un-hide triggers (those are UPDATE OF
- * customer_id / service_request_id, or INSERT).
+ * which fires none of the un-hide triggers (0059: UPDATE OF customer_id /
+ * service_request_id, or INSERT; 0061: UPDATE OF status / scheduled_date /
+ * state / an appointment's date).
+ *
+ * Once the org has a go-live cutoff (`feature_flags.historyCutoff`), every
+ * UPDATE also skips rows created at or after it, so a --reapply never re-hides
+ * post-go-live work.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { BUSINESS_TIME_ZONE } from "./calendar-time";
@@ -155,11 +160,20 @@ function keptIdsSql(table: MarkedTable, org: string, mode: MarkingMode, staleDay
   }
 }
 
-/** Five UPDATEs, one per table, for a single db.batch. Already-hidden rows are left alone. */
+/**
+ * The row (unqualified: the UPDATE / count target) was created before the org's
+ * go-live cutoff; always true when no cutoff is set. A malformed cutoff fails
+ * the cast, so the statement errors rather than run unbounded.
+ */
+function beforeCutoffSql(org: string): SQL {
+  return sql`created_at < COALESCE((SELECT (o.feature_flags->>'historyCutoff')::timestamptz FROM organizations o WHERE o.id = ${org}::uuid), 'infinity'::timestamptz)`;
+}
+
+/** Five UPDATEs, one per table, for a single db.batch. Already-hidden rows and rows from the cutoff on are left alone. */
 export function markStatements(org: string, mode: MarkingMode, staleDays = DEFAULT_STALE_DAYS): SQL[] {
   return MARKED_TABLES.map(
     (table) =>
-      sql`UPDATE ${sql.raw(table)} SET hidden_from_org = true WHERE organization_id = ${org}::uuid AND NOT hidden_from_org AND id NOT IN (${keptIdsSql(table, org, mode, staleDays)})`,
+      sql`UPDATE ${sql.raw(table)} SET hidden_from_org = true WHERE organization_id = ${org}::uuid AND NOT hidden_from_org AND id NOT IN (${keptIdsSql(table, org, mode, staleDays)}) AND ${beforeCutoffSql(org)}`,
   );
 }
 
@@ -173,7 +187,7 @@ export function unhideStatements(org: string): SQL[] {
 function tableCountsSql(table: MarkedTable, org: string, staleDays: number): SQL {
   const t = sql.raw(table);
   const wouldHide = (mode: MarkingMode) =>
-    sql`(SELECT count(*) FROM ${t} WHERE organization_id = ${org}::uuid AND NOT hidden_from_org AND id NOT IN (${keptIdsSql(table, org, mode, staleDays)}))::int AS ${sql.raw(`${table}_hide_${mode}`)}`;
+    sql`(SELECT count(*) FROM ${t} WHERE organization_id = ${org}::uuid AND NOT hidden_from_org AND id NOT IN (${keptIdsSql(table, org, mode, staleDays)}) AND ${beforeCutoffSql(org)})::int AS ${sql.raw(`${table}_hide_${mode}`)}`;
   return sql.join(
     [
       sql`(SELECT count(*) FROM ${t} WHERE organization_id = ${org}::uuid)::int AS ${sql.raw(`${table}_total`)}`,

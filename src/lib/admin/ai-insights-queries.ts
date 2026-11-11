@@ -9,7 +9,7 @@
  * NOTE: the neon-http driver returns SQL aggregates (count, sum) as strings, so
  * every aggregate value is coerced with Number() before use.
  */
-import { and, eq, exists, sql, count, gt } from "drizzle-orm";
+import { and, eq, exists, not, notExists, sql, count, gt, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   customerSessions,
@@ -34,6 +34,22 @@ function asPercent(numerator: number, denominator: number): number {
     return 0;
   }
   return Math.round((numerator / denominator) * 100);
+}
+
+/** A feedback vote not cast in a session the viewer can't see (votes with no session count). */
+function feedbackSessionVisible(organizationId: string, vis: Visibility): SQL {
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(customerSessions)
+      .where(
+        and(
+          eq(customerSessions.id, auditLog.sessionId),
+          eq(customerSessions.organizationId, organizationId),
+          not(visibleRows(customerSessions, vis)),
+        ),
+      ),
+  );
 }
 
 /**
@@ -179,7 +195,8 @@ export async function getAiInsights(
       )
       .where(withTenant(messages, organizationId)),
 
-    // Message feedback votes from the audit log (details is a JSON TEXT column).
+    // Message feedback votes from the audit log (details is a JSON TEXT column),
+    // minus votes cast in a session the viewer doesn't see.
     db
       .select({ value: count() })
       .from(auditLog)
@@ -189,6 +206,7 @@ export async function getAiInsights(
           organizationId,
           eq(auditLog.action, "message_feedback"),
           sql`${auditLog.details} LIKE ${'%"vote":"up"%'}`,
+          feedbackSessionVisible(organizationId, vis),
         ),
       ),
 
@@ -201,6 +219,7 @@ export async function getAiInsights(
           organizationId,
           eq(auditLog.action, "message_feedback"),
           sql`${auditLog.details} LIKE ${'%"vote":"down"%'}`,
+          feedbackSessionVisible(organizationId, vis),
         ),
       ),
   ] as const);

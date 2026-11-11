@@ -15,7 +15,8 @@ vi.mock("server-only", () => ({}));
  * user message. Added here, per set: both requests assigned to one technician,
  * an in_progress status event, a closed 30-minute time entry, a review rating
  * (visible 5, hidden 1), an assistant reply (visible 0 tokens, hidden 100), a
- * bot turn (visible routed, hidden not) and a session outcome. Plus one bot
+ * bot turn (visible routed, hidden not), a session outcome and a feedback vote
+ * (visible up, hidden down). Plus one bot
  * turn with no session (pruned-session telemetry), counted for everyone.
  */
 
@@ -47,8 +48,8 @@ beforeAll(async () => {
     RETURNING id`)).rows[0] as { id: string }).id;
 
   const sets = [
-    { ids: fx.visible, rating: 5, tokens: 0, routed: true, outcome: "booked" },
-    { ids: fx.hidden, rating: 1, tokens: 100, routed: false, outcome: "abandoned" },
+    { ids: fx.visible, rating: 5, tokens: 0, routed: true, outcome: "booked", vote: "up" },
+    { ids: fx.hidden, rating: 1, tokens: 100, routed: false, outcome: "abandoned", vote: "down" },
   ];
   for (const s of sets) {
     await db.batch([
@@ -66,6 +67,8 @@ beforeAll(async () => {
         VALUES (${org},${s.ids.session},1,${s.routed})`),
       db.execute(sql`UPDATE customer_sessions SET outcome = ${s.outcome}::session_outcome
         WHERE id = ${s.ids.session} AND organization_id = ${org}`),
+      db.execute(sql`INSERT INTO audit_log (organization_id,session_id,action,entity,entity_id,details)
+        VALUES (${org},${s.ids.session},'message_feedback','messages',${s.ids.session},${JSON.stringify({ vote: s.vote, messageIndex: 1, intentId: null })})`),
     ]);
   }
   await db.execute(sql`INSERT INTO bot_events (organization_id,session_id,turn,routed)
@@ -169,7 +172,7 @@ describe("visibility: reports, insights, operations (dev DB)", () => {
     expect(all.arAging.nativeOutstandingCents).toBe(15000);
   });
 
-  it("getAiInsights ignores hidden sessions, their messages and hidden requests", async () => {
+  it("getAiInsights ignores hidden sessions, their messages, their feedback votes and hidden requests", async () => {
     const seen = await ai.getAiInsights(fx.org, v.VISIBLE_ONLY);
     const all = await ai.getAiInsights(fx.org, v.SHOW_ALL);
 
@@ -180,6 +183,8 @@ describe("visibility: reports, insights, operations (dev DB)", () => {
       llmReplies: 0,
       totalTokensUsed: 0,
       deflectionRate: 100,
+      feedbackUp: 1,
+      feedbackDown: 0,
     });
     expect(all).toMatchObject({
       totalSessions: 2,
@@ -188,6 +193,8 @@ describe("visibility: reports, insights, operations (dev DB)", () => {
       llmReplies: 1,
       totalTokensUsed: 100,
       deflectionRate: 50,
+      feedbackUp: 1,
+      feedbackDown: 1,
     });
   });
 
