@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAdminPageTitle } from '@/components/admin/org-name-context';
+import { reconcileShouldRun } from '@/lib/admin/reconcile-gate';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ const SORT_OPTIONS: ReadonlyArray<{ value: InvoiceSortKey; label: string }> = [
   { value: 'balance-high', label: 'Balance high→low' },
 ];
 
-// ── ReconcileBanner (unchanged) ───────────────────────────────────────────────
+// ── ReconcileBanner ───────────────────────────────────────────────────────────
 
 interface StuckPayment {
   readonly id: string;
@@ -99,8 +100,10 @@ interface StuckPayment {
   readonly amountCents: number;
 }
 
-function ReconcileBanner() {
+/** `ready` = the first invoice rows have settled; the check waits for them. */
+function ReconcileBanner({ ready }: { readonly ready: boolean }) {
   const [stuck, setStuck] = useState<readonly StuckPayment[]>([]);
+  const ranRef = useRef(false);
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
@@ -118,8 +121,10 @@ function ReconcileBanner() {
   }, []);
 
   useEffect(() => {
+    if (!reconcileShouldRun({ firstPaintDone: ready, alreadyRan: ranRef.current })) return;
+    ranRef.current = true;
     load();
-  }, [load]);
+  }, [ready, load]);
 
   const reconcile = useCallback(async () => {
     setRunning(true);
@@ -330,7 +335,7 @@ export default function InvoicesPage() {
         subtitle="Collections — who owes you, how overdue, and one tap to chase it."
       />
 
-      <ReconcileBanner />
+      <ReconcileBanner ready={!isLoading} />
 
       {/* The KPI band sits above the filters in every state: skeleton tiles
           while loading (same silhouette, so nothing jumps), nothing when the
