@@ -69,6 +69,13 @@ export interface SalesReport {
    * (collected-cash.ts), and invoice amount_paid_cents is never read here.
    * Housecall Pro stores no payment rows, so HCP money is not in it. */
   readonly fieldpulseCollectedCents: number;
+  /** All money ever collected, not period-scoped: the same one-source-per-
+   * invoice rule as the period figure (FieldPulse payment rows on FieldPulse
+   * invoices, net of their refunds; native payments on native invoices, less
+   * native refunds). */
+  readonly lifetimeCollectedCents: number;
+  /** ISO date of the earliest payment counted in lifetimeCollectedCents, or null. */
+  readonly lifetimeSinceDate: string | null;
   /** Open balance across ALL invoices in state 'open' (= nativeArCents + syncedArCents). */
   readonly outstandingArCents: number;
   /** Open balance on NATIVE invoices only (no FSM source id). */
@@ -121,6 +128,8 @@ export async function getSalesReport(
     estimateRow,
     invoiceRow,
     fieldpulseCollectedRow,
+    lifetimeRow,
+    lifetimeRefundRow,
   ] = await db.batch([
     // Gross collected: payments that actually cleared. A FULLY-refunded payment
     // flips status to 'refunded' — it was still collected (the refund is
@@ -297,12 +306,75 @@ export async function getSalesReport(
           lte(payments.createdAt, toDate),
         ),
       ),
+
+    // Lifetime collected (no date bound), same source rule as the two period
+    // queries above: FieldPulse rows only on FieldPulse invoices (settled, net
+    // of refunds), native rows only on native invoices (gross; refunds below).
+    db
+      .select({
+        value: sum(
+          sql`CASE
+                WHEN ${payments.fieldpulsePaymentId} IS NOT NULL
+                     AND ${invoices.fieldpulseInvoiceId} IS NOT NULL
+                     AND ${payments.status} = 'succeeded'
+                  THEN ${payments.amountCents} - ${payments.amountRefundedCents}
+                WHEN ${payments.fieldpulsePaymentId} IS NULL
+                     AND ${invoices.fieldpulseInvoiceId} IS NULL
+                     AND ${invoices.hcpInvoiceId} IS NULL
+                     AND ${payments.status} IN ('succeeded', 'refunded')
+                  THEN ${payments.amountCents}
+                ELSE 0 END`,
+        ),
+        since: sql<string | null>`min(CASE
+                WHEN (${payments.fieldpulsePaymentId} IS NOT NULL
+                      AND ${invoices.fieldpulseInvoiceId} IS NOT NULL
+                      AND ${payments.status} = 'succeeded')
+                  OR (${payments.fieldpulsePaymentId} IS NULL
+                      AND ${invoices.fieldpulseInvoiceId} IS NULL
+                      AND ${invoices.hcpInvoiceId} IS NULL
+                      AND ${payments.status} IN ('succeeded', 'refunded'))
+                THEN ${payments.createdAt} END)`,
+      })
+      .from(payments)
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          visibleRows(invoices, vis),
+        ),
+      )
+      .where(withTenant(payments, organizationId)),
+
+    // Lifetime native refunds (same scope as the period refunds query).
+    db
+      .select({ value: sum(refunds.amountCents) })
+      .from(refunds)
+      .innerJoin(
+        payments,
+        and(eq(payments.id, refunds.paymentId), eq(payments.organizationId, organizationId)),
+      )
+      .innerJoin(
+        invoices,
+        and(
+          eq(invoices.id, payments.invoiceId),
+          eq(invoices.organizationId, organizationId),
+          isNull(invoices.fieldpulseInvoiceId),
+          isNull(invoices.hcpInvoiceId),
+          visibleRows(invoices, vis),
+        ),
+      )
+      .where(withTenant(refunds, organizationId, isNull(payments.fieldpulsePaymentId))),
   ] as const);
 
   const grossCollectedCents = toNumber(grossRow[0]?.value);
   const refundedCents = toNumber(refundRow[0]?.value);
   const netCollectedCents = grossCollectedCents - refundedCents;
   const fieldpulseCollectedCents = toNumber(fieldpulseCollectedRow[0]?.value);
+  const lifetimeCollectedCents =
+    toNumber(lifetimeRow[0]?.value) - toNumber(lifetimeRefundRow[0]?.value);
+  const lifetimeSince = lifetimeRow[0]?.since;
+  const lifetimeSinceDate = lifetimeSince ? new Date(lifetimeSince).toISOString() : null;
   const nativeArCents = toNumber(arRow[0]?.native);
   const syncedArCents = toNumber(arRow[0]?.synced);
   const outstandingArCents = nativeArCents + syncedArCents;
@@ -330,6 +402,8 @@ export async function getSalesReport(
     refundedCents,
     netCollectedCents,
     fieldpulseCollectedCents,
+    lifetimeCollectedCents,
+    lifetimeSinceDate,
     outstandingArCents,
     nativeArCents,
     syncedArCents,

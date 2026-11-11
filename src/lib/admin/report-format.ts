@@ -115,3 +115,19 @@ export function leadSourceLabel(source: string): string {
   const words = source.replace(/_/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1).toLowerCase() : "Not recorded";
 }
+
+/**
+ * The all-time "Collected" tile's sublabel: the month of the first payment it
+ * counts ("Since May 2023"), in the business's time zone.
+ */
+export function lifetimeSublabel(sinceIso: string | null): string {
+  if (!sinceIso) return "No payments recorded yet";
+  const since = new Date(sinceIso);
+  if (Number.isNaN(since.getTime())) return "All payments on record";
+  const month = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "America/New_York",
+  }).format(since);
+  return `Since ${month} · FieldPulse + here, less refunds`;
+}

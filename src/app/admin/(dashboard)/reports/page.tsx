@@ -10,6 +10,7 @@ import {
   Receipt,
   Undo2,
   Loader2,
+  Landmark,
 } from 'lucide-react';
 import {
   useReports,
@@ -21,7 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { formatCentsExact } from '@/lib/admin/money-format';
-import { closeRateSublabel, formatRate, leadSourceLabel, collectedTile, visibleLeadSources } from '@/lib/admin/report-format';
+import { closeRateSublabel, formatRate, leadSourceLabel, collectedTile, visibleLeadSources, lifetimeSublabel } from '@/lib/admin/report-format';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { StatCard, StatStrip } from '@/components/admin/ui/stat-card';
@@ -100,6 +101,14 @@ export default function ReportsPage() {
           value={collected ? formatCentsExact(collected.valueCents) : '—'}
           sublabel={collected?.sublabel}
           icon={DollarSign}
+          intent="success"
+          loading={isLoading}
+        />
+        <StatCard
+          label="Collected, all time"
+          value={report ? formatCentsExact(report.lifetimeCollectedCents) : '—'}
+          sublabel={report ? lifetimeSublabel(report.lifetimeSinceDate) : undefined}
+          icon={Landmark}
           intent="success"
           loading={isLoading}
         />
