@@ -1,4 +1,5 @@
 import { getAdminSession } from "@/lib/auth/session";
+import { getViewerContext } from "@/lib/auth/viewer";
 import { PLATFORM_PROTECTED_MESSAGE } from "@/lib/admin/staff-errors";
 import { getTechnicians, createTechnician } from "@/lib/admin/queries";
 import { logAudit } from "@/lib/admin/audit";
@@ -9,10 +10,11 @@ import { z } from "zod";
 
 export async function GET() {
   try {
-    const session = await getAdminSession();
-    if (!session) {
+    const viewer = await getViewerContext();
+    if (!viewer) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
     }
+    const { session } = viewer;
 
     const rateCheck = slidingWindow(
       `admin:technicians-list:${session.userId}`,
@@ -23,7 +25,7 @@ export async function GET() {
       return errorResponse("Rate limit exceeded", "RATE_LIMITED", 429);
     }
 
-    const technicians = await getTechnicians(session.organizationId);
+    const technicians = await getTechnicians(session.organizationId, viewer);
     return successResponse({ technicians });
   } catch (error: unknown) {
     logger.error({ error }, "Failed to fetch technicians");

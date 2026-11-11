@@ -31,7 +31,7 @@ export async function GET() {
     }
 
     const [staff, seats] = await Promise.all([
-      listStaff(session.organizationId),
+      listStaff(session.organizationId, viewer),
       getSeatUsage(session.organizationId),
     ]);
     // Echo the caller's own id so the UI can disable self-demote/self-deactivate
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     // free seat on the plan.
     if (seatsFull(await getSeatUsage(session.organizationId))) {
       return errorResponse(
-        "Your plan's staff limit has been reached. Upgrade your plan to add more team members.",
+        "Your plan has no free seats.",
         "SEAT_LIMIT_REACHED",
         403,
       );

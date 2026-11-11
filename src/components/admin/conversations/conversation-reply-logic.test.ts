@@ -62,12 +62,12 @@ describe('extractConsentReason', () => {
 });
 
 describe('consent reason copy', () => {
-  it("maps review_requests_off to 'Review requests are turned off for this account.' and has no demo copy", () => {
+  it("maps review_requests_off to 'Review texts are off for this account.' and has no demo copy", () => {
     const copy = replyErrorToCopy({
       code: 'CONSENT_BLOCKED',
       message: 'Cannot message this customer: review_requests_off',
     });
-    expect(copy).toBe('Review requests are turned off for this account.');
+    expect(copy).toBe('Review texts are off for this account.');
     expect(copy.toLowerCase()).not.toContain('demo');
   });
 });

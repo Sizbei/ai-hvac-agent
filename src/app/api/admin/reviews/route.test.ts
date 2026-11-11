@@ -16,6 +16,11 @@ vi.mock("@/lib/rate-limit", () => ({
 
 vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn() } }));
 
+const historyContactOrFallback = vi.fn();
+vi.mock("@/lib/admin/admin-guide-queries", () => ({
+  historyContactOrFallback: (...a: unknown[]) => historyContactOrFallback(...a),
+}));
+
 import { GET } from "./route";
 
 const SESSION = { userId: "u-1", organizationId: "11111111-1111-4111-8111-111111111111" };
@@ -39,5 +44,17 @@ describe("GET /api/admin/reviews", () => {
     expect((await (await GET(req())).json()).data.reviewTextsOn).toBe(false);
     getViewerContext.mockResolvedValue(viewer(true));
     expect((await (await GET(req())).json()).data.reviewTextsOn).toBe(true);
+  });
+
+  it("names who can turn review texts on, only when they are off", async () => {
+    historyContactOrFallback.mockResolvedValue("Raymond Chen");
+    getViewerContext.mockResolvedValue(viewer(false));
+    expect((await (await GET(req())).json()).data.historyContact).toBe("Raymond Chen");
+    expect(historyContactOrFallback).toHaveBeenCalledWith(SESSION.organizationId);
+
+    historyContactOrFallback.mockClear();
+    getViewerContext.mockResolvedValue(viewer(true));
+    expect((await (await GET(req())).json()).data.historyContact).toBeNull();
+    expect(historyContactOrFallback).not.toHaveBeenCalled();
   });
 });

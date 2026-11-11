@@ -89,7 +89,7 @@ function OrgStatusBadge({ status }: { status: OrgRow['status'] }) {
 
 const SWITCHES: readonly { readonly key: FeatureKey; readonly label: string }[] = [
   { key: 'map', label: 'Map' },
-  { key: 'reviewRequests', label: 'Review requests' },
+  { key: 'reviewRequests', label: 'Review texts' },
   { key: 'payLinks', label: 'Pay links' },
   { key: 'showHistory', label: 'Show history' },
 ];

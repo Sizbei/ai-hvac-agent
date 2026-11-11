@@ -95,7 +95,9 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      className={cn("flex flex-col gap-0.5 p-4", className)}
+      // Phones: the close button grows to 44px (top-3 right-3, ending 56px in),
+      // so the title keeps clear of it.
+      className={cn("flex flex-col gap-0.5 p-4 max-sm:pr-16", className)}
       {...props}
     />
   )

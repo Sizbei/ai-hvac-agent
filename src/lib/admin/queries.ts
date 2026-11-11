@@ -36,6 +36,7 @@ import {
 } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import { visibleRows, type Visibility } from "./visibility";
+import { withoutRetiredDemoUsers } from "./retired-demo-users";
 // Reuse the canonical overdue-invoice predicate — the invoices page and the
 // operations page both compute AR off this exact function. Do not
 // re-implement "overdue" here (see AGENTS.md's definitional-consistency note).
@@ -1088,6 +1089,7 @@ export async function addRequestNote(
 
 export async function getTechnicians(
   organizationId: string,
+  vis: Visibility,
 ): Promise<readonly TechnicianRecord[]> {
   const rows = await db
     .select({
@@ -1107,7 +1109,7 @@ export async function getTechnicians(
     )
     .orderBy(asc(users.name));
 
-  return rows.map((row) => ({
+  return withoutRetiredDemoUsers(rows, vis).map((row) => ({
     id: row.id,
     name: row.name,
     email: row.email,
@@ -1691,7 +1693,7 @@ export async function getDispatchBoard(
   // bucket jobs into technician columns.
   const range: PlacedRange = { start: bounds.start, end: bounds.end, by: "start" };
   const [technicians, requestRows, visitRows, unscheduledCount] = await Promise.all([
-    getTechnicians(organizationId),
+    getTechnicians(organizationId, vis),
     placedByRequestQuery(organizationId, OPEN_STATUSES, range, vis),
     placedByVisitQuery(organizationId, OPEN_STATUSES, range, vis),
     countUnscheduledRequests(organizationId, vis),
@@ -1771,7 +1773,7 @@ export async function getSchedulingCalendar(
 
   const [technicians, placedRows, unscheduledRows, availability, visitRows] =
     await Promise.all([
-    getTechnicians(organizationId),
+    getTechnicians(organizationId, vis),
     // Placed jobs: an arrival window OVERLAPPING the range, in an open state.
     // Half-open overlap (window.start < rangeEnd AND window.end > rangeStart),
     // consistent with checkScheduleConflict — NOT a point test on the start. A

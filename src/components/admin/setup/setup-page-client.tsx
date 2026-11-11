@@ -20,6 +20,7 @@ import { refreshOnboarding, useOnboarding } from '@/lib/admin/onboarding-store';
 import type { DerivedStep, OnboardingPayload } from '@/lib/admin/onboarding-steps';
 import {
   dismissedNote,
+  heroActionVariant,
   heroFor,
   justDone,
   optionalGroup,
@@ -247,7 +248,7 @@ export function SetupPageClient() {
         step={hero.step}
         number={hero.number}
         attention={hero.attention}
-        actionVariant={tourExpanded ? 'outline' : 'default'}
+        actionVariant={heroActionVariant({ tourExpanded, attention: hero.attention })}
       />
     );
   } else if (!data && error) {

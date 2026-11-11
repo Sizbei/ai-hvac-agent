@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CreditCard } from 'lucide-react';
 import {
@@ -10,46 +9,37 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { useBillingEntry } from '@/components/admin/billing-entry-context';
+import { billingHandledCopy } from '@/lib/admin/billing-entry';
 
 /**
- * Self-hiding discovery card for billing. Probes the super_admin/platform-gated
- * billing endpoint; a non-eligible admin gets 403/401 and we render nothing —
- * the server is the authority for visibility (same pattern as PlatformLinkPanel).
+ * Billing discovery card, driven by the same view as /admin/settings/billing
+ * (`billingPageView` via the layout): the plan link for whoever gets the
+ * billing panel, who handles billing in a platform-managed org, nothing for
+ * anyone else. The billing endpoints keep their own gates.
  */
 export function BillingLinkPanel() {
-  const [authorized, setAuthorized] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch('/api/platform/billing');
-        if (!cancelled && res.ok) setAuthorized(true);
-      } catch {
-        // leave hidden
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!authorized) return null;
+  const entry = useBillingEntry();
+  if (entry.view === 'redirect') return null;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Billing</CardTitle>
         <CardDescription>
-          See your plan, what it includes, and change it.
+          {entry.view === 'handled'
+            ? billingHandledCopy(entry)
+            : 'See your plan, what it includes, and change it.'}
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <Button variant="outline" render={<Link href="/admin/settings/billing" />}>
-          <CreditCard className="size-4" /> Open billing
-        </Button>
-      </CardContent>
+      {entry.view === 'panel' && (
+        <CardContent>
+          <Link href="/admin/settings/billing" className={buttonVariants({ variant: 'outline' })}>
+            <CreditCard className="size-4" aria-hidden="true" /> Open billing
+          </Link>
+        </CardContent>
+      )}
     </Card>
   );
 }

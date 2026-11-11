@@ -1,6 +1,8 @@
 'use client';
 
 import { staffErrorMessage } from '@/lib/admin/staff-errors';
+import { seatLimitError } from '@/lib/admin/billing-entry';
+import { useBillingEntry } from '@/components/admin/billing-entry-context';
 import { useState, useEffect, useRef } from 'react';
 import type { StaffRecord, StaffRole } from '@/lib/admin/types';
 import {
@@ -82,6 +84,7 @@ export function StaffFormDialog({
   isSelf,
   canManageAdmins = false,
 }: StaffFormDialogProps) {
+  const seatLimitCopy = seatLimitError(useBillingEntry());
   const isEditMode = staff !== null;
   const [form, setForm] = useState<FormState>(INITIAL_FORM_STATE);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -204,7 +207,7 @@ export function StaffFormDialog({
       if (!res.ok) {
         const responseBody: unknown = await res.json().catch(() => null);
         setError(
-          staffErrorMessage(responseBody, "Couldn't save this staff member. Please try again."),
+          staffErrorMessage(responseBody, "Couldn't save this staff member. Please try again.", seatLimitCopy),
         );
         return;
       }

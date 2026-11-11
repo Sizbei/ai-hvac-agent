@@ -71,6 +71,17 @@ export function cardTitle(view: CardView): string {
   return view === "welcome-only" ? "Getting started" : "Setup guide";
 }
 
+/**
+ * The skeleton's title, before data: the title the loaded card lands on. A
+ * skeleton only shows under Operations placement, so the checklist shows
+ * ("Setup guide") unless this demo-org session hid it; then only the welcome
+ * row can follow ("Getting started").
+ */
+export function skeletonTitle(flags: CardSessionFlags): string {
+  const hidden = flags.dismissed === true || flags.completedSeen === true;
+  return cardTitle(hidden ? "welcome-only" : "full");
+}
+
 export type UpNextAction =
   | { readonly kind: "copy"; readonly url: string; readonly variant: "outline" | "default" }
   | { readonly kind: "instruction" }

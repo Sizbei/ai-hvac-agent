@@ -21,6 +21,15 @@ vi.mock('@/lib/auth/session', () => ({
   getAdminSession: () => mockGetAdminSession(),
 }));
 
+// GET reads the viewer (org viewers never see retired demo users); it wraps
+// the same session mock.
+vi.mock('@/lib/auth/viewer', () => ({
+  getViewerContext: async () => {
+    const session = await mockGetAdminSession();
+    return session ? { session, showHidden: false } : null;
+  },
+}));
+
 vi.mock('@/lib/admin/queries', () => ({
   getTechnicians: (...args: unknown[]) => mockGetTechnicians(...args),
   createTechnician: (...args: unknown[]) => mockCreateTechnician(...args),
@@ -96,7 +105,7 @@ describe('GET /api/admin/technicians', () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.technicians).toHaveLength(2);
-    expect(mockGetTechnicians).toHaveBeenCalledWith('org-001');
+    expect(mockGetTechnicians).toHaveBeenCalledWith('org-001', expect.objectContaining({ showHidden: false }));
   });
 });
 

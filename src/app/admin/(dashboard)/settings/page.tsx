@@ -263,8 +263,7 @@ export default function SettingsPage() {
             {/* Super-admin only — self-hides for everyone else (the data
                 endpoint is super_admin-gated and the panel renders null on 403). */}
             <AiModelPanel />
-            {/* Super_admin/platform-admin only — self-hides otherwise (probes
-                the gated billing endpoint and renders null on 403). */}
+            {/* Same view as the billing page: plans link, "handled by", or nothing. */}
             <BillingLinkPanel />
             {/* Platform-admin only — self-hides for everyone else (probes the
                 platform-gated endpoint and renders null on 403). */}

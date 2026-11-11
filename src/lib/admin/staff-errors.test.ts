@@ -19,6 +19,13 @@ describe("staffErrorMessage", () => {
     );
   });
 
+  it("never offers an upgrade by default (the page passes the viewer's seat copy)", () => {
+    const body = { error: { code: "SEAT_LIMIT_REACHED" } };
+    expect(staffErrorMessage(body, "x")).toBe("Your plan has no free seats. Deactivate someone to add more.");
+    expect(staffErrorMessage(body, "x", "Billing is handled by Raymond.")).toBe("Billing is handled by Raymond.");
+    expect(staffErrorMessage({ error: { code: "LAST_ADMIN" } }, "x", "seat copy")).toMatch(/last active admin/);
+  });
+
   it("uses the fallback for unknown codes and bad bodies", () => {
     expect(staffErrorMessage({ error: { code: "INTERNAL_ERROR" } }, "Couldn't save.")).toBe("Couldn't save.");
     expect(staffErrorMessage(null, "Couldn't save.")).toBe("Couldn't save.");

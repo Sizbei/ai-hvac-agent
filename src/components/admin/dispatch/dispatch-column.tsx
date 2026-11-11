@@ -10,7 +10,12 @@ import { BUSINESS_TIME_ZONE } from '@/lib/admin/calendar-time';
 import { urgencyAccent } from '@/lib/admin/urgency-accent';
 import type { DashboardRequest } from '@/lib/admin/types';
 import { issueTypeLabel } from '@/lib/admin/request-labels';
-import { EMPTY_LANE_COPY, UNASSIGNED_EMPTY_COPY, unscheduledLinkLabel } from '@/lib/admin/dispatch-empty';
+import {
+  EMPTY_LANE_COPY,
+  UNASSIGNED_EMPTY_COPY,
+  unscheduledLinkAriaLabel,
+  unscheduledLinkLabel,
+} from '@/lib/admin/dispatch-empty';
 
 interface DispatchColumnProps {
   readonly title: string;
@@ -128,7 +133,11 @@ export function DispatchColumn({
           <p>{isUnassigned ? UNASSIGNED_EMPTY_COPY : EMPTY_LANE_COPY}</p>
           {unscheduledLink && (
             <p>
-              <Link href="/admin/calendar" className="font-medium text-primary underline-offset-2 hover:underline">
+              <Link
+                href="/admin/calendar"
+                aria-label={unscheduledLinkAriaLabel(unscheduledCount)}
+                className="inline-flex items-center font-medium text-primary underline-offset-2 hover:underline max-sm:min-h-11"
+              >
                 {unscheduledLink}
               </Link>
             </p>

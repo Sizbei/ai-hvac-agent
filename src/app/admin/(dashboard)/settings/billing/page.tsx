@@ -1,27 +1,14 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { getViewerContext } from '@/lib/auth/viewer';
-import { isPlatformManagedOrg } from '@/lib/auth/authz';
-import { billingPageView, seesPlatformUi } from '@/lib/admin/preview-view';
-import { readHistoryContact } from '@/lib/admin/admin-guide-queries';
-import { HISTORY_CONTACT_FALLBACK } from '@/lib/admin/admin-guide-state';
-import { errorCode, logger } from '@/lib/logger';
+import { resolveBillingEntry } from '@/lib/admin/billing-entry-server';
+import { billingHandledCopy } from '@/lib/admin/billing-entry';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
 import { BillingPanel } from '@/components/admin/settings/billing-panel';
-
-/** The platform owner's display name; the generic fallback on a read error. */
-async function billingContact(organizationId: string): Promise<string> {
-  try {
-    return await readHistoryContact(organizationId);
-  } catch (error) {
-    logger.error({ code: errorCode(error), organizationId }, 'Billing contact read failed');
-    return HISTORY_CONTACT_FALLBACK;
-  }
-}
 
 /**
  * Billing settings — the org's own platform subscription. Visible to a
@@ -34,27 +21,21 @@ async function billingContact(organizationId: string): Promise<string> {
 export default async function BillingSettingsPage() {
   const viewer = await getViewerContext();
   if (!viewer) redirect('/admin/settings');
-  const { organizationId } = viewer.session;
-  const view = billingPageView({
-    uiRole: viewer.uiRole,
-    platformUi: seesPlatformUi(viewer),
-    platformManagedOrg: isPlatformManagedOrg(organizationId),
-  });
-  if (view === 'redirect') redirect('/admin/settings');
+  const entry = await resolveBillingEntry(viewer);
+  if (entry.view === 'redirect') redirect('/admin/settings');
 
   const back = (
-    <Button variant="outline" render={<Link href="/admin/settings" />}>
+    <Link href="/admin/settings" className={buttonVariants({ variant: 'outline' })}>
       <ArrowLeft className="size-4" aria-hidden="true" />
       Back to settings
-    </Button>
+    </Link>
   );
 
-  if (view === 'handled') {
-    const contact = await billingContact(organizationId);
+  if (entry.view === 'handled') {
     return (
       <PageShell narrow>
         <PageHeader title="Billing" actions={back} />
-        <InfoBanner>Billing is handled by {contact}.</InfoBanner>
+        <InfoBanner>{billingHandledCopy(entry)}</InfoBanner>
       </PageShell>
     );
   }

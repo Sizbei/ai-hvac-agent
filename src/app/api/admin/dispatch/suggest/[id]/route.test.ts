@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const getAdminSession = vi.fn();
-vi.mock("@/lib/auth/session", () => ({
-  getAdminSession: () => getAdminSession(),
+const getViewerContext = vi.fn();
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: () => getViewerContext(),
 }));
 
 const suggestTechnicians = vi.fn();
@@ -39,21 +39,21 @@ beforeEach(() => {
 
 describe("GET /api/admin/dispatch/suggest/[id]", () => {
   it("401 when unauthenticated", async () => {
-    getAdminSession.mockResolvedValue(null);
+    getViewerContext.mockResolvedValue(null);
     const res = await GET(req(), ctx());
     expect(res.status).toBe(401);
     expect(suggestTechnicians).not.toHaveBeenCalled();
   });
 
   it("400 on a malformed request id", async () => {
-    getAdminSession.mockResolvedValue(SESSION);
+    getViewerContext.mockResolvedValue({ session: SESSION, showHidden: false });
     const res = await GET(req(), ctx("not-a-uuid"));
     expect(res.status).toBe(400);
     expect(suggestTechnicians).not.toHaveBeenCalled();
   });
 
   it("returns suggestions, scoping the org to the SESSION (not the request)", async () => {
-    getAdminSession.mockResolvedValue(SESSION);
+    getViewerContext.mockResolvedValue({ session: SESSION, showHidden: false });
     const ranked = [
       { technicianId: "t1", score: 0.9, reasons: ["5 prior no_cool jobs", "80% close rate"], skillMatched: true },
     ];
@@ -64,11 +64,16 @@ describe("GET /api/admin/dispatch/suggest/[id]", () => {
     const body = await res.json();
     expect(body.data.suggestions).toEqual(ranked);
     // org comes from the session, request id from the path, limit 3.
-    expect(suggestTechnicians).toHaveBeenCalledWith("org-1", REQ_ID, 3);
+    expect(suggestTechnicians).toHaveBeenCalledWith(
+      "org-1",
+      REQ_ID,
+      3,
+      expect.objectContaining({ showHidden: false }),
+    );
   });
 
   it("500 when the query throws (never leaks the error)", async () => {
-    getAdminSession.mockResolvedValue(SESSION);
+    getViewerContext.mockResolvedValue({ session: SESSION, showHidden: false });
     suggestTechnicians.mockRejectedValue(new Error("db down"));
     const res = await GET(req(), ctx());
     expect(res.status).toBe(500);

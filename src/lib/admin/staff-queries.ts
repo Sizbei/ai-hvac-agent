@@ -45,6 +45,8 @@ import {
   type CreateStaffInput,
   type UpdateStaffInput,
 } from "./types";
+import { withoutRetiredDemoUsers } from "./retired-demo-users";
+import type { Visibility } from "./visibility";
 
 /** Admin-tier roles (super_admin + admin) as a mutable array for inArray(). */
 const ADMIN_TIER = [...ADMIN_TIER_ROLES] as StaffRole[];
@@ -135,6 +137,7 @@ export function normalizeEmail(email: string): string {
 
 export async function listStaff(
   organizationId: string,
+  vis: Visibility,
 ): Promise<readonly StaffRecord[]> {
   const rows = await db
     .select(STAFF_COLUMNS)
@@ -142,7 +145,7 @@ export async function listStaff(
     .where(withTenant(users, organizationId))
     .orderBy(asc(users.role), asc(users.name));
 
-  return rows.map(toStaffRecord);
+  return withoutRetiredDemoUsers(rows, vis).map(toStaffRecord);
 }
 
 /** Count active admin-tier users (super_admin OR admin) in the org, optionally

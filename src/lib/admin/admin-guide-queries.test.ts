@@ -18,7 +18,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { patchAdminGuide, readAdminGuide, readHistoryContact } from "./admin-guide-queries";
+import {
+  historyContactOrFallback,
+  patchAdminGuide,
+  readAdminGuide,
+  readHistoryContact,
+} from "./admin-guide-queries";
 import type { ViewerContext } from "@/lib/auth/viewer";
 
 const ORG = "11111111-1111-1111-1111-111111111111";
@@ -183,5 +188,17 @@ describe("readHistoryContact", () => {
   it("falls back when no owner row matches", async () => {
     queue.push({ rows: [row()] });
     expect(await readHistoryContact(ORG)).toBe("your account administrator");
+  });
+});
+
+describe("historyContactOrFallback", () => {
+  it("returns the owner's display name", async () => {
+    queue.push({ rows: [row({ contact_name: "Raymond Chen" })] });
+    expect(await historyContactOrFallback(ORG)).toBe("Raymond Chen");
+  });
+
+  it("falls back to the generic contact on a read error (never throws)", async () => {
+    queue.push(new Error("db down"));
+    expect(await historyContactOrFallback(ORG)).toBe("your account administrator");
   });
 });

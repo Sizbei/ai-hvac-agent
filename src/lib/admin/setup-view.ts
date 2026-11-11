@@ -89,6 +89,11 @@ export function optionalGroup(payload: OnboardingPayload): { rows: StepRow[]; me
   };
 }
 
+/** The hero's button: outline while the open quick tour holds the primary, unless a step needs attention. */
+export function heroActionVariant(p: { tourExpanded: boolean; attention: boolean }): "default" | "outline" {
+  return p.tourExpanded && !p.attention ? "outline" : "default";
+}
+
 /** Hero slot: the first needs-attention step wins and suppresses Up next. */
 export function heroFor(payload: OnboardingPayload): { attention?: DerivedStep; upNext?: DerivedStep } {
   const attention = payload.steps.find((s) => s.needsAttention);

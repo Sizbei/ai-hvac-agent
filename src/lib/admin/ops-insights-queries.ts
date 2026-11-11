@@ -15,6 +15,7 @@ import { withTenant } from "@/lib/db/tenant";
 import { OPEN_STATUSES } from "./request-status";
 import { getOrgTimeZone } from "./org-time-zone";
 import { visibleRows, type Visibility } from "./visibility";
+import { withoutRetiredDemoUsers } from "./retired-demo-users";
 import type {
   OpsInsights,
   CategoryCount,
@@ -89,6 +90,7 @@ export async function getOpsInsights(
       .select({
         technicianId: serviceRequests.assignedTo,
         technicianName: users.name,
+        email: users.email,
         total: count(),
         active: sql<number | string>`count(*) filter (where ${serviceRequests.status} in (${sql.join(
           OPEN_STATUSES.map((st) => sql`${st}`),
@@ -108,7 +110,7 @@ export async function getOpsInsights(
         ),
       )
       .where(withTenant(serviceRequests, organizationId, visibleRows(serviceRequests, vis)))
-      .groupBy(serviceRequests.assignedTo, users.name),
+      .groupBy(serviceRequests.assignedTo, users.name, users.email),
 
     // Request volume by hour of day in the ORG's business time zone (a
     // timestamptz AT TIME ZONE gives local wall-clock time, DST included).
@@ -179,7 +181,7 @@ export async function getOpsInsights(
     count: toNumber(r.value),
   }));
 
-  const technicianLoad: TechnicianLoad[] = techRows
+  const technicianLoad: TechnicianLoad[] = withoutRetiredDemoUsers(techRows, vis)
     .map((r) => ({
       technicianId: r.technicianId,
       technicianName: r.technicianName,
