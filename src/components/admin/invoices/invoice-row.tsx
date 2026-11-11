@@ -105,7 +105,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, cardPayment
           </div>
           {/* Phone: the age column is hidden, so its chip rides under the name. */}
           <div className="mt-1 sm:hidden">
-            <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} />
+            <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} compact />
           </div>
         </div>
 
@@ -118,7 +118,7 @@ function InvoiceRowInner({ invoice, onRemind, onCopyPayLink, onVoid, cardPayment
 
         {/* Age chip */}
         <div className="hidden sm:block">
-          <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} />
+          <AgeChip issuedAt={invoice.issuedAt} dueDate={invoice.dueDate} createdAt={invoice.createdAt} state={invoice.state} compact />
         </div>
 
         {/* Balance — right-aligned tabular mono; a zero balance recedes. */}

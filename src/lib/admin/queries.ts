@@ -1690,26 +1690,11 @@ export async function getDispatchBoard(
   // Job cards carry the raw assignedTo id (and the current visit) so we can
   // bucket jobs into technician columns.
   const range: PlacedRange = { start: bounds.start, end: bounds.end, by: "start" };
-  const [technicians, requestRows, visitRows, unscheduledRows] = await Promise.all([
+  const [technicians, requestRows, visitRows, unscheduledCount] = await Promise.all([
     getTechnicians(organizationId),
     placedByRequestQuery(organizationId, OPEN_STATUSES, range, vis),
     placedByVisitQuery(organizationId, OPEN_STATUSES, range, vis),
-    // Same predicate as the calendar's unscheduled rail (getSchedulingCalendar).
-    db
-      .select({ value: count() })
-      .from(serviceRequests)
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
-          or(
-            isNull(serviceRequests.assignedTo),
-            isNull(serviceRequests.arrivalWindowStart),
-          )!,
-          visibleRows(serviceRequests, vis),
-        ),
-      ),
+    countUnscheduledRequests(organizationId, vis),
   ]);
 
   // Seed a bucket for each ACTIVE technician first, so jobs assigned to them
@@ -1741,7 +1726,7 @@ export async function getDispatchBoard(
     date,
     columns,
     unassigned,
-    unscheduledCount: unscheduledRows[0]?.value ?? 0,
+    unscheduledCount,
   };
 }
 

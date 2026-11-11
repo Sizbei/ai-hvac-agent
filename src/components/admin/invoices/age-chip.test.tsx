@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { ageBucket, ageLabel, daysBetween, daysPastDue, invoiceAgeDays, overdueByDates } from './age-chip';
+import { compactAgeLabel, ageBucket, ageLabel, daysBetween, daysPastDue, invoiceAgeDays, overdueByDates } from './age-chip';
 
 it('buckets invoice age into green/amber/red at 30 and 60 days', () => {
   expect(ageBucket(10)).toBe('green');
@@ -71,4 +71,9 @@ it('ageLabel reads naturally for fresh invoices', () => {
   expect(ageLabel(0)).toBe('Issued today');
   expect(ageLabel(1)).toBe('Issued 1 day ago');
   expect(ageLabel(12)).toBe('Issued 12 days ago');
+});
+
+it('compactAgeLabel is short enough for a list row', () => {
+  expect(compactAgeLabel(0)).toBe('Today');
+  expect(compactAgeLabel(91)).toBe('91d old');
 });

@@ -47,18 +47,23 @@ export function ageLabel(days: number): string {
   return days === 1 ? 'Issued 1 day ago' : `Issued ${days} days ago`;
 }
 
+/** Short list-row label ("91d old") — the row's issued-date column already says "issued". */
+export function compactAgeLabel(days: number): string {
+  return days <= 0 ? 'Today' : `${days}d old`;
+}
+
 // Status chip per the redesign spec: 3 px radius, 20 px tall, semantic
 // light/border/strong triplet, 11 px. The label text ("Paid" / "12 days" /
 // "863d overdue") is the primary disambiguator — no redundant dot glyph, which
 // is reserved for the shared badge components.
 const CHIP =
-  'inline-flex h-5 items-center rounded-[3px] border px-1.5 text-[11px] font-medium leading-none';
+  'inline-flex h-5 items-center whitespace-nowrap rounded-[3px] border px-1.5 text-[11px] font-medium leading-none';
 const CLS: Record<string, string> = {
   green: 'bg-success-light text-success-strong border-success-border',
   amber: 'bg-warning-light text-warning-strong border-warning-border',
   red: 'bg-danger-light text-danger-strong border-danger-border',
 };
-export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string }) {
+export function AgeChip({ issuedAt, dueDate, createdAt, state, compact = false }: { issuedAt?: string | null; dueDate?: string | null; createdAt: string; state: string; compact?: boolean }) {
   if (state === 'paid') {
     return <span className={`${CHIP} ${CLS.green}`}>Paid</span>;
   }
@@ -72,5 +77,5 @@ export function AgeChip({ issuedAt, dueDate, createdAt, state }: { issuedAt?: st
   }
   const days = invoiceAgeDays({ issuedAt, createdAt });
   const b = state === 'open' && overdueByDates({ issuedAt, dueDate, createdAt }) ? 'red' : ageBucket(days);
-  return <span className={`${CHIP} ${CLS[b]} font-mono tabular-nums`}>{ageLabel(days)}</span>;
+  return <span className={`${CHIP} ${CLS[b]} font-mono tabular-nums`}>{compact ? compactAgeLabel(days) : ageLabel(days)}</span>;
 }
