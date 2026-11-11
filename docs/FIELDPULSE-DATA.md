@@ -63,6 +63,14 @@ named by `GET /estimates/status-workflows` (each status has a company name and a
 bucket `type`); `estimate_accept_at` marks acceptance. Per-id `custom_status` no
 longer exists (2026-11-11) and `estimate_status` 0–8 has drifted from the
 workflow — mapping in `src/lib/integrations/fieldpulse/estimate-status.ts`.
+Invoice state works the same way: `status_id` named by
+`GET /invoices/status-workflows` (bucket types invoice_draft → `draft`;
+invoice_invoiced / invoice_sent / invoice_partially_paid → `open`; invoice_paid
+→ `paid`; invoice_void → `void`). The legacy invoice `status` integer does not
+match it and is never used. `amount_paid` is mirrored as is; for open
+invoices total − amount_paid equals FieldPulse `amount_unpaid` (verified on all
+live open invoices, 2026-11-11). Drafts and voids carry `amount_unpaid` 0.
+Mapping in `src/lib/integrations/fieldpulse/invoice-status.ts`.
 
 ## Sync architecture
 

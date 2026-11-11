@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   planDeletedJobHide,
+  planDeletedInvoiceHide,
   describeDeletedJobRequest,
+  type DeletedInvoice,
   type DeletedJobChild,
   type DeletedJobRequest,
 } from "./deleted-job-hide";
@@ -64,5 +66,39 @@ describe("describeDeletedJobRequest", () => {
   it("prints reference, status and a cut title on one line", () => {
     const line = describeDeletedJobRequest(req("a", { title: "Walk-in cooler\n not   cooling at the back of the kitchen line" }), 20);
     expect(line).toBe("HVAC-A0000  pending      Walk-in cooler not…");
+  });
+});
+
+describe("planDeletedInvoiceHide", () => {
+  const inv = (over: Partial<DeletedInvoice> = {}): DeletedInvoice => ({
+    id: "i1",
+    fieldpulseInvoiceId: "20776752",
+    balanceCents: 40500,
+    amountPaidCents: 0,
+    hasPaymentRow: false,
+    hidden: false,
+    ...over,
+  });
+
+  it("hides an unpaid deleted invoice", () => {
+    expect(planDeletedInvoiceHide([inv()]).hide.map((i) => i.id)).toEqual(["i1"]);
+  });
+
+  it("never hides one with money paid on it", () => {
+    const plan = planDeletedInvoiceHide([inv({ amountPaidCents: 1 })]);
+    expect(plan.hide).toEqual([]);
+    expect(plan.kept[0]?.reason).toMatch(/payment/);
+  });
+
+  it("never hides one with a payments row, even at amount_paid 0", () => {
+    const plan = planDeletedInvoiceHide([inv({ hasPaymentRow: true })]);
+    expect(plan.hide).toEqual([]);
+    expect(plan.kept).toHaveLength(1);
+  });
+
+  it("leaves rows already hidden out of the plan, so undo can't un-hide another hide", () => {
+    const plan = planDeletedInvoiceHide([inv({ hidden: true })]);
+    expect(plan.hide).toEqual([]);
+    expect(plan.kept).toEqual([]);
   });
 });

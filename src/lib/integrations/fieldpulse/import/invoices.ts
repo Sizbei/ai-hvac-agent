@@ -21,7 +21,7 @@ import { eq, and, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { invoices } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
-import { upsertInvoiceRecord } from "../invoice-sync";
+import { loadInvoiceStatusLookup, upsertInvoiceRecord } from "../invoice-sync";
 import { makeFpCustomerHealer } from "./customers";
 import type { FieldpulseClient } from "../client";
 import type { FieldpulseInvoice } from "../types";
@@ -68,6 +68,10 @@ export async function importInvoicesFromFieldpulse(
   // and is thereafter invisible to collections.
   const healCustomer = makeFpCustomerHealer(orgId, client, counts);
 
+  // The company's status workflows, once per run: each invoice's state comes
+  // from its status_id. null (outage or empty) keeps every stored state.
+  const statusLookup = await loadInvoiceStatusLookup(client, orgId);
+
   // The database keeps no fp customer id for an unlinked invoice, so the
   // residual — invoices whose FP customer is hard-deleted upstream — is
   // observable only here, at sync time. unresolvedCustomerIds is the distinct
@@ -92,7 +96,7 @@ export async function importInvoicesFromFieldpulse(
       // outcome string (upsertInvoiceRecord may return "updated" for race winners).
       const isNew = !existingFpIds.has(inv.id);
 
-      const outcome = await upsertInvoiceRecord(orgId, inv, healCustomer, onUnlinked);
+      const outcome = await upsertInvoiceRecord(orgId, inv, healCustomer, onUnlinked, statusLookup);
 
       if (outcome === "failed") {
         counts.errors++;

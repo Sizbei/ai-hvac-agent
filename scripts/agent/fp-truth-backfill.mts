@@ -5,7 +5,7 @@
  *
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/agent/fp-truth-backfill.mts --org <uuid>            # dry run
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/agent/fp-truth-backfill.mts --org <uuid> --apply
- *   add --part estimates,customers,dates,after-hours to run only some parts (default: all four)
+ *   add --part estimates,customers,dates,after-hours,invoices to run only some parts (default: all five)
  *
  * Parts
  *   estimates  status + fieldpulse_status_name from the STORED fieldpulse_data
@@ -24,13 +24,26 @@
  *              with the import day got `false`; re-dated rows need the real
  *              answer. Native requests later pushed to FieldPulse, and rows
  *              whose created_at is still the import stamp, are untouched.
+ *   invoices   state of FieldPulse-mirrored invoices from the STORED
+ *              fieldpulse_data.status_id, resolved against the company's
+ *              invoice status workflows read from FieldPulse
+ *              (src/lib/integrations/fieldpulse/invoice-status.ts): Invoice
+ *              Draft → draft, Invoiced/Sent/Partially Paid → open, Paid → paid,
+ *              Void → void. A status_id in no current workflow keeps its state.
+ *              Paid amounts are NOT touched: amount_paid/amount_unpaid are not
+ *              stored (they are promoted out of fieldpulse_data), so the
+ *              nightly sync refreshes them from FieldPulse.
+ *              NOTE: trg_unhide_on_reopen (0061) un-hides a hidden invoice that
+ *              moves TO open, with its request and customer; the dry run counts them.
  *
- * Deleted FieldPulse jobs are hidden by the sibling fp-hide-deleted-jobs.mts.
+ * Deleted FieldPulse jobs are hidden by the sibling fp-hide-deleted-jobs.mts
+ * (--invoices hides open invoices deleted in FieldPulse).
  *
- * FieldPulse is only READ (GET /estimates/status-workflows, /jobs, /customers,
- * /estimates). The database writes touch status, fieldpulse_status_name,
- * customer_type and created_at only; no unhide trigger watches those columns
- * (migrations 0059/0061), so hidden_from_org is never changed.
+ * FieldPulse is only READ (GET /estimates/status-workflows,
+ * /invoices/status-workflows, /jobs, /customers, /estimates). The database
+ * writes touch status, fieldpulse_status_name, customer_type, created_at and
+ * invoices.state only. Of those only invoices.state has an unhide trigger
+ * (see the invoices part); nothing here sets hidden_from_org itself.
  *
  * Any run against the production host (ep-withered-hill, any letter case)
  * needs --prod; only the user passes it, never an agent. .env.local (the DEV
@@ -41,7 +54,7 @@
 import { loadGoliveEnv } from "./golive-env.mjs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PARTS = ["estimates", "customers", "dates", "after-hours"] as const;
+const PARTS = ["estimates", "customers", "dates", "after-hours", "invoices"] as const;
 type Part = (typeof PARTS)[number];
 
 function refuse(reason: string): never {
@@ -80,6 +93,7 @@ const { db } = await import("../../src/lib/db");
 const { sql } = await import("drizzle-orm");
 const { getFieldpulseClient } = await import("../../src/lib/integrations/fieldpulse/client");
 const { fpEstimateStatusUpdate } = await import("../../src/lib/integrations/fieldpulse/estimate-status");
+const { fpInvoiceStateFromStatus } = await import("../../src/lib/integrations/fieldpulse/invoice-status");
 const { parseFpDate, earlierFpDate } = await import("../../src/lib/integrations/fieldpulse/fp-dates");
 const { mapAccountType } = await import("../../src/lib/integrations/fieldpulse/import/customers");
 const { getOrgConfig } = await import("../../src/lib/admin/org-config-queries");
@@ -104,7 +118,7 @@ const org = (await rows(sql`SELECT name FROM organizations WHERE id = ${args.org
 if (!org) refuse(`no organization ${args.org}`);
 console.log(`${args.apply ? "APPLY" : "DRY RUN"} for ${org.name} (${args.org}); parts: ${args.parts.join(", ")}`);
 
-const needsFp = args.parts.includes("estimates") || args.parts.includes("dates");
+const needsFp = args.parts.includes("estimates") || args.parts.includes("dates") || args.parts.includes("invoices");
 const client = needsFp ? await getFieldpulseClient(args.org) : null;
 if (needsFp && !client) refuse("this organization has no FieldPulse connection (and no env key fallback)");
 
@@ -247,6 +261,46 @@ if (args.parts.includes("after-hours")) {
     const n = await runBatched(changes.map((c) => sql`
       UPDATE service_requests SET is_after_hours = ${c.to}
        WHERE id = ${c.id}::uuid AND organization_id = ${args.org}::uuid`));
+    console.log(`  updated ${n}`);
+  }
+}
+
+// ── invoices: state from the stored status_id + the live workflow lookup ─────
+if (args.parts.includes("invoices")) {
+  const lookup = await client!.listInvoiceStatuses();
+  if (lookup.size === 0) refuse("FieldPulse returned no invoice statuses; nothing safe to map against");
+  const list = await rows(sql`
+    SELECT id, state::text AS state, hidden_from_org AS hidden,
+           fieldpulse_data->>'status_id' AS status_id,
+           GREATEST(total_cents - amount_paid_cents, 0) AS balance_cents
+      FROM invoices
+     WHERE organization_id = ${args.org}::uuid AND fieldpulse_invoice_id IS NOT NULL`);
+  const name = (sid: unknown) => (sid ? lookup.get(String(sid))?.name ?? `unknown ${sid}` : "no status_id");
+  const changes = list.flatMap((r) => {
+    const to = fpInvoiceStateFromStatus(r.status_id, lookup);
+    return to && to !== r.state
+      ? [{ id: r.id as string, from: r.state as string, to, sid: r.status_id, hidden: r.hidden === true, balance: Number(r.balance_cents) }]
+      : [];
+  });
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const openBalance = (pick: (r: Row) => string) =>
+    usd(list.filter((r) => pick(r) === "open").reduce((n, r) => n + Number(r.balance_cents), 0));
+  const after = new Map(changes.map((c) => [c.id, c.to]));
+  console.log(`\ninvoices: ${list.length} FieldPulse-mirrored, ${changes.length} to change`);
+  console.log("  changes (stored → FieldPulse):", tally(changes.map((c) => `${c.from} → ${c.to} (${name(c.sid)})`)));
+  const byChange = new Map<string, number>();
+  for (const c of changes) byChange.set(`${c.from} → ${c.to}`, (byChange.get(`${c.from} → ${c.to}`) ?? 0) + c.balance);
+  console.log("  balance on changing rows:", Object.fromEntries([...byChange].map(([k, v]) => [k, usd(v)])));
+  console.log(`  open balance before ${openBalance((r) => r.state as string)}, after ${openBalance((r) => after.get(r.id as string) ?? (r.state as string))}`);
+  const reopenHidden = changes.filter((c) => c.to === "open" && c.hidden).length;
+  if (reopenHidden) console.log(`  ${reopenHidden} hidden invoices move to open; the 0061 trigger will un-hide them with their request and customer`);
+  const unknown = list.filter((r) => !fpInvoiceStateFromStatus(r.status_id, lookup)).map((r) => `${r.state} / ${name(r.status_id)}`);
+  if (unknown.length) console.log("  kept as stored (status_id in no current workflow, or none stored):", tally(unknown));
+  if (args.apply && changes.length) {
+    const n = await runBatched(changes.map((c) => sql`
+      UPDATE invoices SET state = ${c.to}::invoice_state, updated_at = now()
+       WHERE id = ${c.id}::uuid AND organization_id = ${args.org}::uuid
+         AND fieldpulse_invoice_id IS NOT NULL AND state = ${c.from}::invoice_state`));
     console.log(`  updated ${n}`);
   }
 }

@@ -182,6 +182,8 @@ export interface FieldpulseInvoice {
   readonly jobId?: string | null; // The associated job id
   readonly customerId?: string | null;
   readonly status?: string | null; // Real API: an int, stringified (informational)
+  /** FP status_id: the invoice's place in the company status workflow (see invoice-status.ts). */
+  readonly statusId?: string | null;
   readonly taxCents?: number | null; // FP `tax` — real sales tax (>0 on ~56% of invoices)
   readonly totalCents?: number | null;
   readonly amountPaidCents?: number | null; // Real API exposes amount_paid
