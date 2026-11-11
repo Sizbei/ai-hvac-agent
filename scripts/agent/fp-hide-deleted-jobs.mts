@@ -5,6 +5,7 @@
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org <uuid>              # dry run: prints the list
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org <uuid> --apply      # hides, writes the undo file
  *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org <uuid> --undo <file> [--apply]
+ *   NODE_OPTIONS=--conditions=react-server npx tsx scripts/agent/fp-hide-deleted-jobs.mts --org <uuid> --invoices [--apply]  # open invoices instead
  *   --manifest <file> names the undo file
  *   (default ~/.hvac-golive/fp-deleted-jobs-hidden-<org8>-<timestamp>.json, outside the repo)
  *
@@ -23,6 +24,14 @@
  * Rows already hidden are left out, so the undo file holds exactly the rows
  * this run hid and --undo un-hides exactly those.
  *
+ * --invoices: open FieldPulse-mirrored invoices whose FieldPulse invoice is
+ * gone (GET /invoices/{id} → 404, or soft-deleted). Only the invoice is hidden
+ * (its request and customer stay as they are), and never one with a recorded
+ * payment (amount_paid_cents > 0 or any payments row): those are listed for
+ * review. Same undo file and --undo as above (the file name starts
+ * fp-deleted-jobs-hidden-invoices-, so golive-hide-history.mjs honours it).
+ * Rules in planDeletedInvoiceHide (deleted-job-hide.ts).
+ *
  * FieldPulse is only READ. Only hidden_from_org changes; no unhide trigger
  * watches it. Any run against the production host (ep-withered-hill, any
  * letter case) needs --prod; only the user passes it, never an agent.
@@ -40,7 +49,7 @@ function refuse(reason: string): never {
 }
 
 function parseArgs(argv: string[]) {
-  const out = { org: "", apply: false, prod: false, undo: null as string | null, manifest: null as string | null };
+  const out = { org: "", apply: false, prod: false, invoices: false, undo: null as string | null, manifest: null as string | null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--org" || arg === "--undo" || arg === "--manifest") {
@@ -49,6 +58,7 @@ function parseArgs(argv: string[]) {
       out[arg.slice(2) as "org" | "undo" | "manifest"] = value;
       i += 1;
     } else if (arg === "--apply") out.apply = true;
+    else if (arg === "--invoices") out.invoices = true;
     else if (arg === "--prod") out.prod = true;
     else refuse(`unknown argument ${arg}`);
   }
@@ -64,7 +74,7 @@ loadGoliveEnv({ prod: args.prod });
 const { db } = await import("../../src/lib/db");
 const { sql } = await import("drizzle-orm");
 const { getFieldpulseClient } = await import("../../src/lib/integrations/fieldpulse/client");
-const { planDeletedJobHide, describeDeletedJobRequest } = await import("../../src/lib/integrations/fieldpulse/deleted-job-hide");
+const { planDeletedJobHide, planDeletedInvoiceHide, describeDeletedJobRequest } = await import("../../src/lib/integrations/fieldpulse/deleted-job-hide");
 
 type Row = Record<string, unknown>;
 type Stmt = ReturnType<typeof sql>;
@@ -78,6 +88,8 @@ interface Manifest {
   readonly invoices: string[];
   readonly estimates: string[];
   readonly sessions: string[];
+  /** --invoices only: what each hidden invoice was, for a person reading the file. */
+  readonly invoiceDetails?: { id: string; fieldpulseInvoiceId: string; balanceCents: number }[];
 }
 
 const org = (await rows(sql`SELECT name FROM organizations WHERE id = ${args.org}::uuid`))[0];
@@ -105,6 +117,7 @@ if (args.undo) {
   if (m.org !== args.org) refuse(`the undo file is for org ${m.org}, not ${args.org}`);
   console.log(`undo file from ${m.createdAt}: ${m.requests.length} requests, ${m.invoices.length} invoices, ${m.estimates.length} estimates, ${m.sessions.length} conversations`);
   for (const r of m.requests) console.log(`  ${r.referenceNumber}`);
+  for (const i of m.invoiceDetails ?? []) console.log(`  FieldPulse invoice #${i.fieldpulseInvoiceId}`);
   if (args.apply) {
     await setHidden(m, false);
     renameSync(args.undo, args.undo.replace(/\.json$/, `.undone-${Date.now()}.json`));
@@ -115,6 +128,66 @@ if (args.undo) {
 
 const client = await getFieldpulseClient(args.org);
 if (!client) refuse("this organization has no FieldPulse connection (and no env key fallback)");
+
+if (args.invoices) {
+  const open = await rows(sql`
+    SELECT i.id, i.fieldpulse_invoice_id, i.hidden_from_org, i.amount_paid_cents,
+           GREATEST(i.total_cents - i.amount_paid_cents, 0) AS balance_cents,
+           EXISTS (SELECT 1 FROM payments p WHERE p.organization_id = ${args.org}::uuid AND p.invoice_id = i.id) AS has_payment_row
+      FROM invoices i
+     WHERE i.organization_id = ${args.org}::uuid AND i.fieldpulse_invoice_id IS NOT NULL
+       AND i.state = 'open'::invoice_state
+     ORDER BY i.issued_at DESC NULLS LAST`);
+  // Only a 404 (or a soft-deleted row) means deleted; any other error stops the run.
+  const deleted = [];
+  for (const r of open) {
+    let answer: "live" | "deleted";
+    try {
+      answer = await client.checkInvoice(String(r.fieldpulse_invoice_id));
+    } catch (err) {
+      const status = (err as { fpStatus?: number | null }).fpStatus;
+      refuse(`FieldPulse answered ${status ?? "with a network error"} for invoice ${r.fieldpulse_invoice_id}; try again later`);
+    }
+    if (answer === "deleted") {
+      deleted.push({
+        id: r.id as string,
+        fieldpulseInvoiceId: String(r.fieldpulse_invoice_id),
+        balanceCents: Number(r.balance_cents),
+        amountPaidCents: Number(r.amount_paid_cents),
+        hasPaymentRow: r.has_payment_row === true,
+        hidden: r.hidden_from_org === true,
+      });
+    }
+  }
+  const plan = planDeletedInvoiceHide(deleted);
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const sum = (list: readonly { balanceCents: number }[]) => usd(list.reduce((n, i) => n + i.balanceCents, 0));
+  console.log(`\n${open.length} open FieldPulse invoices checked; ${deleted.length} deleted in FieldPulse (${deleted.filter((d) => d.hidden).length} already hidden)`);
+  console.log(`\nto hide: ${plan.hide.length} invoices, balance ${sum(plan.hide)}`);
+  for (const i of plan.hide) console.log(`  FieldPulse #${i.fieldpulseInvoiceId}  ${usd(i.balanceCents)}`);
+  if (plan.kept.length) {
+    console.log(`\nkept visible for review (${plan.kept.length}):`);
+    for (const k of plan.kept) console.log(`  FieldPulse #${k.invoice.fieldpulseInvoiceId}  ${usd(k.invoice.balanceCents)}  — ${k.reason}`);
+  }
+  if (args.apply && plan.hide.length) {
+    const manifest: Manifest = {
+      org: args.org,
+      createdAt: new Date().toISOString(),
+      requests: [],
+      invoices: plan.hide.map((i) => i.id),
+      estimates: [],
+      sessions: [],
+      invoiceDetails: plan.hide.map((i) => ({ id: i.id, fieldpulseInvoiceId: i.fieldpulseInvoiceId, balanceCents: i.balanceCents })),
+    };
+    const path = args.manifest ?? goliveRecordPath(`fp-deleted-jobs-hidden-invoices-${args.org.slice(0, 8)}-${manifest.createdAt.replace(/[:.]/g, "-")}.json`);
+    // Write the undo file before any change, so a failed run is still reversible.
+    writeFileSync(path, JSON.stringify(manifest, null, 2));
+    console.log(`\nundo file: ${path}`);
+    await setHidden(manifest, true);
+  }
+  console.log(args.apply ? "\nDone." : "\nDry run only; pass --apply to hide.");
+  process.exit(0);
+}
 
 // imported = created by the FieldPulse import (synthetic fp-import- session);
 // otherwise a native request that was pushed to FieldPulse.

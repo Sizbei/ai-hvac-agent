@@ -1465,3 +1465,54 @@ describe("RestFieldpulseClient — zero-quantity line components (real FP data)"
     expect((inv?.lineItems ?? []).map((l) => l.quantity)).toEqual([1, 1]);
   });
 });
+
+// ── checkInvoice + listInvoiceStatuses (invoice status truth, 2026-11-11) ─────
+
+describe("RestFieldpulseClient — checkInvoice / listInvoiceStatuses", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  const config = { baseUrl: "https://api.fieldpulse.com", apiKey: "k" };
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+
+  it("live on 200, deleted on a soft-deleted row", async () => {
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    mockFetch.mockResolvedValueOnce(ok({ error: false, response: { id: 1, deleted_at: null } }));
+    expect(await client.checkInvoice("1")).toBe("live");
+    mockFetch.mockResolvedValueOnce(ok({ error: false, response: { id: 1, deleted_at: "2026-11-01 10:00:00" } }));
+    expect(await client.checkInvoice("1")).toBe("deleted");
+  });
+
+  it("deleted on 404", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: "Not found" }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    expect(await client.checkInvoice("20776752")).toBe("deleted");
+  });
+
+  it("throws on a 503 — an outage is never read as a deletion", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: "unavailable" }) });
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    await expect(client.checkInvoice("1")).rejects.toThrow("HTTP 503");
+  });
+
+  it("listInvoiceStatuses flattens the workflows and reads status_id on invoices", async () => {
+    const client = new RestFieldpulseClient(config, mockFetch as never);
+    mockFetch.mockResolvedValueOnce(
+      ok({ error: false, response: [{ id: 1, statuses: [{ id: 1878566, name: "Void", type: "invoice_void" }] }] }),
+    );
+    const lookup = await client.listInvoiceStatuses();
+    expect(lookup.get("1878566")).toEqual({ name: "Void", type: "invoice_void" });
+    expect(String(mockFetch.mock.calls[0][0])).toContain("/invoices/status-workflows");
+
+    mockFetch.mockResolvedValueOnce(ok({ error: false, response: { id: 5, status_id: 1878566, total: "10.00" } }));
+    expect((await client.getInvoice("5"))?.statusId).toBe("1878566");
+  });
+});

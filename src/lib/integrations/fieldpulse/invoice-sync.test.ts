@@ -575,3 +575,132 @@ describe("pullOpenFieldpulseInvoices", () => {
     expect(result).toEqual({ created: 0, updated: 0, skipped: 5, failed: 1 });
   });
 });
+
+// ── Workflow status_id decides the state (invoice-status.ts) ───────────────────
+
+describe("upsertInvoiceRecord — state comes from FieldPulse's status workflow", () => {
+  const LOOKUP = new Map([
+    ["1878561", { name: "Invoice Draft", type: "invoice_draft" }],
+    ["1878563", { name: "Sent", type: "invoice_sent" }],
+    ["1878564", { name: "Partially Paid", type: "invoice_partially_paid" }],
+    ["1878565", { name: "Paid", type: "invoice_paid" }],
+    ["1878566", { name: "Void", type: "invoice_void" }],
+  ]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.batch).mockResolvedValue([] as never);
+    vi.mocked(db.delete).mockReturnValue({ where: vi.fn() } as never);
+  });
+
+  function insertState() {
+    wireSelectNoExisting();
+    return wireInsert();
+  }
+
+  function wireExisting(state: string) {
+    const where = vi.fn().mockResolvedValue([{ id: "existing-invoice", state }]);
+    vi.mocked(db.select).mockReturnValue({ from: vi.fn().mockReturnValue({ where }) } as never);
+    let captured: Record<string, unknown> | null = null;
+    vi.mocked(db.update).mockReturnValue({
+      set: (v: Record<string, unknown>) => {
+        captured = v;
+        return { where: vi.fn() };
+      },
+    } as never);
+    return () => captured;
+  }
+
+  it("an unsent draft with a balance lands draft, not open", async () => {
+    const { getInvoiceValues } = insertState();
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ statusId: "1878561", totalCents: 152238, amountPaidCents: 0, amountUnpaidCents: 152238 }),
+      undefined,
+      undefined,
+      LOOKUP,
+    );
+    expect(getInvoiceValues()?.mock.calls[0]?.[0]?.state).toBe("draft");
+  });
+
+  it("a void invoice lands void even though the amounts look unpaid", async () => {
+    const { getInvoiceValues } = insertState();
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ statusId: "1878566", totalCents: 63158, amountPaidCents: 0, amountUnpaidCents: 0 }),
+      undefined,
+      undefined,
+      LOOKUP,
+    );
+    const row = getInvoiceValues()?.mock.calls[0]?.[0];
+    expect(row?.state).toBe("void");
+    expect(row?.amountPaidCents).toBe(0);
+  });
+
+  it("partially paid is open and keeps FieldPulse's amount_paid, so the balance is amount_unpaid", async () => {
+    const { getInvoiceValues } = insertState();
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ statusId: "1878564", totalCents: 100000, amountPaidCents: 40000, amountUnpaidCents: 60000 }),
+      undefined,
+      undefined,
+      LOOKUP,
+    );
+    const row = getInvoiceValues()?.mock.calls[0]?.[0];
+    expect(row?.state).toBe("open");
+    expect(row?.totalCents - row?.amountPaidCents).toBe(60000);
+  });
+
+  it("re-sync moves a stored open row to void", async () => {
+    const getSet = wireExisting("open");
+    await upsertInvoiceRecord(ORG, makeInvoice({ statusId: "1878566", amountPaidCents: 0 }), undefined, undefined, LOOKUP);
+    expect(getSet()?.state).toBe("void");
+  });
+
+  it("re-sync moves a stored paid row back to draft when FieldPulse says draft", async () => {
+    const getSet = wireExisting("paid");
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ statusId: "1878561", totalCents: 5000, amountPaidCents: 0, amountUnpaidCents: 5000 }),
+      undefined,
+      undefined,
+      LOOKUP,
+    );
+    expect(getSet()?.state).toBe("draft");
+    expect(getSet()?.amountPaidCents).toBe(0);
+  });
+
+  it.each([
+    ["no lookup", undefined],
+    ["a failed lookup", null],
+    ["an EMPTY lookup", new Map()],
+  ])("with %s, a stored row keeps its state", async (_label, lookup) => {
+    const getSet = wireExisting("void");
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ statusId: "1878563", totalCents: 5000, amountPaidCents: 0, amountUnpaidCents: 5000 }),
+      undefined,
+      undefined,
+      lookup as Map<string, { name: string; type: string }> | null | undefined,
+    );
+    expect(getSet()?.state).toBe("void");
+  });
+
+  it("an unknown status_id keeps the stored state", async () => {
+    const getSet = wireExisting("draft");
+    await upsertInvoiceRecord(ORG, makeInvoice({ statusId: "999", amountPaidCents: 0 }), undefined, undefined, LOOKUP);
+    expect(getSet()?.state).toBe("draft");
+  });
+
+  it("a NEW row without a usable lookup falls back to the amounts", async () => {
+    const { getInvoiceValues } = insertState();
+    await upsertInvoiceRecord(
+      ORG,
+      makeInvoice({ statusId: "1878566", totalCents: 5000, amountPaidCents: 0, amountUnpaidCents: 5000 }),
+      undefined,
+      undefined,
+      new Map(),
+    );
+    expect(getInvoiceValues()?.mock.calls[0]?.[0]?.state).toBe("open");
+  });
+});

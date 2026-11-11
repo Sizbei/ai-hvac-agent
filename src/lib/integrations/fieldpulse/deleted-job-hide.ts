@@ -81,3 +81,41 @@ export function describeDeletedJobRequest(req: DeletedJobRequest, max = 48): str
   const cut = title.length > max ? `${title.slice(0, max - 1).trimEnd()}…` : title;
   return `${req.referenceNumber}  ${req.status.padEnd(11)}  ${cut}`;
 }
+
+// ── Invoices deleted in FieldPulse (fp-hide-deleted-jobs.mts --invoices) ──────
+
+export interface DeletedInvoice {
+  readonly id: string;
+  readonly fieldpulseInvoiceId: string;
+  readonly balanceCents: number;
+  /** amount_paid_cents on the row. */
+  readonly amountPaidCents: number;
+  /** Any payments row recorded against it. */
+  readonly hasPaymentRow: boolean;
+  readonly hidden: boolean;
+}
+
+export interface DeletedInvoiceHidePlan {
+  readonly hide: readonly DeletedInvoice[];
+  readonly kept: readonly { readonly invoice: DeletedInvoice; readonly reason: string }[];
+}
+
+/**
+ * Plan the hide for mirrored invoices FieldPulse no longer has (GET
+ * /invoices/{id} → 404). Only the invoice is hidden; its request and customer
+ * are left alone. Anything with a recorded payment is never hidden: that
+ * money happened, so a person must look. Rows already hidden are left out.
+ */
+export function planDeletedInvoiceHide(deleted: readonly DeletedInvoice[]): DeletedInvoiceHidePlan {
+  const hide: DeletedInvoice[] = [];
+  const kept: { invoice: DeletedInvoice; reason: string }[] = [];
+  for (const inv of deleted) {
+    if (inv.hidden) continue;
+    if (inv.amountPaidCents > 0 || inv.hasPaymentRow) {
+      kept.push({ invoice: inv, reason: "has a recorded payment" });
+      continue;
+    }
+    hide.push(inv);
+  }
+  return { hide, kept };
+}

@@ -24,13 +24,15 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+const STATUS_LOOKUP = new Map([["1878566", { name: "Void", type: "invoice_void" }]]);
 vi.mock("../invoice-sync", () => ({
   upsertInvoiceRecord: vi.fn(),
+  loadInvoiceStatusLookup: vi.fn(),
 }));
 
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { upsertInvoiceRecord } from "../invoice-sync";
+import { loadInvoiceStatusLookup, upsertInvoiceRecord } from "../invoice-sync";
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -81,6 +83,7 @@ function wireSelect(existingFpIds: string[]) {
 describe("importInvoicesFromFieldpulse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(loadInvoiceStatusLookup).mockResolvedValue(STATUS_LOOKUP);
   });
 
   it("sets fetched = items.length and total = null (totalCount always null on /invoices)", async () => {
@@ -129,6 +132,7 @@ describe("importInvoicesFromFieldpulse", () => {
       active,
       expect.any(Function),
       expect.any(Function),
+      STATUS_LOOKUP,
     );
   });
 
@@ -145,13 +149,27 @@ describe("importInvoicesFromFieldpulse", () => {
     // Third arg is the per-run customer healer — without it, an invoice whose
     // customer lost its fp-id link is written orphaned and never collectable.
     // Fourth arg is the per-run onUnlinked callback that feeds the residual
-    // counters (unresolvedFpCustomerIds / unlinkedInvoices).
+    // counters (unresolvedFpCustomerIds / unlinkedInvoices). Fifth is the
+    // status-workflow lookup, read once per run, that decides each state.
     expect(upsertInvoiceRecord).toHaveBeenCalledWith(
       ORG,
       inv,
       expect.any(Function),
       expect.any(Function),
+      STATUS_LOOKUP,
     );
+    expect(loadInvoiceStatusLookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes null through when the status workflows are unavailable (stored states kept)", async () => {
+    const inv = makeInvoice({ id: "50000001" });
+    wireSelect([]);
+    vi.mocked(loadInvoiceStatusLookup).mockResolvedValue(null);
+    vi.mocked(upsertInvoiceRecord).mockResolvedValue("updated");
+
+    await importInvoicesFromFieldpulse(ORG, makeCounts(), makeClient([inv]));
+
+    expect(vi.mocked(upsertInvoiceRecord).mock.calls[0]?.[4]).toBeNull();
   });
 
   it("counts created for new invoices (not in pre-select Set) when outcome is 'created'", async () => {

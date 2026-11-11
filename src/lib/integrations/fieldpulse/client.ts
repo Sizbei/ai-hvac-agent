@@ -16,6 +16,7 @@
  */
 import { getFieldpulseConfig, type FieldpulseConfig } from "./config";
 import { buildFpEstimateStatusLookup, type FpEstimateStatusLookup } from "./estimate-status";
+import { buildFpInvoiceStatusLookup, type FpInvoiceStatusLookup } from "./invoice-status";
 import type {
   CreateCustomerInput,
   CreateJobInput,
@@ -264,6 +265,21 @@ export interface FieldpulseClient {
    * reached, so a caller never mistakes an outage for "no statuses".
    */
   listEstimateStatuses(): Promise<FpEstimateStatusLookup>;
+
+  /**
+   * The company's invoice status workflows (GET /invoices/status-workflows),
+   * flattened to status_id → { name, type }. Throws when FieldPulse can't be
+   * reached, so a caller never mistakes an outage for "no statuses".
+   */
+  listInvoiceStatuses(): Promise<FpInvoiceStatusLookup>;
+
+  /**
+   * Whether FieldPulse still has this invoice: "deleted" on a 404 or a
+   * soft-deleted row, "live" otherwise. Any other failure THROWS (unlike
+   * getInvoice, which folds every error into null), so an outage is never
+   * read as a deletion.
+   */
+  checkInvoice(invoiceId: string): Promise<"live" | "deleted">;
 }
 
 // ── Real-API helpers (verified 2026-06-19 against the live FieldPulse API) ─────
@@ -591,6 +607,8 @@ function toInvoice(raw: unknown): FieldpulseInvoice | null {
     // Real status is an int (e.g. 3) — preserve as a string for reference; the
     // mirror derives paid/open/void from the amounts below, not this code.
     status: obj.status != null ? String(obj.status) : null,
+    // The workflow status the invoice's state is read from (invoice-status.ts).
+    statusId: idStr(obj.status_id),
     // FP sends real tax as a dollar string; the mirror hardcoded 0, so every
     // invoice document showed a fake $0.00 tax. (subtotal is derived total-tax
     // in the sync — FP's raw subtotal is pre-discount and doesn't reconcile.)
@@ -1233,6 +1251,24 @@ export class RestFieldpulseClient implements FieldpulseClient {
   async listEstimateStatuses(): Promise<FpEstimateStatusLookup> {
     const raw = await this.request("/estimates/status-workflows", { method: "GET" });
     return buildFpEstimateStatusLookup(unwrap(raw));
+  }
+
+  async checkInvoice(invoiceId: string): Promise<"live" | "deleted"> {
+    try {
+      const raw = await this.request(
+        `/invoices/${encodeURIComponent(invoiceId)}`,
+        { method: "GET" },
+      );
+      return toInvoice(unwrap(raw))?.deletedAt != null ? "deleted" : "live";
+    } catch (err) {
+      if ((err as Partial<FieldpulseRequestError>)?.fpStatus === 404) return "deleted";
+      throw err;
+    }
+  }
+
+  async listInvoiceStatuses(): Promise<FpInvoiceStatusLookup> {
+    const raw = await this.request("/invoices/status-workflows", { method: "GET" });
+    return buildFpInvoiceStatusLookup(unwrap(raw));
   }
 
   async listJobInvoices(

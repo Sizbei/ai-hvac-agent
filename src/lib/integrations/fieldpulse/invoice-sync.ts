@@ -22,12 +22,17 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, isNotNull } from "drizzle-orm";
 import { logger } from "@/lib/logger";
-import { getFieldpulseClient } from "./client";
+import { getFieldpulseClient, type FieldpulseClient } from "./client";
 import { parseFpDate } from "./fp-dates";
 import type { FieldpulseInvoiceStatus, FieldpulseInvoice } from "./types";
 import { buildFpSpillover } from "./import/spillover";
 import { displayQuantity } from "./line-item-display";
 import { makeFpCustomerHealer } from "./import/customers";
+import {
+  fpInvoiceStateFromStatus,
+  requestInvoiceStatusWord,
+  type FpInvoiceStatusLookup,
+} from "./invoice-status";
 
 /**
  * Map a Fieldpulse invoice status to our invoice status enum.
@@ -286,9 +291,13 @@ export function mapFieldpulseStatusToInvoiceState(
 }
 
 /**
- * Derive the native `invoices.state` from the invoice's AMOUNTS — authoritative,
- * unlike the real API's opaque integer `status` (whose code meanings are
- * unconfirmed). Paid when nothing is owed; open once invoiced; draft otherwise.
+ * FALLBACK ONLY: used for an invoice seen for the first time when the status
+ * workflows could not be read (the workflow status_id is the real answer, see
+ * invoice-status.ts). Amounts cannot tell a draft or a void from an open
+ * invoice, which is how never-sent and voided invoices were once counted as owed.
+ *
+ * Derive the native `invoices.state` from the invoice's AMOUNTS.
+ * Paid when nothing is owed; open once invoiced; draft otherwise.
  * (Void isn't derivable from amounts; the webhook's invoice.voided event drives
  * the request-status void path separately.)
  */
@@ -369,12 +378,19 @@ function lineItemRows(
  * (`invoice.customerId` is set) but resolved to no native row, even after
  * healing. Passed only by the import backfill (`import/invoices.ts`) to
  * surface the residual on `PhaseResult`; the webhook and daily cron omit it.
+ *
+ * `statusLookup` is the company's invoice status workflows
+ * (loadInvoiceStatusLookup). The state comes from the invoice's `status_id`
+ * through it (invoice-status.ts). When it is null or empty, or the id is in no
+ * current workflow, an existing row KEEPS its stored state (an outage must not
+ * reset history) and a new row falls back to the amounts.
  */
 export async function upsertInvoiceRecord(
   organizationId: string,
   invoice: FieldpulseInvoice,
   healCustomer?: (fpCustomerId: string) => Promise<string | null>,
   onUnlinked?: (fpCustomerId: string) => void,
+  statusLookup?: FpInvoiceStatusLookup | null,
 ): Promise<InvoicePullOutcome> {
   // A DELETED FieldPulse invoice must never become live AR. The importer skips
   // these, but this function is also the webhook and daily-cron entry point,
@@ -418,12 +434,9 @@ export async function upsertInvoiceRecord(
   const subtotalCents = totalCents - taxCents;
   // Real API exposes accurate paid/unpaid amounts — use them (no longer binary).
   const rawAmountPaidCents = invoice.amountPaidCents ?? 0;
-  const state = deriveInvoiceState(invoice, totalCents, rawAmountPaidCents);
-  // H2 guard: a paid invoice has zero balance by definition. If FP sends state
-  // 'paid' but amount_paid=0 (absent or zeroed-out in the payload), correct the
-  // paid amount to totalCents so the invoice never shows as outstanding.
-  const amountPaidCents =
-    state === "paid" && rawAmountPaidCents === 0 ? totalCents : rawAmountPaidCents;
+  // FieldPulse's own workflow status decides the state. null = no usable
+  // answer (lookup failed or empty, id in no workflow): keep the stored state.
+  const workflowState = fpInvoiceStateFromStatus(invoice.statusId, statusLookup);
 
   // Resolve links — both optional, both ORG-SCOPED compound keys so a
   // cross-tenant Fieldpulse-id collision can't attach to the wrong tenant.
@@ -480,6 +493,27 @@ export async function upsertInvoiceRecord(
         eq(invoices.fieldpulseInvoiceId, invoice.id),
       ),
     );
+
+  // Workflow first. Without it, a stored row keeps its state; only a row seen
+  // for the first time falls back to the amounts (the nightly sweep corrects it
+  // once the workflows can be read again).
+  const state =
+    workflowState ??
+    existing?.state ??
+    deriveInvoiceState(invoice, totalCents, rawAmountPaidCents);
+  // H2 guard: a paid invoice has zero balance by definition. If FP sends state
+  // 'paid' but amount_paid=0 (absent or zeroed-out in the payload), correct the
+  // paid amount to totalCents so the invoice never shows as outstanding.
+  const amountPaidCents =
+    state === "paid" && rawAmountPaidCents === 0 ? totalCents : rawAmountPaidCents;
+  // The request-level invoice status follows the same workflow answer. The
+  // legacy numeric `status` never matched it (it always mapped to "none"), so
+  // without a workflow answer the request is left alone.
+  const syncRequestStatus = async () => {
+    if (invoice.jobId && workflowState) {
+      await syncInvoiceStatus(invoice.jobId, requestInvoiceStatusWord(workflowState), organizationId);
+    }
+  };
 
   // Spillover: build from the raw FP invoice payload (snake_case fields).
   // invoice._raw is threaded through toInvoice(); the denylist model captures
@@ -550,7 +584,7 @@ export async function upsertInvoiceRecord(
         ipAddress: null,
       }),
     ]);
-    if (invoice.jobId) await syncInvoiceStatus(invoice.jobId, invoice.status, organizationId);
+    await syncRequestStatus();
     return "updated";
   }
 
@@ -593,7 +627,7 @@ export async function upsertInvoiceRecord(
       }),
       ...(liRows.length ? [db.insert(invoiceLineItems).values(liRows)] : []),
     ]);
-    if (invoice.jobId) await syncInvoiceStatus(invoice.jobId, invoice.status, organizationId);
+    await syncRequestStatus();
     return "created";
   }
 
@@ -610,6 +644,31 @@ export async function upsertInvoiceRecord(
       ),
     );
   return now ? "updated" : "skipped";
+}
+
+/**
+ * The company's invoice status workflows, or null when they can't be read or
+ * came back empty (both logged). null makes upsertInvoiceRecord keep every
+ * stored state, so an outage never resets history. Never throws.
+ */
+export async function loadInvoiceStatusLookup(
+  client: Pick<FieldpulseClient, "listInvoiceStatuses">,
+  organizationId: string,
+): Promise<FpInvoiceStatusLookup | null> {
+  try {
+    const lookup = await client.listInvoiceStatuses();
+    if (lookup.size > 0) return lookup;
+    logger.warn(
+      { organizationId },
+      "FieldPulse invoice status workflows came back empty — stored invoice states left as they are",
+    );
+  } catch (error) {
+    logger.warn(
+      { organizationId, error: error instanceof Error ? error.message : String(error) },
+      "FieldPulse invoice status workflows unavailable — stored invoice states left as they are",
+    );
+  }
+  return null;
 }
 
 /**
@@ -634,6 +693,8 @@ export async function pullInvoiceFromFieldpulse(
       organizationId,
       invoice,
       makeFpCustomerHealer(organizationId, client),
+      undefined,
+      await loadInvoiceStatusLookup(client, organizationId),
     );
   } catch (error) {
     logger.warn(
@@ -664,10 +725,11 @@ export async function pullInvoicesForJob(
     // — the backstop for missed webhooks — inserts orphans of its own, which
     // is the exact leak the healer was added to stop.
     const healCustomer = makeFpCustomerHealer(organizationId, client);
+    const statusLookup = list.length ? await loadInvoiceStatusLookup(client, organizationId) : null;
     for (const inv of list) {
       let outcome: InvoicePullOutcome;
       try {
-        outcome = await upsertInvoiceRecord(organizationId, inv, healCustomer);
+        outcome = await upsertInvoiceRecord(organizationId, inv, healCustomer, undefined, statusLookup);
       } catch (error) {
         logger.warn(
           { error, fieldpulseInvoiceId: inv.id },
@@ -715,6 +777,7 @@ export async function pullOpenFieldpulseInvoices(
       .orderBy(asc(invoices.updatedAt))
       .limit(OPEN_INVOICE_SWEEP_LIMIT);
     const healCustomer = makeFpCustomerHealer(organizationId, client);
+    const statusLookup = open.length ? await loadInvoiceStatusLookup(client, organizationId) : null;
     for (let i = 0; i < open.length; i += OPEN_INVOICE_SWEEP_CONCURRENCY) {
       const outcomes = await Promise.all(
         open.slice(i, i + OPEN_INVOICE_SWEEP_CONCURRENCY).map(async ({ fieldpulseInvoiceId }) => {
@@ -722,7 +785,13 @@ export async function pullOpenFieldpulseInvoices(
           try {
             const invoice = await client.getInvoice(fieldpulseInvoiceId);
             if (!invoice) return "skipped" as const;
-            return await upsertInvoiceRecord(organizationId, invoice, healCustomer);
+            return await upsertInvoiceRecord(
+              organizationId,
+              invoice,
+              healCustomer,
+              undefined,
+              statusLookup,
+            );
           } catch (error) {
             logger.warn(
               { error, fieldpulseInvoiceId },
