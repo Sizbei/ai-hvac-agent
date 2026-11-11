@@ -6,8 +6,9 @@ description: Use when working on the /admin/accounting page — QuickBooks-compa
 # Accounting (/admin/accounting)
 
 **Purpose:** super_admins download a date-ranged CSV journal for import into
-QuickBooks (or any ledger). Regular admins see a blank page — the panel
-self-hides on 403.
+QuickBooks (or any ledger). Regular admins see one line ("Only a super admin
+can download accounting exports."): the page decides from `viewer.uiRole`
+(`canExportAccounting`, `src/lib/admin/preview-view.ts`) on the server.
 
 **Files:** page `src/app/admin/(dashboard)/accounting/page.tsx` (server
 component, `narrow` PageShell) · export panel
@@ -16,9 +17,10 @@ API `src/app/api/admin/accounting/export/route.ts` · export logic
 `src/lib/admin/accounting-export.ts` · tables `invoices` `payments`
 (schema `src/lib/db/schema.ts`).
 
-**Data flow:** on mount the panel probes `GET /api/admin/accounting/export`
-without params. 403/401 → renders nothing. 400 VALIDATION_ERROR → authorized,
-shows the form. On download: sends `?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv`
+**Data flow:** the page renders the panel only for a super_admin viewer (the
+"View as" target's role while previewing; then `readOnly` disables Download
+with a "Read-only preview" tooltip, since the proxy refuses the export's audit
+write). There is no client probe. On download: sends `?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv`
 (plain business days). The server reads the org's time zone
 (`getOrgTimeZone`, after-hours settings) and covers whole business days with
 `zonedDayRange` (`src/lib/admin/zoned-date.ts`, DST-correct). A full ISO
@@ -26,15 +28,12 @@ timestamp is still accepted; only its date part is used. The server streams a
 CSV blob; the client triggers a synthetic `<a download>` click.
 
 **Invariants (violate = bug):**
-- The export endpoint is super_admin-gated on the server; the client probe
-  pattern is UI hygiene only — never rely on the probe result as the real gate.
+- The export endpoint is super_admin-gated on the real session; the page's
+  role check is presentation only — never rely on it as the real gate.
 - Dates are BUSINESS days: the period bounds and every row's Date are in the
   org's time zone (`dateInZone`), never UTC — an 8 pm Eastern payment on Nov 5
   is a Nov 5 row (UTC made it Nov 6, and month-end work landed in the wrong
   month).
-- The probe fires without date params — the server returns 400 VALIDATION_ERROR
-  (not 403) for authorized callers with missing params. Only 401/403 means
-  unauthorized. Do not break this probe/gate handshake.
 - Export file name pattern: `accounting-export-${from}_to_${to}.csv` using the
   YYYY-MM-DD strings, not the full ISO.
 - Synced invoice rows (FP/HCP-mirrored) are filtered AND dated by

@@ -25,6 +25,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { InfoBanner } from '@/components/admin/ui/info-banner';
+import { usePlatformUi } from '@/components/admin/platform-ui-context';
 
 function StatusChip({ status, isStale }: { status?: string; isStale?: boolean }) {
   if (isStale) {
@@ -198,6 +199,8 @@ function RecentRunsTable({
 export default function FieldpulseImportPage() {
   const { runs: rawRuns, isLoading, error, refresh, isPolling, asOfMs } = useFpImportStatus();
   const runs = rawRuns as readonly FpImportRunSummary[];
+  // Run history is internal (m9): org users see the current status per phase only.
+  const showRunHistory = usePlatformUi();
 
   const latestPerPhase = latestRunPerPhase(runs);
 
@@ -270,10 +273,12 @@ export default function FieldpulseImportPage() {
         })}
       </div>
 
-      <div>
-        <SectionHeading title="Recent runs" className="mb-3" />
-        <RecentRunsTable runs={runs} asOfMs={asOfMs} />
-      </div>
+      {showRunHistory && (
+        <div>
+          <SectionHeading title="Recent runs" className="mb-3" />
+          <RecentRunsTable runs={runs} asOfMs={asOfMs} />
+        </div>
+      )}
     </PageShell>
   );
 }

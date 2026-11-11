@@ -11,13 +11,17 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { usePlatformUi } from '@/components/admin/platform-ui-context';
 
 /**
  * Self-hiding discovery card for the platform console. Probes the platform-gated
  * endpoint; a non-platform admin gets 403/401 and we render nothing — the server
- * is the authority for visibility (same pattern as AiModelPanel).
+ * is the authority for visibility (same pattern as AiModelPanel). While a
+ * "View as" preview is on the probe still passes (the API keeps the real
+ * session), so the layout's platform-UI flag hides it too (spec P7).
  */
 export function PlatformLinkPanel() {
+  const platformUi = usePlatformUi();
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
@@ -35,7 +39,7 @@ export function PlatformLinkPanel() {
     };
   }, []);
 
-  if (!authorized) return null;
+  if (!platformUi || !authorized) return null;
 
   return (
     <Card>

@@ -1,5 +1,6 @@
-import { redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { getViewerContext } from '@/lib/auth/viewer';
+import { seesPlatformUi } from '@/lib/admin/preview-view';
 import { PlatformConsole, ViewAs } from '@/components/admin/platform/platform-console';
 import { PageShell } from '@/components/admin/ui/page-shell';
 import { PageHeader } from '@/components/admin/ui/page-header';
@@ -8,14 +9,15 @@ import { PageHeader } from '@/components/admin/ui/page-header';
  * Platform tenant console — visible ONLY to platform admins (env allowlist).
  *
  * The dashboard layout already guarantees an admin session; here we additionally
- * gate on isPlatformAdmin and redirect a non-platform admin away (the API behind
- * the console is itself platform-gated, so the server is the authority either
- * way — this redirect just avoids rendering an empty shell).
+ * gate on isPlatformAdmin. A non-platform viewer gets a 404, and so does the
+ * platform admin while a "View as" preview is on (spec P7: the preview applies
+ * the target's P3 gates). The APIs behind the console keep the real session's
+ * platform gate; this only decides what renders.
  */
 export default async function PlatformPage() {
   const viewer = await getViewerContext();
-  if (!viewer || !viewer.isPlatformAdmin) {
-    redirect('/admin');
+  if (!viewer || !seesPlatformUi(viewer)) {
+    notFound();
   }
 
   return (
@@ -24,9 +26,7 @@ export default async function PlatformPage() {
         title="Platform"
         subtitle="Provision new tenant organizations and view existing ones. Creating a tenant issues a one-time invite link for the owner to accept."
       />
-      {/* While a preview is on, the banner's Exit is the only control; a
-          second start would be refused by the read-only proxy anyway. */}
-      {viewer.preview === null && <ViewAs />}
+      <ViewAs />
       <PlatformConsole />
     </PageShell>
   );

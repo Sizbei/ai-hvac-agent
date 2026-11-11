@@ -6,6 +6,7 @@ import { getAdminSession } from '@/lib/auth/session';
 import { getViewerContext } from '@/lib/auth/viewer';
 import { previewBannerLine } from '@/lib/admin/preview-banner-copy';
 import { shownPreview } from '@/lib/admin/preview-sync';
+import { chipIdentity, seesPlatformUi } from '@/lib/admin/preview-view';
 import { db } from '@/lib/db';
 import { organizations, organizationSettings } from '@/lib/db/schema';
 import { parseOnboardingState, placementFor } from '@/lib/admin/onboarding-state';
@@ -44,11 +45,15 @@ export default async function DashboardLayout({
     loadSetupPlacement(session.organizationId),
   ]);
 
+  // While previewing, the chip shows the target (m14); the banner names the real viewer's mode.
+  const chip = chipIdentity(session, viewer.preview);
+
   return (
     <DashboardShell
       orgName={orgName}
-      adminName={session.name}
-      adminEmail={session.email}
+      adminName={chip.name}
+      adminEmail={chip.email}
+      platformUi={seesPlatformUi(viewer)}
       role={viewer.uiRole}
       preview={
         viewer.preview

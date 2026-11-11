@@ -442,6 +442,9 @@ high/emergency (`urgencyTone`). Photos and signatures never show server text
   dev DB: `VITEST_INTEGRATION=1 npx vitest run tests/integration/field-forms.test.ts`.
 
 **Invariants:**
+- "View as" a technician: the layout provides `TechReadOnlyProvider`
+  (`src/components/tech/tech-read-only-context.tsx`); the day clock and the
+  status buttons render disabled under a "Read-only preview" title span.
 - **Assignee + tenant guard** (legacy sub-routes): every mutation route checks BOTH
   `assignedTo == techUserId` AND the session's `organizationId`. A technician may only
   touch THEIR OWN job. The guard in `field-queries.ts` must mirror

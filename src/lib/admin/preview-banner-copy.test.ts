@@ -8,6 +8,7 @@ describe("previewBannerLine", () => {
         status: "active",
         targetUserId: "u",
         targetName: "Chick Spears",
+        targetEmail: "t@example.com",
         targetRole: "super_admin",
         exp: 1,
       }),
@@ -22,7 +23,7 @@ describe("previewBannerLine", () => {
 
   it("falls back to the stale wording for a blank name", () => {
     expect(
-      previewBannerLine({ status: "active", targetUserId: "u", targetName: "  ", targetRole: "admin", exp: 1 }),
+      previewBannerLine({ status: "active", targetUserId: "u", targetName: "  ", targetEmail: "t@example.com", targetRole: "admin", exp: 1 }),
     ).toBe("Viewing as a user who is no longer available · read-only");
   });
 });

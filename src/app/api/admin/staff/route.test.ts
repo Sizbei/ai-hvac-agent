@@ -5,6 +5,11 @@ vi.mock("@/lib/auth/session", () => ({
   getAdminSession: () => getAdminSession(),
 }));
 
+const getViewerContext = vi.fn();
+vi.mock("@/lib/auth/viewer", () => ({
+  getViewerContext: () => getViewerContext(),
+}));
+
 const listStaff = vi.fn();
 const createStaff = vi.fn();
 vi.mock("@/lib/admin/staff-queries", () => ({
@@ -51,6 +56,7 @@ function postReq() {
 beforeEach(() => {
   vi.clearAllMocks();
   getAdminSession.mockResolvedValue(SESSION);
+  getViewerContext.mockResolvedValue({ session: SESSION, preview: null });
 });
 
 describe("POST /api/admin/staff seat gate", () => {
@@ -112,5 +118,31 @@ describe("GET /api/admin/staff", () => {
     const body = await (await GET()).json();
     expect(body.data.seats).toEqual({ used: 3, limit: 2 });
     expect(getSeatUsage).toHaveBeenCalledWith(SESSION.organizationId);
+  });
+
+  it("401 without a viewer", async () => {
+    getViewerContext.mockResolvedValue(null);
+    expect((await GET()).status).toBe(401);
+    expect(listStaff).not.toHaveBeenCalled();
+  });
+
+  it("marks the session user as \"you\" when not previewing", async () => {
+    listStaff.mockResolvedValue([]);
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    const body = await (await GET()).json();
+    expect(body.data.currentUserId).toBe(SESSION.userId);
+  });
+
+  it("marks the View as target as \"you\" while previewing (m14)", async () => {
+    getViewerContext.mockResolvedValue({
+      session: SESSION,
+      preview: { status: "active", targetUserId: "t1", targetName: "Chick", targetEmail: "c@x.com", targetRole: "super_admin", exp: 1 },
+    });
+    listStaff.mockResolvedValue([]);
+    getSeatUsage.mockResolvedValue({ used: 1, limit: 2 });
+    const body = await (await GET()).json();
+    expect(body.data.currentUserId).toBe("t1");
+    // The list stays the session org's.
+    expect(listStaff).toHaveBeenCalledWith(SESSION.organizationId);
   });
 });

@@ -82,6 +82,15 @@ export function isPlatformAdmin(
 }
 
 /**
+ * Whether `organizationId` is the platform's own org (PLATFORM_ORG_ID): its
+ * billing is handled by the platform owner, not by the org. False when unset.
+ */
+export function isPlatformManagedOrg(organizationId: string): boolean {
+  const platformOrgId = process.env.PLATFORM_ORG_ID?.trim();
+  return !!platformOrgId && organizationId === platformOrgId;
+}
+
+/**
  * Who is changing a user row. `AdminSessionPayload` satisfies it; the invite
  * accept flow builds one from the inviter's CURRENT users row.
  */

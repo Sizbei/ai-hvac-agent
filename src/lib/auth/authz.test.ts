@@ -4,6 +4,7 @@ vi.mock('server-only', () => ({}));
 
 import {
   isPlatformAdmin,
+  isPlatformManagedOrg,
   isSuperAdmin,
   canAssignRole,
   isPlatformAdminEmail,
@@ -21,6 +22,21 @@ afterEach(() => {
   else process.env.PLATFORM_ADMIN_EMAILS = ORIGINAL;
   if (ORIGINAL_ORG === undefined) delete process.env.PLATFORM_ORG_ID;
   else process.env.PLATFORM_ORG_ID = ORIGINAL_ORG;
+});
+
+describe('isPlatformManagedOrg', () => {
+  it('true only for the PLATFORM_ORG_ID org (trimmed)', () => {
+    process.env.PLATFORM_ORG_ID = ` ${PORG} `;
+    expect(isPlatformManagedOrg(PORG)).toBe(true);
+    expect(isPlatformManagedOrg('other-org')).toBe(false);
+  });
+
+  it('false when PLATFORM_ORG_ID is unset or blank', () => {
+    delete process.env.PLATFORM_ORG_ID;
+    expect(isPlatformManagedOrg(PORG)).toBe(false);
+    process.env.PLATFORM_ORG_ID = '  ';
+    expect(isPlatformManagedOrg('')).toBe(false);
+  });
 });
 
 describe('isPlatformAdmin', () => {

@@ -7,6 +7,7 @@ import { parseFeatures } from "@/lib/tenancy/feature-flags";
 import { adminGuidePatchSql, adminGuideSelectSql } from "./admin-guide-sql";
 import {
   buildGuidePayload,
+  contactOrFallback,
   guidePatchWrites,
   parseAdminGuideState,
   type AdminGuidePayload,
@@ -55,6 +56,19 @@ export async function readAdminGuide(
     historyHidden: !viewer.showHidden,
     contactName: typeof row.contact_name === "string" ? row.contact_name : null,
   });
+}
+
+/**
+ * The platform owner's display name in `organizationId` (or the generic
+ * fallback), for "… handled by {name}" copy. Never an email. Same SELECT as the
+ * guide read, with no subject user. Throws on a DB error.
+ */
+export async function readHistoryContact(organizationId: string): Promise<string> {
+  const res = await db.execute(
+    adminGuideSelectSql({ organizationId, userId: null, contactEmails: platformAdminEmails() }),
+  );
+  const row = (res.rows[0] ?? {}) as Row;
+  return contactOrFallback(typeof row.contact_name === "string" ? row.contact_name : null);
 }
 
 /** PATCH: one UPDATE on the user's own row, every time (no no-op skip). */

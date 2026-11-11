@@ -4,6 +4,7 @@ import { TechLocationTracker } from '@/components/tech/tech-location-tracker';
 import { TechSignOutButton } from '@/components/tech/tech-sign-out-button';
 import { GuideLink } from '@/components/tech/guide-link';
 import { TechPreviewBanner } from '@/components/tech/tech-preview-banner';
+import { TechReadOnlyProvider } from '@/components/tech/tech-read-only-context';
 import { techPreviewBanner } from '@/lib/tech/tech-preview';
 
 /**
@@ -38,7 +39,7 @@ export default async function TechLayout({
       </header>
       <main className="space-y-4 px-4 py-4">
         {!preview && <TechLocationTracker />}
-        {children}
+        <TechReadOnlyProvider value={preview !== null}>{children}</TechReadOnlyProvider>
       </main>
     </div>
   );

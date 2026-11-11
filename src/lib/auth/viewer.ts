@@ -17,6 +17,8 @@ export type PreviewState =
       readonly status: "active";
       readonly targetUserId: string;
       readonly targetName: string;
+      /** For the sidebar chip only (m14); never logged. */
+      readonly targetEmail: string;
       readonly targetRole: AdminRole | "technician";
       /** The cookie's expiry, unix seconds (the banner reloads then). */
       readonly exp: number;
@@ -98,6 +100,7 @@ async function resolvePreview(
       status: "active",
       targetUserId: target.userId,
       targetName: target.name,
+      targetEmail: target.email,
       targetRole: target.role,
       exp: claims.exp,
     };

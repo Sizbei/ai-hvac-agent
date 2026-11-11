@@ -25,6 +25,7 @@ export function techPreviewBanner(session: TechSession): TechPreviewBanner | nul
       status: "active",
       targetUserId: session.userId,
       targetName: session.name,
+      targetEmail: session.email,
       targetRole: "technician",
       exp: session.preview.exp,
     }),

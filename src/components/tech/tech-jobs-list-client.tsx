@@ -11,6 +11,8 @@ import { issueLabel, overdueLabel, visitBadge, visitWhen } from '@/lib/tech/job-
 import { GuideCard } from '@/components/tech/guide-card';
 import { pickTodayFirst, type TodayFirst } from '@/lib/tech/guide-view';
 import { dayClockText } from '@/lib/tech/clock-display';
+import { READ_ONLY_PREVIEW } from '@/lib/admin/preview-view';
+import { useTechReadOnly } from '@/components/tech/tech-read-only-context';
 
 /** Card-shaped skeleton matching the 3-line job card anatomy. */
 function JobCardSkeleton() {
@@ -60,6 +62,7 @@ const EMPTY_COPY: Record<VisitRange, string> = {
 
 /** Day clock: a general clock-in with no job attached. */
 function ClockButton() {
+  const readOnly = useTechReadOnly();
   // undefined = still loading, null = clocked out, string = clock-in instant.
   const [clockInAt, setClockInAt] = useState<string | null | undefined>(undefined);
   const [pending, setPending] = useState(false);
@@ -128,16 +131,18 @@ function ClockButton() {
             {text.running}
           </span>
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant={clockedIn ? 'outline' : 'default'}
-          disabled={pending || clockInAt === undefined}
-          onClick={() => void toggle()}
-          className="min-h-11"
-        >
-          {text.button}
-        </Button>
+        <span title={readOnly ? READ_ONLY_PREVIEW : undefined}>
+          <Button
+            type="button"
+            size="sm"
+            variant={clockedIn ? 'outline' : 'default'}
+            disabled={pending || clockInAt === undefined || readOnly}
+            onClick={() => void toggle()}
+            className="min-h-11"
+          >
+            {text.button}
+          </Button>
+        </span>
       </div>
       {error && <p className="text-[13px] text-danger-strong">{error}</p>}
     </div>
