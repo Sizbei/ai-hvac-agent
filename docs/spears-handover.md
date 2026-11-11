@@ -871,3 +871,19 @@ errors, `npx vitest run` → no drop from the live baseline.
   - A new booking can turn text consent off, never back on.
   - `/docs.html`, `/schema.html` and `/widget-demo.html` are no longer public (moved to `docs/site/`).
 - **Not done** (first visits are still 0.4–1.5 s on dev): request sheet and customer profile load their sections one after another; invoice and global search scan on every keystroke; rate limits are per server instance, not shared; no per-account sign-in lockout; a signed-in session cannot be revoked before it expires.
+
+## Deploy record: second review round (2026-11-12)
+- Six more reviewers (secrets, regressions, outbound messages, money figures, phone layout, first-load speed). Fixes are commits `ea1ad4e`, `4bfc643` and the membership perf commit; `main` = `7775b47`. Smoke passes.
+- No credential was found in any git ref, PR ref, Actions log or served file. Nothing to rotate.
+- **Messages:** texts are plain text (were HTML-escaped: `O&#x27;Neil &amp; Sons`); "running behind" alerts only cover visible jobs whose window ended in the last day; pending emails cannot block texts; quiet hours delay a message for an hour instead of cancelling it; hidden and do-not-service customers are refused at the send gate; a schedule edit no longer overwrites the FieldPulse job description.
+- **Money:** void and paid invoices show no balance due; FieldPulse discounts appear on the invoice; Reports "sold/open" estimate counts use the Estimates board's rules; the accounting export leaves out drafts and voids; the customer portal shows the real issue date and omits hidden invoices.
+- **Last night's regressions fixed:** the 150-a-day booking ceiling counted FieldPulse and office-made jobs (now assistant bookings only); a failed refresh over old cached data showed no error.
+- **Guards:** `db:seed` and `db:seed:demo` refuse the production database; the nightly sync installs with `--ignore-scripts`.
+- **Open, needs a decision:**
+  - An online booking with a time slot still auto-assigns the first active technician and texts the customer that name; FieldPulse gets the job with no assignee. Setting `scheduling_source = external` stops the auto-assign, but slot offers then depend on the FieldPulse availability sync, which returns 403 on prod.
+  - The repo is public and this file holds Spears' revenue figures.
+  - Each new portal or pay link invalidates the customer's earlier link (one token per customer).
+  - FieldPulse payments reach us only through the GitHub nightly sync; if it stops, "Collected" goes stale while invoices still show paid.
+  - A reply of "Cancel" to an appointment text is an opt-out keyword (Twilio enforces this too); the appointment stays booked.
+  - Admin pages have no script-blocking content security policy.
+  - Speed: the request sheet and customer profile still load their sections only after the main record arrives (about one extra round trip each).
