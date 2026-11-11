@@ -120,7 +120,7 @@ variables and point a Twilio number at `/api/voice/incoming` (see
 - **[docs/FIELDPULSE-DATA.md](docs/FIELDPULSE-DATA.md)** — the imported FieldPulse data map (entities, display surfaces, read-only rules, sync architecture).
 - **[docs/KNOWLEDGE-BASE-CATALOG.md](docs/KNOWLEDGE-BASE-CATALOG.md)** — the deterministic FAQ intents.
 - **[EVAL.md](EVAL.md)** — the conversation-quality eval harness.
-- **`/docs.html`** — interactive docs (run the app, open http://localhost:3000/docs.html).
+- **`docs/site/docs.html`** — interactive docs (open the file in a browser; not served by the app).
 
 **Operations**
 - **[DEPLOY.md](DEPLOY.md)** / **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — Vercel + self-hosted deployment.
@@ -162,7 +162,7 @@ src/lib/db/         Drizzle schema, migrations, seed
 drizzle/            SQL migrations
 e2e/                Playwright E2E suites (chat, admin, security, embed)
 .github/            CI/CD pipeline (type-check, lint, test, security audit)
-public/docs.html    Interactive documentation
+docs/site/docs.html    Interactive documentation
 ```
 
 ---

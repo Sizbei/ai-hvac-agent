@@ -197,6 +197,8 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => args),
   sql: vi.fn(),
   inArray: vi.fn((...args: unknown[]) => args),
+  count: vi.fn(),
+  gt: vi.fn((...args: unknown[]) => args),
 }));
 
 vi.mock('@/lib/session', () => ({
@@ -551,6 +553,8 @@ describe('E2E Smoke Test: Full Customer-to-Admin Flow', () => {
         }),
       },
     ]);
+    // Daily online-booking ceiling: a count of the org's recent requests.
+    mockDbSelect.mockResolvedValueOnce([{ value: 0 }]);
 
     // The customer upsert now happens via the (mocked) upsertCustomerByContact
     // BEFORE the batch, so the batch inserts are: [0] service request insert

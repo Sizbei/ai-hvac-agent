@@ -310,8 +310,11 @@ export function isVoiceExtractionComplete(extraction: ExtractionResult): boolean
 export const serviceRequestSchema = z.object({
   issueType: z.enum(issueTypeValues),
   urgency: z.enum(urgencyValues),
-  address: z.string().min(1),
-  customerName: z.string().nullable(),
+  // Length caps: this schema is the write boundary of an UNAUTHENTICATED
+  // endpoint (/api/session/confirm). Without them one request could carry
+  // megabytes into the sanitizers, the encrypted columns and FieldPulse.
+  address: z.string().min(1).max(500),
+  customerName: z.string().max(200).nullable(),
   // Validate phone SHAPE at the write boundary too (not just .min(1)) so a direct
   // POST to /api/session/confirm can't persist a junk/short number that bypassed
   // the chat gate. Matches isPhoneComplete (10 or 11-digit NANP).
@@ -321,8 +324,8 @@ export const serviceRequestSchema = z.object({
   // Nullable: a customer may skip the email (see MAX_EMAIL_REPROMPTS) — the
   // request is still dispatchable via phone. A PRESENT value must be a real
   // email so junk can't be persisted through a direct POST.
-  customerEmail: z.string().email().nullable(),
-  description: z.string().min(1),
+  customerEmail: z.string().email().max(320).nullable(),
+  description: z.string().min(1).max(4000),
   ...optionalIntakeFields,
 });
 

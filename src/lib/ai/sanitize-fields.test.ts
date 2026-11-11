@@ -74,6 +74,12 @@ describe("sanitizeAddress", () => {
       "Apt 4b",
     );
   });
+  it("stays fast on a long run of spaces with no comma (no quadratic backtracking)", () => {
+    const hostile = "1" + " ".repeat(200_000) + "1";
+    const started = performance.now();
+    expect(sanitizeAddress(hostile)).toBe("1 1");
+    expect(performance.now() - started).toBeLessThan(500);
+  });
   it("does not upper-case a 2-letter word that is not a state", () => {
     // "Of" isn't a state code → stays title-cased, not "OF".
     expect(sanitizeAddress("1 of something rd")).toBe("1 Of Something Rd");

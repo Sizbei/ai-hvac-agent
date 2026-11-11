@@ -450,5 +450,9 @@
   {
     "id": "src/lib/admin/location-queries.ts#listCustomerLocations",
     "reason": "Customer-keyed list behind customers/[id]/locations#GET (id-keyed, permanent); no cross-customer surface."
+  },
+  {
+    "id": "src/lib/ai/account-zips.ts#isVerifyLockedOut",
+    "reason": "Security counter, not a display read: failed account-verification attempts must be counted across every session (hidden or not) or hiding a chat would reset the lockout."
   }
 ]

@@ -329,6 +329,9 @@ async function fetchWindowPrompt(
 // map 1:1; the legacy reference intents (which still win the phrase match and
 // return as FALLBACK_LLM with their intentId) map to the closest capability so an
 // identified customer gets a real answer instead of an LLM punt.
+/** Hard cap on one chat message; anything longer is refused before any scanning. */
+const MAX_CHAT_MESSAGE_CHARS = 8000;
+
 export async function POST(request: NextRequest) {
   // Turn-start marker for bot-telemetry latency (Step 10). Cheap and PII-free.
   const turnStart = performance.now();
@@ -480,6 +483,11 @@ export async function POST(request: NextRequest) {
 
     if (!userMessage || userMessage.trim().length === 0) {
       return errorResponse("Message is required", "INVALID_MESSAGE", 400);
+    }
+    // Refuse oversized input before any pattern runs over it (the guardrails
+    // truncate to 2,000 chars, but only after scanning the whole string).
+    if (userMessage.length > MAX_CHAT_MESSAGE_CHARS) {
+      return errorResponse("That message is too long. Please shorten it and try again.", "MESSAGE_TOO_LONG", 413);
     }
 
     // Extract attachment IDs from the request body

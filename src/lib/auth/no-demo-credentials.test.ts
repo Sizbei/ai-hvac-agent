@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const PUBLISHED_FILES = [
   "src/app/page.tsx",
-  "public/docs.html",
+  "docs/site/docs.html",
   "README.md",
   "DEMO.md",
   "GUIDE.md",

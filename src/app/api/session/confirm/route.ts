@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, count, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { customerSessions } from "@/lib/db/schema";
+import { customerSessions, serviceRequests } from "@/lib/db/schema";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { getSessionToken } from "@/lib/session";
 import { isSameOriginRequest, hasJsonContentType } from "@/lib/session-csrf";
@@ -25,6 +25,11 @@ import { formatArrivalWindow } from "@/lib/admin/arrival-window";
 import { BUSINESS_TIME_ZONE } from "@/lib/admin/calendar-time";
 import { logger } from "@/lib/logger";
 import { clientIp } from "@/lib/http/client-ip";
+/** A real intake is at least one processed chat message. */
+const MIN_TURNS_BEFORE_BOOKING = 1;
+/** Most requests one organization accepts through this endpoint in 24 hours. */
+const MAX_ONLINE_BOOKINGS_PER_DAY = 150;
+
 export async function POST(request: NextRequest) {
   const ip = clientIp(request);
   const rateCheck = slidingWindow(
@@ -64,6 +69,39 @@ export async function POST(request: NextRequest) {
 
     // Everything written below is scoped to the session's own organization.
     const organizationId = session.organizationId;
+
+    // A booking must come out of a conversation. A session is free to mint, so
+    // without this a script could POST straight here and create a customer, a
+    // request, a capacity hold, a technician assignment and a FieldPulse job
+    // per call without ever talking to the assistant.
+    if (session.turnCount < MIN_TURNS_BEFORE_BOOKING) {
+      return errorResponse(
+        "Tell us a little about the issue in the chat first, then confirm your request.",
+        "CONVERSATION_REQUIRED",
+        409,
+      );
+    }
+
+    // Durable ceiling (a DB count, not the per-instance in-memory limiter):
+    // however many addresses an abuser rotates through, one organization takes
+    // at most this many online bookings a day. Past it, send people to the phone.
+    const [recent] = await db
+      .select({ value: count() })
+      .from(serviceRequests)
+      .where(
+        and(
+          eq(serviceRequests.organizationId, organizationId),
+          gt(serviceRequests.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        ),
+      );
+    if ((recent?.value ?? 0) >= MAX_ONLINE_BOOKINGS_PER_DAY) {
+      logger.warn({ organizationId }, "Online booking ceiling reached; refusing confirm");
+      return errorResponse(
+        "We can't take more online requests right now. Please call our office and we'll book you directly.",
+        "BOOKING_CEILING",
+        429,
+      );
+    }
 
     // Parse and validate the service request data from request body
     const body: unknown = await request.json();

@@ -136,10 +136,13 @@ const STATE_ABBREVIATIONS = new Set([
 export function sanitizeAddress(raw: string): string {
   // Normalize comma spacing ("st  ,knoxville" -> "st, knoxville") and collapse
   // whitespace.
+  // Collapse whitespace FIRST, then fix comma spacing with a pattern that has
+  // no unbounded run on either side: `\s*,\s*` backtracks quadratically on a
+  // long run of spaces with no comma (a 300 KB address pinned a CPU for minutes).
   const collapsed = raw
     .trim()
-    .replace(/\s*,\s*/g, ", ")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .replace(/ ?, ?/g, ", ");
   if (collapsed.length === 0) return collapsed;
 
   const titled = collapsed

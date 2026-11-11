@@ -9,6 +9,7 @@
  * never logged.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isSuperAdmin } from "@/lib/auth/authz";
 import { getAdminSession } from "@/lib/auth/session";
 import { logAudit } from "@/lib/admin/audit";
 import { errorResponse } from "@/lib/api-response";
@@ -38,6 +39,12 @@ export async function GET(request: NextRequest): Promise<Response> {
     const session = await getAdminSession();
     if (!session) {
       return errorResponse("Unauthorized", "UNAUTHORIZED", 401);
+    }
+    // Same tier as starting the connect and disconnecting: without it a plain
+    // admin could complete the OAuth dance by hand and swap the org's calendar
+    // connection for their own Google account.
+    if (!isSuperAdmin(session)) {
+      return errorResponse("Forbidden", "FORBIDDEN", 403);
     }
 
     const rateCheck = slidingWindow(

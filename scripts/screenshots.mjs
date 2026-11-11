@@ -139,7 +139,7 @@ async function main() {
 
   // 6. Docs page (top of page)
   await capture('docs', async () => {
-    await page.goto(`${BASE_URL}/docs.html`, { waitUntil: 'networkidle' });
+    await page.goto(`file://${process.cwd()}/docs/site/docs.html`, { waitUntil: 'networkidle' });
     await sleep(500);
     await page.screenshot({ path: join(OUT_DIR, 'docs.png') });
   });
