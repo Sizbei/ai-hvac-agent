@@ -17,6 +17,15 @@ const nextConfig: NextConfig = {
   // which runs after and intentionally varies it per route.
   async headers() {
     return [
+      // Brand and tutorial files rarely change: let browsers keep them for a day
+      // (and serve stale for a week while refreshing) instead of revalidating
+      // on every page view.
+      {
+        source: "/(brand|tutorial)/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" },
+        ],
+      },
       {
         source: "/:path*",
         headers: [
