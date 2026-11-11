@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
 import { RefreshCw, MapPin, Layers } from 'lucide-react';
 import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import {
