@@ -43,7 +43,7 @@ describe('scoreTechnician', () => {
   it('marks a tech with zero matching jobs as not skill-matched', () => {
     const r = scoreTechnician(signals('t1', { skillJobsCompleted: 0 }));
     expect(r.skillMatched).toBe(false);
-    expect(r.reasons.some((x) => x.includes('no prior'))).toBe(true);
+    expect(r.reasons.some((x) => x.includes('No prior'))).toBe(true);
   });
 
   it('marks a tech with >=1 matching job as skill-matched', () => {
@@ -122,7 +122,7 @@ describe('scoreTechnician', () => {
       signals('t1', { skillJobsCompleted: 7, avgRating: 4.9, sameDayJobCount: 2 }),
     );
     expect(r.reasons).toContain('7 prior no cooling requests');
-    expect(r.reasons).toContain('4.9★');
+    expect(r.reasons).toContain('4.9★ rating');
     expect(r.reasons).toContain('2 requests that day');
     // No raw enum values reach the dispatcher.
     for (const reason of r.reasons) expect(reason).not.toMatch(/_/);
@@ -142,8 +142,8 @@ describe('scoreTechnician', () => {
       signals('t2', { skillJobsCompleted: 5, skillJobsCompletedRecent: 5, bookedMinutes: 700, dayMinutes: 720, thisJobEstimate: 120 }),
     );
     expect(packed.score).toBeCloseTo(roomy.score - 0.1, 5);
-    expect(packed.reasons).toContain('day likely full');
-    expect(roomy.reasons).not.toContain('day likely full');
+    expect(packed.reasons).toContain('Day likely full');
+    expect(roomy.reasons).not.toContain('Day likely full');
   });
 });
 
@@ -168,7 +168,7 @@ describe('rankTechnicians', () => {
     // Both techs are returned (fallback, not filtered out).
     expect(ranked.map((r) => r.technicianId)).toEqual(['a', 'b']);
     // Each result carries an honest disclaimer in reasons.
-    expect(ranked[0].reasons.some((r) => r.includes('no matching-category history'))).toBe(true);
+    expect(ranked[0].reasons.some((r) => r.includes('No matching history'))).toBe(true);
     // skillMatched is false for all (the score function never changes that flag).
     expect(ranked.every((r) => !r.skillMatched)).toBe(true);
   });
@@ -277,7 +277,7 @@ describe('travel-aware scoring + confidence classification', () => {
     expect(ranked[0].technicianId).toBe('near');
     expect(
       ranked.find((r) => r.technicianId === 'nowhere')!.reasons,
-    ).toContain('location unknown');
+    ).toContain('Location unknown');
   });
 
   it('falls back to the km term when travelMinutes is null', () => {
@@ -340,6 +340,11 @@ describe('Probook-parity: expected-value term + urgency tier', () => {
     const poor = scoreTechnician({ job, tech: { technicianId: 'b', ...baseTech, avgJobRevenueCents: 0 } });
     expect(rich.score).toBeGreaterThan(poor.score);
     expect(rich.reasons.some((r) => r.includes('avg ticket'))).toBe(true);
+  });
+
+  it('formats the avg-ticket reason with a thousands separator', () => {
+    const r = scoreTechnician({ job, tech: { technicianId: 'a', ...baseTech, avgJobRevenueCents: 532_300 } });
+    expect(r.reasons).toContain('$5,323 avg ticket');
   });
 
   it('an emergency auto-commits a near-tie a standard job would queue', () => {

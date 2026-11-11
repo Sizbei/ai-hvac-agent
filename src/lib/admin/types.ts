@@ -282,6 +282,8 @@ export interface DispatchBoard {
   readonly columns: readonly DispatchColumn[];
   /** Scheduled jobs for the day with no technician yet — the "to place" pile. */
   readonly unassigned: readonly DashboardRequest[];
+  /** Open requests with no technician or no arrival window (the calendar's rail). */
+  readonly unscheduledCount: number;
 }
 
 // ─── Scheduling (Stage 1: calendar foundation) ──────────────────────────────

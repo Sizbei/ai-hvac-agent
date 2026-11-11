@@ -48,6 +48,8 @@ import { CalendarClock, ChevronDown, ChevronRight } from 'lucide-react';
 import { SectionCard } from '@/components/admin/ui/section-card';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { LoadErrorState } from '@/components/admin/ui/load-error-state';
+import { ErrorState } from '@/components/admin/ui/error-state';
+import { detailLoadFailure, REQUEST_DETAIL_COPY, type DetailLoadFailure } from '@/lib/admin/detail-load';
 import { WindowPicker, useAvailability, type WindowPickerValue } from '@/components/admin/window-picker';
 import {
   Dialog,
@@ -707,7 +709,7 @@ export function RequestDetailSheet({
 }: RequestDetailSheetProps) {
   const [detail, setDetail] = useState<AdminRequestDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<DetailLoadFailure | null>(null);
   // Bumped by the load error's Try again.
   const [detailReload, setDetailReload] = useState(0);
 
@@ -903,11 +905,7 @@ export function RequestDetailSheet({
         if (!res.ok) {
           if (cancelled) return;
           // Human copy, never the server's message.
-          setDetailError(
-            res.status === 404
-              ? 'This request no longer exists or isn’t in your organization.'
-              : 'Couldn’t load this request.',
-          );
+          setDetailError(detailLoadFailure(res.status));
           return;
         }
         const body = (await res.json()) as {
@@ -930,7 +928,7 @@ export function RequestDetailSheet({
           }
         }
       } catch {
-        if (!cancelled) setDetailError('Couldn’t load this request.');
+        if (!cancelled) setDetailError(detailLoadFailure(null));
       } finally {
         if (!cancelled) setIsLoadingDetail(false);
       }
@@ -1096,10 +1094,17 @@ export function RequestDetailSheet({
         ) : detailError ? (
           <div className="p-4 pt-12">
             <SheetTitle className="sr-only">Request</SheetTitle>
-            <LoadErrorState
-              title={detailError}
-              onRetry={() => setDetailReload((n) => n + 1)}
-            />
+            {detailError === 'not_found' ? (
+              <ErrorState
+                title={REQUEST_DETAIL_COPY.not_found}
+                action={<Button variant="outline" onClick={onClose}>Close</Button>}
+              />
+            ) : (
+              <LoadErrorState
+                title={REQUEST_DETAIL_COPY.failed}
+                onRetry={() => setDetailReload((n) => n + 1)}
+              />
+            )}
           </div>
         ) : detail ? (
           <>

@@ -167,16 +167,24 @@ export function navItemMatches(pathname: string, item: Pick<NavItem, 'href' | 'e
   return path === href || path.startsWith(`${href}/`);
 }
 
-/** The nav label for the current page (mobile top bar), or undefined. */
+/** Title for a path no nav item claims: its first segment under /admin, capitalised. */
+function fallbackTitleFor(pathname: string): string {
+  const segment = normalizePath(pathname).split('/')[2];
+  if (!segment) return 'Admin';
+  const words = segment.replace(/[-_]+/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** The nav label for the current page (mobile top bar); unmatched paths get a fallback title. */
 export function navLabelFor(
   pathname: string,
   placement: SetupPlacement,
   opts: NavOptions,
-): string | undefined {
+): string {
   for (const group of navGroupsFor(placement, opts)) {
     for (const item of group.items) {
       if (navItemMatches(pathname, item)) return item.label;
     }
   }
-  return undefined;
+  return fallbackTitleFor(pathname);
 }

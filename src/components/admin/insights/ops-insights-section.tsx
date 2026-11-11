@@ -340,13 +340,13 @@ export function OpsInsightsSection() {
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Avg / job</p>
+                <p className="text-xs text-muted-foreground">Avg / request</p>
                 <p className="font-mono text-xl font-medium tabular-nums">
                   {formatCents(data.costStats.averageCents)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Jobs costed</p>
+                <p className="text-xs text-muted-foreground">Requests costed</p>
                 <p className="font-mono text-xl font-medium tabular-nums">
                   {data.costStats.count}
                 </p>

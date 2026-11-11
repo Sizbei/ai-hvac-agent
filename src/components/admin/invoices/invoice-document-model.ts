@@ -3,9 +3,26 @@ import type { InvoiceDetailView } from '@/lib/admin/invoice-queries';
 
 const NET_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * "Aug 11, 2026". Source-system dates (FP/HCP issue and due dates) are pinned
+ * to UTC midnight, so they must render in UTC: rendered in a US timezone they
+ * land on the previous evening and read a day early. Row-creation instants
+ * (native invoices) are real moments and render in the viewer's zone.
+ */
+export function docDateLabel(d: Date, utcPinned: boolean): string {
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    ...(utcPinned ? { timeZone: 'UTC' } : {}),
+  });
+}
+
 export interface InvoiceDocModel {
   readonly invoiceRef: string;
   readonly invoiceDate: Date;
+  /** True when invoiceDate is a source-system date (UTC-pinned). */
+  readonly invoiceDateIsSource: boolean;
   readonly serviceDate: Date | null;
   readonly dueDate: Date;
   /** True when dueDate is our net-30 fallback (no source-system due date) —
@@ -26,6 +43,7 @@ export function invoiceDocModel(inv: InvoiceDetailView, now: Date = new Date()):
   return {
     invoiceRef: invoiceRef(inv.id),
     invoiceDate,
+    invoiceDateIsSource: inv.issuedAt != null,
     serviceDate: inv.serviceDate ? new Date(inv.serviceDate) : null,
     dueDate,
     derivedNetTerms: inv.dueDate == null,

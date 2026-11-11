@@ -81,7 +81,9 @@ describe("navItemMatches / navLabelFor", () => {
   it("labels the mobile top bar, including the dashboard", () => {
     expect(navLabelFor("/admin", "operations", ON)).toBe("Dashboard");
     expect(navLabelFor("/admin/conversations", "integrations", ON)).toBe("Conversations");
-    expect(navLabelFor("/nowhere", "integrations", ON)).toBeUndefined();
+    expect(navLabelFor("/nowhere", "integrations", ON)).toBe("Admin");
+    expect(navLabelFor("/admin/platform", "integrations", ON)).toBe("Platform");
+    expect(navLabelFor("/admin/some-page/x", "integrations", ON)).toBe("Some page");
   });
 
   it("uses plain sentence-case labels and keeps reports out of Money", () => {
@@ -116,8 +118,8 @@ describe("map gate", () => {
     expect(navGroupsFor("operations", ON)).not.toBe(navGroupsFor("operations", OFF));
   });
 
-  it("has no mobile title for the map page when it is off", () => {
+  it("still titles the map page when it is off", () => {
     expect(navLabelFor("/admin/map", "operations", ON)).toBe("Map");
-    expect(navLabelFor("/admin/map", "operations", OFF)).toBeUndefined();
+    expect(navLabelFor("/admin/map", "operations", OFF)).toBe("Map");
   });
 });

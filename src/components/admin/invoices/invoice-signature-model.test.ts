@@ -45,7 +45,7 @@ describe('signatureBlock', () => {
   it("uses the request's signature on a draft, labelled as not yet on the invoice", () => {
     expect(signatureBlock({ state: 'draft', signature: none, requestSignature: present })).toEqual({
       kind: 'image',
-      label: 'Job signature (not yet on the invoice)',
+      label: 'Request signature (not yet on the invoice)',
       url: present.url,
       name: 'Pat Doe',
       signedAt: AT,
@@ -53,7 +53,7 @@ describe('signatureBlock', () => {
     expect(signatureBlock({ state: 'draft', signature: present, requestSignature: null })).toBeNull();
     expect(signatureBlock({ state: 'draft', signature: none, requestSignature: erased })).toEqual({
       kind: 'note',
-      label: 'Job signature (not yet on the invoice)',
+      label: 'Request signature (not yet on the invoice)',
       note: 'Signature removed',
     });
   });
@@ -66,7 +66,7 @@ describe('signatureBlock', () => {
     });
     expect(signatureBlock({ state: 'draft', signature: none, requestSignature: present }, true)).toEqual({
       kind: 'note',
-      label: 'Job signature (not yet on the invoice)',
+      label: 'Request signature (not yet on the invoice)',
       note: "Signature couldn't be loaded.",
     });
   });
