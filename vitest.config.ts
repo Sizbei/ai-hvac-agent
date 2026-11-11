@@ -42,6 +42,8 @@ const INTEGRATION_SUITES = [
   "tests/integration/admin-guide-state.test.ts",
   // P8 M7: go-live audit cutoff builder, CLI and since-bound reads (one throwaway org).
   "tests/integration/audit-history-cutoff.test.ts",
+  // Final wave I1: badge count, dispatch link and calendar rail share one unscheduled set (one throwaway org).
+  "tests/integration/unscheduled-set.test.ts",
 ];
 
 // `npm run test:integration` sets this to invert the selection: run ONLY the

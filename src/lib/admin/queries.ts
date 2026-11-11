@@ -40,6 +40,7 @@ import { visibleRows, type Visibility } from "./visibility";
 // operations page both compute AR off this exact function. Do not
 // re-implement "overdue" here (see AGENTS.md's definitional-consistency note).
 import { overdueWhere } from "./invoice-queries";
+import { needsPlacementWhere } from "./unscheduled-sql";
 import { buildNeedsActionCountQuery } from "./conversation-queries";
 import { referenceSearchPatterns } from "./request-search";
 import { normalizeEmail } from "./staff-queries";
@@ -1786,18 +1787,8 @@ export async function getSchedulingCalendar(
       .select(dashboardRequestSelect)
       .from(serviceRequests)
       .leftJoin(users, eq(serviceRequests.assignedTo, users.id))
-      .where(
-        withTenant(
-          serviceRequests,
-          organizationId,
-          inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
-          or(
-            isNull(serviceRequests.assignedTo),
-            isNull(serviceRequests.arrivalWindowStart),
-          )!,
-          visibleRows(serviceRequests, vis),
-        ),
-      )
+      // The one unscheduled set (same as the nav badge and the dispatch link).
+      .where(needsPlacementWhere(organizationId, visibleRows(serviceRequests, vis)))
       // Urgency rank first (emergency, then high, then the rest), then
       // oldest-first within a tier — same urgency-before-age approach as the
       // "needs attention" ordering below. Without this, oldest-first alone let
@@ -2116,8 +2107,9 @@ export async function getCustomerBookings(
 
 /**
  * Count of open requests still needing to be PLACED on the calendar (no tech
- * and/or no arrival window) — the number the admin-nav unscheduled badge shows.
- * A cheap COUNT(*) so it can be fetched on every admin page load. Tenant-scoped.
+ * and/or no arrival window) — the number the admin-nav unscheduled badge and
+ * the dispatch "unscheduled → Calendar" link show. Same set as the calendar
+ * rail (needsPlacementWhere). A cheap COUNT(*). Tenant-scoped.
  */
 export async function countUnscheduledRequests(
   organizationId: string,
@@ -2126,17 +2118,6 @@ export async function countUnscheduledRequests(
   const [result] = await db
     .select({ value: count() })
     .from(serviceRequests)
-    .where(
-      withTenant(
-        serviceRequests,
-        organizationId,
-        inArray(serviceRequests.status, [...UNASSIGNED_OPEN_STATUSES]),
-        or(
-          isNull(serviceRequests.assignedTo),
-          isNull(serviceRequests.arrivalWindowStart),
-        )!,
-        visibleRows(serviceRequests, vis),
-      ),
-    );
+    .where(needsPlacementWhere(organizationId, visibleRows(serviceRequests, vis)));
   return result?.value ?? 0;
 }

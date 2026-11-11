@@ -10,6 +10,6 @@ import type { TechPreviewBanner as Props } from '@/lib/tech/tech-preview';
  * preview state (`/api/admin/preview/status`) differs from this page's.
  */
 export function TechPreviewBanner({ line, targetUserId, exp }: Props) {
-  usePreviewSync(true, targetUserId, exp);
+  usePreviewSync(true, true, targetUserId, exp);
   return <PreviewBanner line={line} />;
 }

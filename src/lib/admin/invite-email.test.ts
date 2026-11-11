@@ -103,6 +103,12 @@ describe("buildInviteEmail", () => {
     expect(central.text).toMatch(/expires Nov 14, 2026, 9:00\sAM CST\./);
   });
 
+  it("an invalid stored zone falls back to the business zone instead of throwing", () => {
+    const bad = buildInviteEmail({ ...ARGS, timeZone: "Not/A_Zone" });
+    expect(bad).toEqual(buildInviteEmail(ARGS));
+    expect(bad.text).toMatch(/expires Nov 14, 2026, 10:00\sAM EST\./);
+  });
+
   it("asks the owner to set up their account instead of naming a role", () => {
     const owner = buildInviteEmail({ ...ARGS, ownerInvite: true });
     for (const body of [owner.text, owner.html]) {
@@ -170,6 +176,17 @@ describe("deliverInvite", () => {
 
   it("falls back to the business time zone when the org's can't be read", async () => {
     getOrgTimeZone.mockRejectedValue(new Error("db down"));
+    deliverInvite(BASE);
+    await (after.mock.calls[0][0] as () => Promise<void>)();
+    expect(sendEmail).toHaveBeenCalledWith({
+      to: "chick@example.com",
+      ...buildInviteEmail({ ...ARGS, timeZone: "America/New_York" }),
+    });
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it("still sends, in the business zone, when the org's stored zone is invalid", async () => {
+    getOrgTimeZone.mockResolvedValue("Mars/Olympus_Mons");
     deliverInvite(BASE);
     await (after.mock.calls[0][0] as () => Promise<void>)();
     expect(sendEmail).toHaveBeenCalledWith({

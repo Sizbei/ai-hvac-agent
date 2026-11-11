@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { adminFetch } from '@/lib/admin/admin-fetch';
-import { LESSON_IDS, type GuidePatch, type LessonId } from '@/lib/admin/admin-guide-state';
+import { patchGuide } from '@/lib/admin/guide-patch';
+import { LESSON_IDS, type LessonId } from '@/lib/admin/admin-guide-state';
 import { invalidateOnboarding, refreshOnboarding } from '@/lib/admin/onboarding-store';
 import type { OnboardingPayload } from '@/lib/admin/onboarding-steps';
 import { buildLessons, lessonContext, type Lesson } from '@/lib/admin/tour-lessons';
@@ -31,18 +31,6 @@ export interface QuickTour {
   readonly go: (index: number) => void;
   readonly finish: () => void;
   readonly replay: () => void;
-}
-
-/** Fire-and-forget: every failure (auth redirect included) is ignored. Resolves to `ok`. */
-function patchGuide(body: GuidePatch): Promise<boolean> {
-  return adminFetch('/api/admin/guide', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).then(
-    (res) => res.ok,
-    () => false,
-  );
 }
 
 /** A stored lesson changed `lastLesson`: never seed a later mount from the old snapshot. */

@@ -2,11 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { FieldpulseDetails } from '@/components/admin/fieldpulse-details';
+import { adminFetch, AdminAuthRedirectError } from '@/lib/admin/admin-fetch';
 import {
-  fieldpulseDataFromDetail,
+  createFieldpulseDetailLoader,
   fieldpulseDetailUrl,
   type FieldpulseDetailRecord,
 } from '@/lib/admin/fieldpulse-detail-fetch';
+
+/** One load per record for the page's lifetime (re-expanding a row is instant). */
+const loadDetail = createFieldpulseDetailLoader((url) => adminFetch(url));
 
 type LoadResult =
   | { readonly kind: 'failed' }
@@ -30,18 +34,18 @@ export function LazyFieldpulseDetails({
 
   useEffect(() => {
     let active = true;
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('load failed'))))
-      .then((body: unknown) => {
-        if (active) setLoaded({ url, result: { kind: 'loaded', data: fieldpulseDataFromDetail(body, record) } });
+    loadDetail(record, id)
+      .then((data) => {
+        if (active) setLoaded({ url, result: { kind: 'loaded', data } });
       })
-      .catch(() => {
-        if (active) setLoaded({ url, result: { kind: 'failed' } });
+      .catch((err: unknown) => {
+        // A 401 is already on its way to sign in: keep "Loading…".
+        if (active && !(err instanceof AdminAuthRedirectError)) setLoaded({ url, result: { kind: 'failed' } });
       });
     return () => {
       active = false;
     };
-  }, [url, record]);
+  }, [url, record, id]);
 
   const result = loaded?.url === url ? loaded.result : null;
   if (!result) {

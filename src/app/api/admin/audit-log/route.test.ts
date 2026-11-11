@@ -6,7 +6,7 @@ vi.mock("@/lib/auth/viewer", () => ({ getViewerContext: () => getViewerContext()
 
 const getHistoryCutoff = vi.fn();
 vi.mock("@/lib/tenancy/features", () => ({
-  getHistoryCutoff: (...a: unknown[]) => getHistoryCutoff(...a),
+  getCachedHistoryCutoff: (...a: unknown[]) => getHistoryCutoff(...a),
 }));
 
 const getAuditLog = vi.fn();

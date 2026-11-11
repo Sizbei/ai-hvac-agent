@@ -30,6 +30,8 @@ const opt = (name) => {
 };
 const base = opt("--base") ?? "http://localhost:3000";
 const previewAs = opt("--preview-as");
+// Cookies go to the base's host (127.0.0.1 or a LAN host too, not only localhost).
+const cookieDomain = new URL(base).hostname;
 const VIEWPORT = 390;
 
 const { auditFindings } = await import("../../src/lib/admin/mobile-audit.ts");
@@ -148,7 +150,7 @@ const newCtx = () =>
   browser.newContext({ viewport: { width: VIEWPORT, height: 844 }, deviceScaleFactor: 2 });
 
 const ctx = await newCtx();
-await ctx.addCookies([{ name: "hvac_admin_session", value: token, domain: "localhost", path: "/" }]);
+await ctx.addCookies([{ name: "hvac_admin_session", value: token, domain: cookieDomain, path: "/" }]);
 await run("", ctx, pages);
 
 if (previewAs) {
@@ -162,8 +164,8 @@ if (previewAs) {
     .pop();
   const pctx = await newCtx();
   await pctx.addCookies([
-    { name: "hvac_admin_session", value: token, domain: "localhost", path: "/" },
-    { name: "hvac_preview", value: preview, domain: "localhost", path: "/" },
+    { name: "hvac_admin_session", value: token, domain: cookieDomain, path: "/" },
+    { name: "hvac_preview", value: preview, domain: cookieDomain, path: "/" },
   ]);
   await run("[view as] ", pctx, ["/admin"]);
 }

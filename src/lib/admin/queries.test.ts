@@ -1779,7 +1779,7 @@ describe('getSchedulingCalendar', () => {
     await getSchedulingCalendar(ORG_ID, START, END, [...DAYS], true, VISIBLE_ONLY);
 
     // The unscheduled queue must NEVER include terminal statuses — it uses
-    // UNASSIGNED_OPEN_STATUSES (pending, scheduled) regardless of includeCompleted.
+    // NEEDS_PLACEMENT_STATUSES (needsPlacementWhere) regardless of includeCompleted.
     const calls = vi.mocked(inArray).mock.calls;
     // Among calls that do NOT include terminal statuses, at least one should exist
     // (the unscheduled query). This verifies the unscheduled query wasn't expanded.

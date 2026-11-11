@@ -22,6 +22,15 @@ export function shownPreview(p: PreviewState | null): PreviewStatus {
   return { previewing: true, targetUserId: p.status === "active" ? p.targetUserId : null };
 }
 
+/**
+ * Only the platform owner can start a preview, so only their shell (previewing
+ * or not) needs the expiry timer and the on-return status check; an org
+ * user's shell never polls the status route.
+ */
+export function previewSyncEnabled(p: { platformUi: boolean; previewing: boolean }): boolean {
+  return p.platformUi || p.previewing;
+}
+
 /** Milliseconds until the expiry reload; null when not previewing. */
 export function previewExpiryDelayMs(exp: number | null, nowMs: number): number | null {
   if (exp === null) return null;

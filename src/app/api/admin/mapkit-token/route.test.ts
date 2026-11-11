@@ -12,7 +12,7 @@ vi.mock("@/lib/logger", () => ({ logger: { error: vi.fn() } }));
 
 const getFeatures = vi.fn();
 vi.mock("@/lib/tenancy/features", () => ({
-  getFeatures: (...a: unknown[]) => getFeatures(...a),
+  getCachedFeatures: (...a: unknown[]) => getFeatures(...a),
 }));
 
 import { NextRequest } from "next/server";

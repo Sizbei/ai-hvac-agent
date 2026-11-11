@@ -90,7 +90,7 @@ vi.mock("@/lib/db", () => ({
 
 const getFeatures = vi.fn();
 vi.mock("@/lib/tenancy/features", () => ({
-  getFeatures: (...a: unknown[]) => getFeatures(...a),
+  getCachedFeatures: (...a: unknown[]) => getFeatures(...a),
 }));
 
 import { GET } from "./route";

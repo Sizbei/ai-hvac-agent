@@ -27,17 +27,28 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** "Nov 14, 2026, 10:00 AM EST": the expiry in the org's IANA zone, with its abbreviation. */
+/**
+ * "Nov 14, 2026, 10:00 AM EST": the expiry in the org's IANA zone, with its
+ * abbreviation. A zone Intl rejects (a bad stored value: RangeError) falls
+ * back to the business zone rather than dropping the email.
+ */
 function formatExpiry(at: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone,
-    timeZoneName: "short",
-  }).format(at);
+  const format = (zone: string) =>
+    new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: zone,
+      timeZoneName: "short",
+    }).format(at);
+  try {
+    return format(timeZone);
+  } catch (error) {
+    if (error instanceof RangeError) return format(BUSINESS_TIME_ZONE);
+    throw error;
+  }
 }
 
 /**

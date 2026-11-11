@@ -284,7 +284,7 @@ export async function listReviews(
   const whereClause = withTenant(reviewRequests, organizationId);
   // A review is a child of its request: a hidden request takes its review out
   // of the list and the total (inner join; service_request_id is NOT NULL). A
-  // hidden customer only drops the name (left join ON).
+  // hidden customer only drops the name and the customer link (left join ON).
   const requestJoin = and(
     eq(serviceRequests.id, reviewRequests.serviceRequestId),
     eq(serviceRequests.organizationId, organizationId),
@@ -301,7 +301,8 @@ export async function listReviews(
         id: reviewRequests.id,
         serviceRequestId: reviewRequests.serviceRequestId,
         referenceNumber: serviceRequests.referenceNumber,
-        customerId: reviewRequests.customerId,
+        // From the visibility-gated join: a hidden customer drops the id with the name.
+        customerId: customers.id,
         customerNameEncrypted: customers.nameEncrypted,
         status: reviewRequests.status,
         rating: reviewRequests.rating,
