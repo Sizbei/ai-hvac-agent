@@ -61,12 +61,16 @@ describe("featurePatchSchema", () => {
 });
 
 describe("historyCutoff", () => {
-  it("is null for null, non-objects, arrays and a missing key", () => {
+  it("is null when there are no flags (null, undefined) or the key is missing", () => {
     expect(historyCutoff(null)).toBeNull();
     expect(historyCutoff(undefined)).toBeNull();
-    expect(historyCutoff("2026-11-10T12:00:00.000Z")).toBeNull();
-    expect(historyCutoff(["2026-11-10T12:00:00.000Z"])).toBeNull();
     expect(historyCutoff({ showHistory: true })).toBeNull();
+  });
+
+  it("fails closed when feature_flags itself is not an object", () => {
+    for (const bad of ["2026-11-10T12:00:00.000Z", ["2026-11-10T12:00:00.000Z"], 42, true]) {
+      expect(historyCutoff(bad)?.toISOString(), JSON.stringify(bad)).toBe(MALFORMED_HISTORY_CUTOFF_ISO);
+    }
   });
 
   it("is null for an explicit null (no cutoff)", () => {

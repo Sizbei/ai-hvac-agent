@@ -24,6 +24,9 @@
  * unless --reapply is passed. --reapply only hides more (it never un-hides);
  * once the org has a go-live cutoff (set-history-cutoff.mjs) no run hides a row
  * created from the cutoff on. To switch modes run --unhide first, then --apply.
+ * Note: --reapply DOES re-hide pre-cutoff rows that migration 0061 un-hid
+ * through activity (a live status change, a reschedule, a visit move, an
+ * invoice reopening, a new message); the cutoff bounds only by created_at.
  * --unhide also clears the cutoff. A malformed cutoff makes the dry run and
  * --apply refuse; --unhide still runs (and clears it). Any run against the
  * production host (ep-withered-hill, any letter case) needs --prod; only the

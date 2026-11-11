@@ -142,6 +142,24 @@ describe("migration 0061: activity un-hides work (dev DB)", { timeout: 60_000 },
       await expectChain(false, ch);
     });
 
+    it("a hidden request moved to in_progress un-hides it, its customer and its session", async () => {
+      const ch = await chain({ status: "scheduled" });
+      await hideChain(ch);
+      await db.execute(sql`UPDATE service_requests SET status = 'in_progress'::request_status WHERE id = ${ch.r}`);
+      await expectChain(false, ch);
+    });
+
+    it("closing out old work never un-hides it: a hidden request moved to completed or cancelled stays hidden", async () => {
+      for (const to of ["completed", "cancelled"]) {
+        const ch = await chain({ status: "scheduled" });
+        await hideChain(ch);
+        await db.execute(sql`UPDATE service_requests SET status = ${to}::request_status WHERE id = ${ch.r}`);
+        const [row] = await run(sql`SELECT status FROM service_requests WHERE id = ${ch.r}`);
+        expect(row!.status).toBe(to);
+        await expectChain(true, ch);
+      }
+    });
+
     it("a reschedule to within the last day un-hides, even with no live visit to cascade from", async () => {
       // A cancelled request mirrors its date into a cancelled visit #1, so no
       // appointment trigger can fire: only the request trigger is in play.

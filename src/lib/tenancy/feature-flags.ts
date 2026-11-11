@@ -44,13 +44,14 @@ export const MALFORMED_HISTORY_CUTOFF_ISO = "9999-12-31T23:59:59.999Z";
 /**
  * The go-live moment, `feature_flags.historyCutoff` (an ISO timestamp the
  * marking run stores). Org viewers who don't see hidden history see audit
- * entries only from here on. Null when the key is absent (or null); a value
- * that is present but not a parseable string reads as
- * MALFORMED_HISTORY_CUTOFF_ISO. Kept apart from `parseFeatures`, whose switches
+ * entries only from here on. Null when there are no flags (null/undefined) or
+ * the key is absent (or null); flags that are not an object, or a value that
+ * is present but not a parseable string, read as MALFORMED_HISTORY_CUTOFF_ISO. Kept apart from `parseFeatures`, whose switches
  * are booleans only.
  */
 export function historyCutoff(raw: unknown): Date | null {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) return new Date(MALFORMED_HISTORY_CUTOFF_ISO);
   const value = (raw as Record<string, unknown>).historyCutoff;
   if (value === undefined || value === null) return null;
   const at = typeof value === "string" && value !== "" ? new Date(value) : null;

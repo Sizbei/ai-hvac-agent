@@ -75,10 +75,10 @@ describe("migration 0061", () => {
     expect(FN).toContain("UPDATE service_requests SET hidden_from_org = false WHERE session_id = NEW.session_id AND hidden_from_org;");
   });
 
-  it("service_requests: a hidden row with a real status change or a reschedule to yesterday or later", () => {
+  it("service_requests: a hidden row with a real change to a live status, or a reschedule to yesterday or later", () => {
     expect(createTrigger("service_requests", "trg_unhide_on_activity")).toBe(
       "CREATE TRIGGER trg_unhide_on_activity AFTER UPDATE OF status, scheduled_date ON service_requests FOR EACH ROW " +
-        "WHEN (NEW.hidden_from_org AND (OLD.status IS DISTINCT FROM NEW.status OR (NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date AND NEW.scheduled_date >= now() - interval '1 day'))) " +
+        "WHEN (NEW.hidden_from_org AND ((OLD.status IS DISTINCT FROM NEW.status AND NEW.status NOT IN ('completed'::request_status, 'cancelled'::request_status)) OR (NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date AND NEW.scheduled_date >= now() - interval '1 day'))) " +
         "EXECUTE FUNCTION unhide_parents();",
     );
   });
@@ -106,13 +106,14 @@ describe("migration 0061", () => {
     }
   });
 
-  it("is the last journal entry, right after 0060_admin_guide", () => {
+  it("is the journal entry right after 0060_admin_guide", () => {
     const entries = journal.entries as { idx: number; tag: string; when: number }[];
-    const last = entries[entries.length - 1];
-    const prev = entries[entries.length - 2];
+    const at = entries.findIndex((e) => e.tag === "0061_unhide_on_activity");
+    const entry = entries[at];
+    const prev = entries[at - 1];
     expect(prev.tag).toBe("0060_admin_guide");
-    expect(last).toMatchObject({ idx: 61, tag: "0061_unhide_on_activity", version: "7", breakpoints: true });
-    expect(last.when).toBeGreaterThan(prev.when);
+    expect(entry).toMatchObject({ idx: 61, tag: "0061_unhide_on_activity", version: "7", breakpoints: true });
+    expect(entry.when).toBeGreaterThan(prev.when);
   });
 
   it("snapshot = the 0060 snapshot (no schema change), chained by prevId", () => {

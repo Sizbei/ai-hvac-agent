@@ -20,7 +20,7 @@ DECLARE
   v_customer_id uuid;
 BEGIN
   IF TG_TABLE_NAME = 'service_requests' THEN
-    -- 0061 activity trigger: a hidden request with a status change or a
+    -- 0061 activity trigger: a hidden request with a change to a live status or a
     -- reschedule to yesterday or later.
     IF NEW.hidden_from_org THEN
       UPDATE service_requests SET hidden_from_org = false WHERE id = NEW.id AND hidden_from_org;
@@ -63,12 +63,14 @@ $$ LANGUAGE plpgsql;
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS trg_unhide_on_activity ON service_requests;
 --> statement-breakpoint
--- Technician or office activity (a real status change), or a reschedule to
--- yesterday or later (FieldPulse moves the job, or the office does).
+-- Technician or office activity (a real status change to a live status), or a
+-- reschedule to yesterday or later (FieldPulse moves the job, or the office
+-- does). Closing out old work (to completed or cancelled) never un-hides it, so
+-- tidying FieldPulse doesn't bring history back.
 CREATE TRIGGER trg_unhide_on_activity
   AFTER UPDATE OF status, scheduled_date ON service_requests
   FOR EACH ROW
-  WHEN (NEW.hidden_from_org AND (OLD.status IS DISTINCT FROM NEW.status OR (NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date AND NEW.scheduled_date >= now() - interval '1 day')))
+  WHEN (NEW.hidden_from_org AND ((OLD.status IS DISTINCT FROM NEW.status AND NEW.status NOT IN ('completed'::request_status, 'cancelled'::request_status)) OR (NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date AND NEW.scheduled_date >= now() - interval '1 day')))
   EXECUTE FUNCTION unhide_parents();
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS trg_unhide_on_reschedule ON appointments;
