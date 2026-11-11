@@ -7,13 +7,19 @@
  * Two modes:
  * - "history" keeps live work: requests not yet closed and created within the
  *   stale-days cut (default 60), visits from today, open AR (ruling 10), open
- *   estimates touched in the last 90 days, and resumable conversations updated
- *   in the last 14 days (ruling 16, tightened at P8).
+ *   estimates active in the last 90 days (FieldPulse rows by created_at, since
+ *   the import rewrites updated_at) plus estimates a kept invoice references,
+ *   and resumable conversations updated in the last 14 days (ruling 16,
+ *   tightened at P8).
  * - "empty" keeps only visits from today and those recent resumable conversations.
- * Both modes hide the seeded HVAC-DEMO / HVAC-CAP requests, their sessions, and
- * any invoice or estimate on them. Parents of anything kept stay visible
- * (request → session, anything → customer, invoice/estimate → request), so no
- * visible child points at a hidden parent.
+ * Both modes hide the seeded rows: HVAC-DEMO / HVAC-CAP requests, demo-seed- /
+ * demo-cap- sessions, the sessions of seeded requests, and any invoice or
+ * estimate on a seeded request.
+ *
+ * Kept sets build in one direction, no cycle: invoices → estimates → requests →
+ * sessions → customers. Each later set keeps the parents of the earlier ones
+ * (invoice → estimate, invoice/estimate → request, request → session, anything
+ * → customer), so no visible child points at a hidden parent.
  *
  * The kept sets read data columns only, never `hidden_from_org`, so the five
  * UPDATEs give the same result in any order. They SET only `hidden_from_org`,
@@ -49,9 +55,13 @@ const seededRef = (a: string): SQL =>
 const notOnSeededRequest = (org: string, a: string): SQL =>
   sql`NOT EXISTS (SELECT 1 FROM service_requests sd WHERE sd.organization_id = ${org}::uuid AND sd.id = ${sql.raw(`${a}.service_request_id`)} AND ${seededRef("sd")})`;
 
-/** The session (alias `cs`) is not the session of a seeded request. */
-const notSeededSession = (org: string): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM service_requests sd WHERE sd.organization_id = ${org}::uuid AND sd.session_id = cs.id AND ${seededRef("sd")})`;
+/** Session tokens the demo seed script writes (seed-demo.ts). token is NOT NULL. */
+const seededToken = (a: string): SQL =>
+  sql.raw(`(${a}.token LIKE 'demo-seed-%' OR ${a}.token LIKE 'demo-cap-%')`);
+
+/** The session (alias `a`) is not seeded: neither a demo token nor a seeded request's session. */
+const notSeededSession = (org: string, a: string): SQL =>
+  sql`NOT ${seededToken(a)} AND NOT EXISTS (SELECT 1 FROM service_requests sd WHERE sd.organization_id = ${org}::uuid AND sd.session_id = ${sql.raw(`${a}.id`)} AND ${seededRef("sd")})`;
 
 const RESUMABLE_SESSIONS = (): SQL =>
   sql.raw("'chatting'::session_status, 'extracting'::session_status, 'confirmed'::session_status");
@@ -64,11 +74,17 @@ const invoiceKeptWhere = (a: string): SQL =>
     `(${a}.state = 'open'::invoice_state OR (${a}.state = 'draft'::invoice_state AND ${a}.fieldpulse_invoice_id IS NULL AND ${a}.hcp_invoice_id IS NULL))`,
   );
 
-/** Open and touched in the last 90 days (P8: FieldPulse never closes old estimates). */
+/**
+ * When the estimate last saw real activity. The FieldPulse import rewrites
+ * updated_at on every run, so FieldPulse rows use created_at. (No HCP estimate
+ * mirror exists.)
+ */
+const estimateActivityAt = (a: string): string =>
+  `(CASE WHEN ${a}.fieldpulse_estimate_id IS NOT NULL THEN ${a}.created_at ELSE COALESCE(${a}.updated_at, ${a}.created_at) END)`;
+
+/** Open and active in the last 90 days (P8: FieldPulse never closes old estimates). */
 const estimateKeptWhere = (a: string): SQL =>
-  sql.raw(
-    `(${a}.status = 'open'::estimate_status AND COALESCE(${a}.updated_at, ${a}.created_at) >= now() - interval '90 days')`,
-  );
+  sql.raw(`(${a}.status = 'open'::estimate_status AND ${estimateActivityAt(a)} >= now() - interval '90 days')`);
 
 /** Local midnight today in the org's timezone (after_hours_config), else the business timezone. */
 export function todayStartSql(org: string): SQL {
@@ -94,7 +110,7 @@ export function keptRequestIdsSql(org: string, mode: MarkingMode, staleDays = DE
   if (mode === "empty") {
     return sql`SELECT sr.id FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT ${seededRef("sr")} AND ${visitFromTodaySql(org)}`;
   }
-  return sql`SELECT sr.id FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT ${seededRef("sr")} AND ((sr.status NOT IN (${TERMINAL_REQUESTS()}) AND sr.created_at >= now() - make_interval(days => ${staleDays}::int)) OR ${visitFromTodaySql(org)} OR EXISTS (SELECT 1 FROM invoices i WHERE i.organization_id = ${org}::uuid AND i.service_request_id = sr.id AND ${invoiceKeptWhere("i")}) OR EXISTS (SELECT 1 FROM estimates e WHERE e.organization_id = ${org}::uuid AND e.service_request_id = sr.id AND ${estimateKeptWhere("e")}))`;
+  return sql`SELECT sr.id FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT ${seededRef("sr")} AND ((sr.status NOT IN (${TERMINAL_REQUESTS()}) AND sr.created_at >= now() - make_interval(days => ${staleDays}::int)) OR ${visitFromTodaySql(org)} OR EXISTS (SELECT 1 FROM invoices i WHERE i.organization_id = ${org}::uuid AND i.service_request_id = sr.id AND ${invoiceKeptWhere("i")}) OR EXISTS (SELECT 1 FROM estimates re WHERE re.organization_id = ${org}::uuid AND re.service_request_id = sr.id AND re.id IN (${keptEstimateIdsSql(org, mode)})))`;
 }
 
 export function keptInvoiceIdsSql(org: string, mode: MarkingMode): SQL {
@@ -104,15 +120,15 @@ export function keptInvoiceIdsSql(org: string, mode: MarkingMode): SQL {
 
 export function keptEstimateIdsSql(org: string, mode: MarkingMode): SQL {
   if (mode === "empty") return NONE();
-  return sql`SELECT e.id FROM estimates e WHERE e.organization_id = ${org}::uuid AND ${estimateKeptWhere("e")} AND ${notOnSeededRequest(org, "e")}`;
+  return sql`SELECT e.id FROM estimates e WHERE e.organization_id = ${org}::uuid AND ${notOnSeededRequest(org, "e")} AND (${estimateKeptWhere("e")} OR e.id IN (SELECT ki.estimate_id FROM invoices ki WHERE ki.organization_id = ${org}::uuid AND ki.estimate_id IS NOT NULL AND ki.id IN (${keptInvoiceIdsSql(org, mode)})))`;
 }
 
 /**
  * Sessions of kept requests, plus resumable sessions (ruling 16, both modes)
- * updated in the last 14 days that are not a seeded request's session.
+ * updated in the last 14 days that are not seeded.
  */
 export function keptSessionIdsSql(org: string, mode: MarkingMode, staleDays = DEFAULT_STALE_DAYS): SQL {
-  return sql`SELECT cs.id FROM customer_sessions cs WHERE cs.organization_id = ${org}::uuid AND ((cs.status IN (${RESUMABLE_SESSIONS()}) AND cs.updated_at >= now() - interval '14 days' AND ${notSeededSession(org)}) OR cs.id IN (SELECT kr.session_id FROM service_requests kr WHERE kr.organization_id = ${org}::uuid AND kr.id IN (${keptRequestIdsSql(org, mode, staleDays)})))`;
+  return sql`SELECT cs.id FROM customer_sessions cs WHERE cs.organization_id = ${org}::uuid AND ((cs.status IN (${RESUMABLE_SESSIONS()}) AND cs.updated_at >= now() - interval '14 days' AND ${notSeededSession(org, "cs")}) OR cs.id IN (SELECT kr.session_id FROM service_requests kr WHERE kr.organization_id = ${org}::uuid AND kr.id IN (${keptRequestIdsSql(org, mode, staleDays)})))`;
 }
 
 /**
@@ -178,9 +194,10 @@ function oldOpenRequestSql(org: string, staleDays: number): SQL {
  * The per-rule counts, all of visible rows:
  * - stale_requests_hidden: old open requests (not seeded) that history hides;
  * - old_open_requests_kept: old open requests history keeps for a kept invoice or estimate;
- * - stale_estimates_hidden: open estimates untouched for 90 days that history hides;
+ * - stale_estimates_hidden: open estimates inactive for 90 days that history hides;
  * - stale_sessions_hidden: resumable sessions idle for 14 days that history hides;
- * - seeded_requests_hidden: HVAC-DEMO / HVAC-CAP requests, hidden in both modes.
+ * - seeded_requests_hidden: HVAC-DEMO / HVAC-CAP requests, hidden in both modes;
+ * - seeded_sessions_hidden: demo-token sessions and seeded requests' sessions history hides.
  */
 function ruleCountsSql(org: string, staleDays: number): SQL {
   const keptRequests = keptRequestIdsSql(org, "history", staleDays);
@@ -188,9 +205,10 @@ function ruleCountsSql(org: string, staleDays: number): SQL {
     [
       sql`(SELECT count(*) FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT sr.hidden_from_org AND NOT ${seededRef("sr")} AND ${oldOpenRequestSql(org, staleDays)} AND sr.id NOT IN (${keptRequests}))::int AS stale_requests_hidden`,
       sql`(SELECT count(*) FROM service_requests sr WHERE sr.organization_id = ${org}::uuid AND NOT sr.hidden_from_org AND ${oldOpenRequestSql(org, staleDays)} AND sr.id IN (${keptRequests}))::int AS old_open_requests_kept`,
-      sql`(SELECT count(*) FROM estimates se WHERE se.organization_id = ${org}::uuid AND NOT se.hidden_from_org AND se.status = 'open'::estimate_status AND COALESCE(se.updated_at, se.created_at) < now() - interval '90 days' AND se.id NOT IN (${keptEstimateIdsSql(org, "history")}))::int AS stale_estimates_hidden`,
+      sql`(SELECT count(*) FROM estimates se WHERE se.organization_id = ${org}::uuid AND NOT se.hidden_from_org AND se.status = 'open'::estimate_status AND ${sql.raw(estimateActivityAt("se"))} < now() - interval '90 days' AND se.id NOT IN (${keptEstimateIdsSql(org, "history")}))::int AS stale_estimates_hidden`,
       sql`(SELECT count(*) FROM customer_sessions ss WHERE ss.organization_id = ${org}::uuid AND NOT ss.hidden_from_org AND ss.status IN (${RESUMABLE_SESSIONS()}) AND ss.updated_at < now() - interval '14 days' AND ss.id NOT IN (${keptSessionIdsSql(org, "history", staleDays)}))::int AS stale_sessions_hidden`,
       sql`(SELECT count(*) FROM service_requests sq WHERE sq.organization_id = ${org}::uuid AND NOT sq.hidden_from_org AND ${seededRef("sq")})::int AS seeded_requests_hidden`,
+      sql`(SELECT count(*) FROM customer_sessions sz WHERE sz.organization_id = ${org}::uuid AND NOT sz.hidden_from_org AND NOT (${notSeededSession(org, "sz")}) AND sz.id NOT IN (${keptSessionIdsSql(org, "history", staleDays)}))::int AS seeded_sessions_hidden`,
     ],
     sql`, `,
   );

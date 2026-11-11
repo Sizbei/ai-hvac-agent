@@ -72,9 +72,9 @@ function customer() {
   return one(sql`INSERT INTO customers (organization_id,name_encrypted) VALUES (${org},'probe') RETURNING id`);
 }
 
-function session(customerId: string | null, status = "submitted") {
+function session(customerId: string | null, status = "submitted", tokenPrefix = "") {
   return one(
-    sql`INSERT INTO customer_sessions (organization_id,token,customer_id,status) VALUES (${org},gen_random_uuid()::text,${customerId},${status}::session_status) RETURNING id`,
+    sql`INSERT INTO customer_sessions (organization_id,token,customer_id,status) VALUES (${org},${tokenPrefix}||gen_random_uuid()::text,${customerId},${status}::session_status) RETURNING id`,
   );
 }
 
@@ -100,12 +100,13 @@ async function danglingLinks(orgId: string): Promise<Row> {
     (SELECT count(*) FROM invoices x JOIN service_requests p ON p.id = x.service_request_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS invoice_request,
     (SELECT count(*) FROM invoices x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS invoice_customer,
     (SELECT count(*) FROM estimates x JOIN service_requests p ON p.id = x.service_request_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS estimate_request,
-    (SELECT count(*) FROM estimates x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS estimate_customer`))[0]!;
+    (SELECT count(*) FROM estimates x JOIN customers p ON p.id = x.customer_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS estimate_customer,
+    (SELECT count(*) FROM invoices x JOIN estimates p ON p.id = x.estimate_id WHERE x.organization_id = ${orgId} AND NOT x.hidden_from_org AND p.hidden_from_org)::int AS invoice_estimate`))[0]!;
 }
 
 const NO_DANGLING = {
   request_session: 0, request_customer: 0, session_customer: 0,
-  invoice_request: 0, invoice_customer: 0, estimate_request: 0, estimate_customer: 0,
+  invoice_request: 0, invoice_customer: 0, estimate_request: 0, estimate_customer: 0, invoice_estimate: 0,
 };
 
 function appointment(requestId: string, startsAt: ReturnType<typeof sql>, cancelled: boolean) {
@@ -195,6 +196,31 @@ async function seed() {
   f.sharedSeedR = await request(f.sharedSeedS, f.sharedC, "pending", sql`NULL`, "HVAC-DEMO");
   f.sharedRealS = await session(f.sharedC);
   f.sharedRealR = await request(f.sharedRealS, f.sharedC, "pending");
+  // P8 fix A: a FieldPulse estimate created 120 days ago that the import "updated"
+  // yesterday is stale; a native one with the same dates was really touched
+  await chain("fpOldEst", "completed");
+  f.fpOldEstE = await one(
+    sql`INSERT INTO estimates (organization_id,service_request_id,customer_id,status,total_cents,fieldpulse_estimate_id)
+        VALUES (${org},${f.fpOldEstR},${f.fpOldEstC},'open'::estimate_status,9900,${`fp-${randomUUID()}`}) RETURNING id`,
+  );
+  await chain("nativeTouched", "completed");
+  f.nativeTouchedE = await estimate(f.nativeTouchedR!, f.nativeTouchedC!, "open");
+  for (const id of [f.fpOldEstE, f.nativeTouchedE]) {
+    await db.execute(sql`UPDATE estimates SET created_at = now() - interval '120 days', updated_at = now() - interval '1 day' WHERE id = ${id}`);
+  }
+  // an old sold estimate an open invoice references stays with the invoice
+  f.invEstC = await customer();
+  f.invEstE = await estimate(null, f.invEstC, "sold");
+  await backdate("estimates", f.invEstE, 200);
+  f.invEstI = await one(
+    sql`INSERT INTO invoices (organization_id,customer_id,estimate_id,state,total_cents)
+        VALUES (${org},${f.invEstC},${f.invEstE},'open'::invoice_state,12500) RETURNING id`,
+  );
+  // fresh resumable sessions with seed-script tokens
+  f.demoTokC = await customer();
+  f.demoTokS = await session(f.demoTokC, "chatting", "demo-seed-");
+  f.demoCapTokC = await customer();
+  f.demoCapTokS = await session(f.demoCapTokC, "confirmed", "demo-cap-");
   // the local-midnight boundary in America/Chicago
   const midnight = sql`(date_trunc('day', now() AT TIME ZONE ${TZ}) AT TIME ZONE ${TZ})`;
   await chain("todayEarly", "completed");
@@ -273,10 +299,12 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
     expect(dry.stale_requests_hidden).toBe(1);
     // staleInvR and staleEstR are kept by their open invoice / recent estimate
     expect(dry.old_open_requests_kept).toBe(2);
-    // oldEstE only; seedCapE is hidden as seeded, not as stale
-    expect(dry.stale_estimates_hidden).toBe(1);
-    // oldChatS only; seedDemoS (fresh, but a seeded request's session) counts as seeded
+    // oldEstE and fpOldEstE; seedCapE is hidden as seeded, not as stale
+    expect(dry.stale_estimates_hidden).toBe(2);
+    // oldChatS only; fresh seeded sessions count as seeded
     expect(dry.stale_sessions_hidden).toBe(1);
+    // seedDemoS, seedCapS, sharedSeedS (seeded requests) + demoTokS, demoCapTokS (tokens)
+    expect(dry.seeded_sessions_hidden).toBe(5);
     expect(dry.seeded_requests_hidden).toBe(3);
     // a longer cut keeps staleR
     const longer = (await run(m.dryRunSql(org, 100)))[0]!;
@@ -306,6 +334,27 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
       ["service_requests", "staleEstR"], ["estimates", "staleEstE"], ["customer_sessions", "staleEstS"], ["customers", "staleEstC"],
       ["service_requests", "openR"],
     ]);
+  });
+
+  it("a FieldPulse estimate ages by created_at; a native one by updated_at", async () => {
+    await apply("history");
+    await expectHidden(true, [["estimates", "fpOldEstE"], ["service_requests", "fpOldEstR"], ["customers", "fpOldEstC"]]);
+    await expectHidden(false, [["estimates", "nativeTouchedE"], ["service_requests", "nativeTouchedR"], ["customers", "nativeTouchedC"]]);
+  });
+
+  it("an estimate a kept invoice references is kept, whatever its status and age", async () => {
+    await apply("history");
+    await expectHidden(false, [["invoices", "invEstI"], ["estimates", "invEstE"], ["customers", "invEstC"]]);
+  });
+
+  it("demo-seed- / demo-cap- sessions are hidden with their customers in both modes", async () => {
+    for (const mode of ["history", "empty"] as const) {
+      await apply(mode);
+      await expectHidden(true, [
+        ["customer_sessions", "demoTokS"], ["customers", "demoTokC"],
+        ["customer_sessions", "demoCapTokS"], ["customers", "demoCapTokC"],
+      ]);
+    }
   });
 
   it("--stale-days moves the cut", async () => {
@@ -409,6 +458,9 @@ describe("go-live marking (dev DB)", { timeout: 60_000 }, () => {
       expect(out.status).toBe(1);
       expect(out.stderr).toBe("Refused: --stale-days must be a whole number of days from 1 to 99999\n");
     }
+    const empty = spawnScript(["--org", org, "--mode", "empty", "--stale-days", "30"]);
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toBe("Refused: --stale-days only applies to --mode history\n");
     const out = spawnScript(["--org", org, "--stale-days", "100"]);
     expect(out.status).toBe(0);
     expect(out.stdout).toContain("stale cut 100 days");

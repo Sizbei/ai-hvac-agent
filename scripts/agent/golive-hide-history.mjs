@@ -8,15 +8,17 @@
  *   npx tsx scripts/agent/golive-hide-history.mjs --org <uuid> --mode history --apply
  *   npx tsx scripts/agent/golive-hide-history.mjs --org <uuid> --mode empty --apply --reapply
  *   npx tsx scripts/agent/golive-hide-history.mjs --org <uuid> --unhide
- *   add --stale-days <n> (default 60) to any dry run or --apply
+ *   add --stale-days <n> (default 60) to a dry run or a history --apply
  *
  * Modes (src/lib/admin/golive-marking-sql.ts):
  *   history  keeps requests not yet closed and created within --stale-days, visits
- *            from today, open AR, open estimates touched in the last 90 days,
+ *            from today, open AR, open estimates active in the last 90 days (and
+ *            any estimate an open invoice references),
  *            resumable conversations updated in the last 14 days, and their customers
  *   empty    keeps only visits from today, those recent resumable conversations
  *            and their customers
- *   Both hide the seeded HVAC-DEMO / HVAC-CAP requests and their conversations.
+ *   Both hide the seeded HVAC-DEMO / HVAC-CAP requests, demo-seed- / demo-cap- sessions
+ *   and the sessions of seeded requests.
  *
  * Safety (plan ruling 5): --apply refuses when the org already has hidden rows
  * unless --reapply is passed. --reapply only hides more (it never un-hides,
@@ -61,6 +63,7 @@ function parseArgs(argv) {
   if (out.apply && out.unhide) refuse("--apply and --unhide cannot be combined");
   if (out.reapply && !out.apply) refuse("--reapply only goes with --apply");
   if (out.staleDays !== null && out.unhide) refuse("--stale-days does not go with --unhide");
+  if (out.staleDays !== null && out.mode === "empty") refuse("--stale-days only applies to --mode history");
   return out;
 }
 
@@ -109,9 +112,10 @@ async function dryRun() {
   console.log("\n  history / empty = rows each mode's --apply would newly hide.");
   console.log(`\nhistory: hides ${d.stale_requests_hidden} open requests older than ${staleDays} days with no visit from today (--stale-days).`);
   console.log(`history: keeps ${d.old_open_requests_kept} open requests older than ${staleDays} days because an open invoice or estimate is on them.`);
-  console.log(`history: hides ${d.stale_estimates_hidden} open estimates untouched for 90 days.`);
+  console.log(`history: hides ${d.stale_estimates_hidden} open estimates inactive for 90 days (FieldPulse estimates by creation date).`);
   console.log(`both: hide ${d.stale_sessions_hidden} resumable conversations idle for 14 days (history count).`);
-  console.log(`both: hide ${d.seeded_requests_hidden} seeded HVAC-DEMO / HVAC-CAP requests and their conversations.`);
+  console.log(`both: hide ${d.seeded_requests_hidden} seeded HVAC-DEMO / HVAC-CAP requests.`);
+  console.log(`both: hide ${d.seeded_sessions_hidden} seeded conversations (demo-seed- / demo-cap- tokens, or a seeded request's).`);
   console.log(`empty: hides ${dollars(d.open_ar_cents_hidden_in_empty)} of open invoice balance.`);
   console.log(`empty: ${EMPTY_WARNING}`);
   return d;

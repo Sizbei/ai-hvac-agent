@@ -169,11 +169,11 @@ describe("golive marking SQL", () => {
     }
     expect(flat).toContain(" AS old_open_requests_kept");
     expect(flat).toContain(" AS open_ar_cents_hidden_in_empty");
-    for (const col of ["stale_requests_hidden", "stale_sessions_hidden", "stale_estimates_hidden", "seeded_requests_hidden"]) {
+    for (const col of ["stale_requests_hidden", "stale_sessions_hidden", "stale_estimates_hidden", "seeded_requests_hidden", "seeded_sessions_hidden"]) {
       expect(flat).toContain(` AS ${col}`);
     }
     // the stale counts are by age only; seeded rows are counted on their own line
-    expect(flat).toContain("COALESCE(se.updated_at, se.created_at) < now() - interval '90 days'");
+    expect(flat).toContain("(CASE WHEN se.fieldpulse_estimate_id IS NOT NULL THEN se.created_at ELSE COALESCE(se.updated_at, se.created_at) END) < now() - interval '90 days'");
     expect(flat).toContain("ss.updated_at < now() - interval '14 days'");
     expect(flat).toContain("sr.created_at < now() - make_interval(days => $");
   });
@@ -182,22 +182,36 @@ describe("golive marking SQL", () => {
     for (const mode of MODES) {
       const { flat } = render(keptSessionIdsSql(ORG, mode));
       expect(flat).toContain(
-        "(cs.status IN ('chatting'::session_status, 'extracting'::session_status, 'confirmed'::session_status) AND cs.updated_at >= now() - interval '14 days' AND NOT EXISTS (",
+        "(cs.status IN ('chatting'::session_status, 'extracting'::session_status, 'confirmed'::session_status) AND cs.updated_at >= now() - interval '14 days' AND NOT (cs.token",
       );
       // sessions of kept requests are still kept, whatever their age
       expect(flat).toMatch(/OR cs\.id IN \(SELECT kr\.session_id FROM service_requests kr/);
     }
   });
 
-  it("open estimates are kept only when touched in the last 90 days", () => {
+  it("open estimates are kept only when active in the last 90 days; FieldPulse rows age by created_at", () => {
     const { flat } = render(keptEstimateIdsSql(ORG, "history"));
     expect(flat).toContain(
-      "(e.status = 'open'::estimate_status AND COALESCE(e.updated_at, e.created_at) >= now() - interval '90 days')",
+      "(e.status = 'open'::estimate_status AND (CASE WHEN e.fieldpulse_estimate_id IS NOT NULL THEN e.created_at ELSE COALESCE(e.updated_at, e.created_at) END) >= now() - interval '90 days')",
     );
-    // the request rule uses the same estimate predicate
-    expect(render(keptRequestIdsSql(ORG, "history")).flat).toContain(
-      "(e.status = 'open'::estimate_status AND COALESCE(e.updated_at, e.created_at) >= now() - interval '90 days')",
-    );
+  });
+
+  it("estimates referenced by a kept invoice are kept", () => {
+    const { flat } = render(keptEstimateIdsSql(ORG, "history"));
+    expect(flat).toMatch(/OR e\.id IN \(SELECT ki\.estimate_id FROM invoices ki WHERE ki\.organization_id = \$\d+::uuid AND ki\.estimate_id IS NOT NULL AND ki\.id IN \(SELECT i\.id FROM invoices i /);
+  });
+
+  it("the request rule keeps a request for membership in the kept estimates, not a re-stated age test", () => {
+    const { flat } = render(keptRequestIdsSql(ORG, "history"));
+    expect(flat).toMatch(/OR EXISTS \(SELECT 1 FROM estimates re WHERE re\.organization_id = \$\d+::uuid AND re\.service_request_id = sr\.id AND re\.id IN \(SELECT e\.id FROM estimates e /);
+  });
+
+  it("demo-seed- and demo-cap- session tokens are seeded", () => {
+    for (const mode of MODES) {
+      expect(render(keptSessionIdsSql(ORG, mode)).flat).toContain(
+        "AND NOT (cs.token LIKE 'demo-seed-%' OR cs.token LIKE 'demo-cap-%') AND",
+      );
+    }
   });
 
   it("history keeps a non-terminal request only when created within the stale-days cut (default 60)", () => {
@@ -212,7 +226,7 @@ describe("golive marking SQL", () => {
     expect(custom.params).toContain(30);
     expect(custom.params).not.toContain(60);
     // a kept invoice or estimate still keeps an old request
-    expect(flat).toMatch(/OR EXISTS \(SELECT 1 FROM invoices i .*OR EXISTS \(SELECT 1 FROM estimates e /);
+    expect(flat).toMatch(/OR EXISTS \(SELECT 1 FROM invoices i .*OR EXISTS \(SELECT 1 FROM estimates re /);
   });
 
   it("the stale-days cut reaches every statement that renders the request rule", () => {
